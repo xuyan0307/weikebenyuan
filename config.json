@@ -1,0 +1,89 @@
+{
+  "routes": [
+    {
+      "path": "/login",
+      "src": "src/pages/Login.tsx"
+    },
+    {
+      "path": "/",
+      "src": "src/pages/Index.tsx"
+    }
+  ],
+  "components": [
+    {
+      "name": "AppointmentsCalendarPage",
+      "src": "src/components/AppointmentsCalendarPage.tsx",
+      "route": "/preview/appointments-calendar-page"
+    },
+    {
+      "name": "AppointmentsListPage",
+      "src": "src/components/AppointmentsListPage.tsx",
+      "route": "/preview/appointments-list-page"
+    },
+    {
+      "name": "ContractListPage",
+      "src": "src/components/ContractListPage.tsx",
+      "route": "/preview/contract-list-page"
+    },
+    {
+      "name": "CustomerPoolPage",
+      "src": "src/components/CustomerPoolPage.tsx",
+      "route": "/preview/customer-pool-page"
+    },
+    {
+      "name": "CustomersListPage",
+      "src": "src/components/CustomersListPage.tsx",
+      "route": "/preview/customers-list-page"
+    },
+    {
+      "name": "DashboardPage",
+      "src": "src/components/DashboardPage.tsx",
+      "route": "/preview/dashboard-page"
+    },
+    {
+      "name": "FinanceIncomePage",
+      "src": "src/components/FinanceIncomePage.tsx",
+      "route": "/preview/finance-income-page"
+    },
+    {
+      "name": "FinanceSalaryPage",
+      "src": "src/components/FinanceSalaryPage.tsx",
+      "route": "/preview/finance-salary-page"
+    },
+    {
+      "name": "OrdersListPage",
+      "src": "src/components/OrdersListPage.tsx",
+      "route": "/preview/orders-list-page"
+    },
+    {
+      "name": "ServiceProgressPage",
+      "src": "src/components/ServiceProgressPage.tsx",
+      "route": "/preview/service-progress-page"
+    },
+    {
+      "name": "ServiceRecordsPage",
+      "src": "src/components/ServiceRecordsPage.tsx",
+      "route": "/preview/service-records-page"
+    },
+    {
+      "name": "Sidebar",
+      "src": "src/components/Sidebar.tsx",
+      "route": "/preview/sidebar"
+    },
+    {
+      "name": "SystemSettingsPage",
+      "src": "src/components/SystemSettingsPage.tsx",
+      "route": "/preview/system-settings-page"
+    },
+    {
+      "name": "TherapistListPage",
+      "src": "src/components/TherapistListPage.tsx",
+      "route": "/preview/therapist-list-page"
+    },
+    {
+      "name": "TopBar",
+      "src": "src/components/TopBar.tsx",
+      "route": "/preview/top-bar"
+    }
+  ]
+}
