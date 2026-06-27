@@ -38,6 +38,25 @@ if [ ! -f .env ]; then
     fi
 fi
 
+set -a
+# shellcheck disable=SC1091
+source .env
+set +a
+
+require_secret() {
+    local name="$1"
+    local value="${!name:-}"
+    if [ -z "$value" ] || [[ "$value" == 请替换* ]] || [[ "$value" == change_this* ]] || [[ "$value" == *password* ]]; then
+        echo -e "${RED}错误: 请在 .env 中配置真实的 $name${NC}"
+        exit 1
+    fi
+}
+
+require_secret "DB_PASSWORD"
+require_secret "DB_ROOT_PASSWORD"
+require_secret "REDIS_PASSWORD"
+require_secret "JWT_SECRET"
+
 echo -e "${YELLOW}停止现有服务...${NC}"
 docker compose -f $COMPOSE_FILE down || true
 

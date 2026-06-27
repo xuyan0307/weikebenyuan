@@ -36,6 +36,9 @@ app.use(morgan('combined'));
 app.get('/health', (_req: Request, res: Response) => {
   res.status(200).json({ status: 'healthy', timestamp: new Date().toISOString() });
 });
+app.get('/api/health', (_req: Request, res: Response) => {
+  res.status(200).json({ status: 'healthy', timestamp: new Date().toISOString() });
+});
 
 // API路由
 app.use('/api/auth', authRouter);

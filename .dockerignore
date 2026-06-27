@@ -1,0 +1,15 @@
+.git
+.docker-cli
+node_modules
+dist
+backend/node_modules
+backend/dist
+*.log
+docker-*.txt
+compose-*.log
+windows-feature-status.txt
+wsl-*.log
+.env
+.env.*
+!.env.example
+!.env.production

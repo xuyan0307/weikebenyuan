@@ -5,6 +5,13 @@
 
 set -e
 
+if [ -f .env ]; then
+  set -a
+  # shellcheck disable=SC1091
+  source .env
+  set +a
+fi
+
 # 配置
 BACKUP_DIR="./backups"
 DB_CONTAINER="chankang-mysql"

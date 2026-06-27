@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { EyeIcon, EyeOffIcon, UserIcon, LockIcon, ArrowRightIcon } from 'lucide-react';
 import { useLogin } from '../api/hooks';
 import { setToken } from '../api/client';
@@ -27,7 +26,6 @@ function RippleCircle({ size = 200, opacity = 0.06, className = '' }: { size?: n
 }
 
 export default function Login() {
-  const navigate = useNavigate();
   const loginMut = useLogin();
   const [account, setAccount] = useState('');
   const [password, setPassword] = useState('');
@@ -45,8 +43,7 @@ export default function Login() {
       setToken(res.token);
       const user: UserInfo = res.user;
       void user;
-      navigate('/');
-      window.location.reload();
+      window.location.replace('/');
     } catch (e: any) {
       setError(e?.message || '登录失败，请重试');
     }

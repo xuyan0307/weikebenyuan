@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { authenticateToken, authorizeRoles } from '../middleware/auth';
 import { getDb } from '../config/database';
 
-const router = Router();
+const router: Router = Router();
 
 router.get('/', authenticateToken, authorizeRoles('superadmin', 'admin'), async (req, res, next) => {
   try {

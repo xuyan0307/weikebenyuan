@@ -4,7 +4,7 @@ import { authenticateToken } from '../middleware/auth';
 import { auditLog } from '../middleware/auditLog';
 import { getDb } from '../config/database';
 
-const router = Router();
+const router: Router = Router();
 
 function mapRow(r: any) {
   return {

@@ -68,10 +68,8 @@ interface FollowRecord {
 }
 
 // Module-level follow records map (keyed by customerId)
-const followRecordsMap: Map<string, FollowRecord[]> = new Map();
 
 // Module-level task map (keyed by customerId) for the 跟进事项 column
-const followTaskMap: Map<string, string> = new Map();
 
 // New display statuses (4 values)
 const NEW_DISPLAY_STATUSES: NewFollowStatus[] = ['跟进中', '待跟进', '已完成', '延迟'];
@@ -159,6 +157,24 @@ function profileSummary(p: CustomerProfile): string {
 function todayStr(): string { return new Date().toISOString().slice(0, 10); }
 
 function nowIso(): string { return new Date().toISOString().slice(0, 19).replace('T', ' '); }
+
+type PersistedCustomerProfile = CustomerProfile & {
+  followTask?: string;
+  followRecords?: FollowRecord[];
+};
+
+function getPersistedProfile(c: Customer): PersistedCustomerProfile {
+  return (c.profile ?? {}) as PersistedCustomerProfile;
+}
+
+function getFollowTask(c: Customer): string {
+  return getPersistedProfile(c).followTask ?? '';
+}
+
+function getFollowRecords(c: Customer): FollowRecord[] {
+  const records = getPersistedProfile(c).followRecords;
+  return Array.isArray(records) ? records : [];
+}
 
 // ─────────────────────────── TaskTooltip ───────────────────────────
 function TaskTooltip({ text, isOverdue = false }: { text: string; isOverdue?: boolean }) {
@@ -275,7 +291,7 @@ function customerToForm(c: Customer): CustomerForm {
     birthYear, situation: c.situation, tag: c.tag,
     advisor: c.advisor, remark: c.remark,
     followStatus: c.followStatus, followDate: c.followDate ?? '', followContent: '',
-    followTask: followTaskMap.get(c.id) ?? '',
+    followTask: getFollowTask(c),
   };
 }
 
@@ -571,7 +587,6 @@ export default function CustomersListPage() {
   const mutations = useCustomerMutations();
   const ordersQuery = useOrders({ customerId: detailId || '', page: 1, pageSize: 100 });
   // Local follow task map state (for re-rendering)
-  const [taskVersion, setTaskVersion] = useState(0);
 
   const [showAdd, setShowAdd] = useState(false);
   const [addForm, setAddForm] = useState<CustomerForm>(blankForm(currentUser.name));
@@ -644,18 +659,17 @@ export default function CustomersListPage() {
         deliveryType: addForm.deliveryType,
         babyCount: Number(addForm.babyCount) || 1,
         feedingType: addForm.feedingType,
+        followTask: addForm.followTask,
+        followRecords: [],
       },
       situation: addForm.situation,
       intendedProduct: addForm.intendedProducts.join(','),
       remark: addForm.remark,
     };
-    followRecordsMap.set(newId, []);
-    followTaskMap.set(newId, addForm.followTask);
     try {
       await mutations.create(nc);
       toast.success('客户新增成功');
       setShowAdd(false); setAddErrors({});
-      setTaskVersion(v => v + 1);
     } catch (e: any) {
       toast.error(e?.message || '新增失败');
     }
@@ -668,6 +682,10 @@ export default function CustomersListPage() {
     if (Object.keys(errs).length) { setEditErrors(errs); return; }
     const birthYearNum = Number(editForm.birthYear);
     const computedAge = birthYearNum > 1900 ? new Date().getFullYear() - birthYearNum : 0;
+
+    const existingCustomer = customers.find(c => c.id === editId);
+    const existingProfile = existingCustomer ? getPersistedProfile(existingCustomer) : null;
+    let nextFollowRecords = existingCustomer ? getFollowRecords(existingCustomer) : [];
 
     // Append follow record if there is feedback or follow content
     const hasUpdate = editForm.followContent.trim() || editForm.followTask.trim();
@@ -684,11 +702,8 @@ export default function CustomersListPage() {
         operator: currentUser.name,
         createdAt: nowIso(),
       };
-      const existing = followRecordsMap.get(editId) ?? [];
-      followRecordsMap.set(editId, [rec, ...existing]);
+      nextFollowRecords = [rec, ...nextFollowRecords];
     }
-
-    followTaskMap.set(editId, editForm.followTask);
 
     const updated: any = {
       name: editForm.name.trim(), wechat: editForm.wechat.trim(),
@@ -701,18 +716,20 @@ export default function CustomersListPage() {
       followStatus: editForm.followStatus,
       followDate: editForm.followDate,
       profile: {
+        ...(existingProfile ?? {}),
         age: computedAge > 0 ? computedAge : 0,
         deliveryDate: editForm.deliveryDate,
         deliveryType: editForm.deliveryType,
         babyCount: Number(editForm.babyCount) || 1,
         feedingType: editForm.feedingType,
+        followTask: editForm.followTask,
+        followRecords: nextFollowRecords,
       },
     };
     try {
       await mutations.update({ id: editId, body: updated });
       toast.success('客户更新成功');
       setEditId(null); setEditErrors({});
-      setTaskVersion(v => v + 1);
     } catch (e: any) {
       toast.error(e?.message || '更新失败');
     }
@@ -772,11 +789,9 @@ export default function CustomersListPage() {
           name, wechat, phone, area, source, acquiredAt,
           tag: 'D1', followStatus: '待跟进', followDate: '',
           advisor: currentUser.name, totalOrders: 0, lastFollow: todayStr(),
-          profile: { age, deliveryDate, deliveryType, babyCount, feedingType },
+          profile: { age, deliveryDate, deliveryType, babyCount, feedingType, followTask: '', followRecords: [] } as PersistedCustomerProfile,
           situation, intendedProduct, remark,
         };
-        followRecordsMap.set(newId, []);
-        followTaskMap.set(newId, '');
         newCustomers.push(nc);
       });
       if (newCustomers.length === 0) { setImportMsg('未解析到有效数据，请检查文件格式'); return; }
@@ -1041,7 +1056,6 @@ export default function CustomersListPage() {
   }));
 
   // Prevent unused variable warning
-  void taskVersion;
 
   // ── render ──
   return (
@@ -1238,7 +1252,7 @@ export default function CustomersListPage() {
                 const displayStatus = customerDisplayStatus(c);
                 const isOverdue = displayStatus === '延迟';
                 const overdueColor = '#ef4444';
-                const followTask = followTaskMap.get(c.id) ?? '';
+                const followTask = getFollowTask(c);
                 // Frozen columns must have an opaque background to prevent content bleed-through
                 const frozenBg = 'var(--card)';
 
@@ -1440,7 +1454,7 @@ export default function CustomersListPage() {
                     {/* Follow task */}
                     <div className="flex items-start gap-4">
                       <span className="text-sm w-20 flex-shrink-0 mt-0.5" style={{ color: 'var(--muted-foreground)' }}>跟进事项</span>
-                      <span className="text-sm font-medium text-foreground">{followTaskMap.get(detailCustomer.id) || '—'}</span>
+                      <span className="text-sm font-medium text-foreground">{getFollowTask(detailCustomer) || '—'}</span>
                     </div>
                   </div>
                 </div>
@@ -1482,7 +1496,7 @@ export default function CustomersListPage() {
                 {/* 跟进记录 tab — shows FollowRecord history */}
                 <div className={detailTab === 'follow' ? 'block' : 'hidden'}>
                   {(() => {
-                    const records = followRecordsMap.get(detailCustomer.id) ?? [];
+                    const records = getFollowRecords(detailCustomer);
                     if (records.length === 0) {
                       return (
                         <div className="flex flex-col items-center justify-center py-12 gap-3">

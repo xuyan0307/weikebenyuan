@@ -38,6 +38,11 @@ deploy.log
 
 # Docker volumes
 docker-volumes
+.docker-cli/
+docker-*.txt
+wsl-*.log
+windows-feature-status.txt
+compose-*.log
 
 # SSH keys
 *.pem

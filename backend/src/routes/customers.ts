@@ -5,7 +5,7 @@ import { auditLog } from '../middleware/auditLog';
 import { getDb } from '../config/database';
 import { createError } from '../middleware/errorHandler';
 
-const router = Router();
+const router: Router = Router();
 
 function mapRow(r: any) {
   return {

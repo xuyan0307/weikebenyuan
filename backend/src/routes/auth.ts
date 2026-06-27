@@ -4,7 +4,7 @@ import { getDb } from '../config/database';
 import { comparePassword } from '../utils/bcrypt';
 import { createError } from '../middleware/errorHandler';
 
-const router = Router();
+const router: Router = Router();
 
 router.post('/login', async (req, res, next) => {
   try {
@@ -47,10 +47,12 @@ router.post('/login', async (req, res, next) => {
 
 router.get('/me', authenticateToken, async (req, res, next) => {
   try {
+    const userId = req.userId;
+    if (!userId) return next(createError('未登录', 401));
     const db = getDb();
     const [rows] = await db.execute(
       'SELECT id, username, name, role, avatar, phone, email, status FROM users WHERE id = ? LIMIT 1',
-      [req.userId]
+      [userId]
     );
     const user = (rows as any[])[0];
     if (!user) return next(createError('用户不存在', 404));
@@ -72,19 +74,21 @@ router.get('/me', authenticateToken, async (req, res, next) => {
 
 router.put('/password', authenticateToken, async (req, res, next) => {
   try {
+    const userId = req.userId;
+    if (!userId) return next(createError('未登录', 401));
     const { oldPassword, newPassword } = req.body || {};
     if (!oldPassword || !newPassword || newPassword.length < 6) {
       return next(createError('新密码至少 6 位', 400));
     }
     const db = getDb();
-    const [rows] = await db.execute('SELECT password_hash FROM users WHERE id = ?', [req.userId]);
+    const [rows] = await db.execute('SELECT password_hash FROM users WHERE id = ?', [userId]);
     const user = (rows as any[])[0];
     if (!user) return next(createError('用户不存在', 404));
     if (!comparePassword(oldPassword, user.password_hash)) {
       return next(createError('原密码错误', 400));
     }
     const { hashPassword } = await import('../utils/bcrypt');
-    await db.execute('UPDATE users SET password_hash = ? WHERE id = ?', [hashPassword(newPassword), req.userId]);
+    await db.execute('UPDATE users SET password_hash = ? WHERE id = ?', [hashPassword(newPassword), userId]);
     res.json({ message: '密码修改成功' });
   } catch (err) {
     next(err);
