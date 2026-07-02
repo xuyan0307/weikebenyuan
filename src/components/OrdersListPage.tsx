@@ -7,14 +7,15 @@ import {
 } from 'lucide-react';
 import type { OrderType, PayStatus, Customer, CustomerTag } from '../data/mockData';
 import { useApp } from '../hooks/useApp';
-import { useOrders, useOrderMutations, useCustomers, useTherapists } from '../api/hooks';
+import { useOrders, useOrderMutations, useCustomers, useCustomer, useTherapists } from '../api/hooks';
 import { toast } from 'sonner';
 
 /* ─── Types ─────────────────────────────────────────── */
-type NewPayStatus = '已支付' | '待支付' | '已付定金';
+type NewPayStatus = '已支付' | '待支付' | '已付定金' | '已退款';
 type TherapistType = '产康师' | '运动康复师' | '调理师';
 type TherapistAssign = '待分配' | '无' | string;
 type ContractStatus = '无' | '未回签' | '已回签';
+type OrderModalMode = 'create' | 'view' | 'edit';
 
 interface ServicePerson {
   type: TherapistType;
@@ -25,6 +26,22 @@ interface FollowRecord {
   date: string;
   content: string;
   operator: string;
+}
+
+interface OrderAttachment {
+  id: string;
+  name: string;
+  type: string;
+  dataUrl: string;
+  uploadedAt: string;
+}
+
+interface ServicePhotoRecord {
+  id: string;
+  seq: number;
+  time: string;
+  remark: string;
+  photos: OrderAttachment[];
 }
 
 interface OrderFollowRecord {
@@ -55,10 +72,26 @@ interface OrderForm {
   serviceItems: string;
   appointmentTime: string;
   serviceNote: string;
-  photos: string[];
+  contractAttachments: OrderAttachment[];
+  servicePhotoRecords: ServicePhotoRecord[];
+  editingPhotoRecordId: string;
+  newPhotoSeq: string;
+  newPhotoTime: string;
+  newPhotoRemark: string;
+  newPhotoFiles: OrderAttachment[];
   followRecords: FollowRecord[];
   newFollowDate: string;
   newFollowContent: string;
+}
+
+interface CustomerFollowRecord {
+  id: string;
+  date: string;
+  content: string;
+  feedback: string;
+  status: string;
+  operator: string;
+  createdAt: string;
 }
 
 /* ─── Module-level persistent maps ────────────────────── */
@@ -69,17 +102,31 @@ const orderContractMap = new Map<string, ContractStatus>();
 const orderServiceItemsMap = new Map<string, string>(); // orderId -> serviceItems string
 
 /* ─── Constants & Helpers ────────────────────────────── */
-const PAY_STATUS_COLORS: Record<PayStatus, string> = {
+const PAY_STATUS_COLORS: Record<string, string> = {
   '已付款': 'badge-success',
   '待付款': 'badge-warning',
   '已退款': 'badge-danger',
+  '已付定金': 'badge-info',
 };
 
 const NEW_PAY_STATUS_COLORS: Record<NewPayStatus, string> = {
   '已支付': 'badge-success',
   '待支付': 'badge-warning',
   '已付定金': 'badge-info',
+  '已退款': 'badge-danger',
 };
+
+function payStatusDisplay(status: string | undefined) {
+  if (status === '已付款' || status === '已支付') return '已支付';
+  if (status === '待付款' || status === '待支付') return '待支付';
+  if (status === '已付定金') return '定金';
+  if (status === '已退款') return '已退款';
+  return status || '待支付';
+}
+
+function effectiveOrderPayStatus(order: any): string {
+  return order?.tag === 'T2' ? '已退款' : order?.payStatus;
+}
 
 const TAG_CLS: Partial<Record<CustomerTag, string>> = {
   V1: 'badge-purple', V2: 'badge-purple',
@@ -173,21 +220,21 @@ interface TagDef {
 }
 
 const TAG_DEFS: TagDef[] = [
-  { tag: 'V1', label: 'V1', desc: '消费1W-3W之间VIP客户',          badgeCls: 'badge-purple',  groupKey: 'V', groupLabel: 'V 已成交高价值' },
-  { tag: 'V2', label: 'V2', desc: '消费3W以上SVIP客户',            badgeCls: 'badge-purple',  groupKey: 'V', groupLabel: 'V 已成交高价值' },
-  { tag: 'A1', label: 'A1', desc: '消费5000元以内，小疗程客户',     badgeCls: 'badge-success', groupKey: 'A', groupLabel: 'A 已成交' },
-  { tag: 'A2', label: 'A2', desc: '消费5000-1W元之间，大疗程客户', badgeCls: 'badge-success', groupKey: 'A', groupLabel: 'A 已成交' },
-  { tag: 'B1', label: 'B1', desc: '高意向',                        badgeCls: 'badge-warning', groupKey: 'B', groupLabel: 'B 意向客户' },
-  { tag: 'B2', label: 'B2', desc: '普通意向',                      badgeCls: 'badge-warning', groupKey: 'B', groupLabel: 'B 意向客户' },
-  { tag: 'C1', label: 'C1', desc: '待约具体时间',                  badgeCls: 'badge-info',    groupKey: 'C', groupLabel: 'C 体验预约' },
-  { tag: 'C2', label: 'C2', desc: '已约具体时间',                  badgeCls: 'badge-info',    groupKey: 'C', groupLabel: 'C 体验预约' },
-  { tag: 'D1', label: 'D1', desc: '高意向',                        badgeCls: 'badge-gray',    groupKey: 'D', groupLabel: 'D 待开发' },
-  { tag: 'D2', label: 'D2', desc: '普通意向',                      badgeCls: 'badge-gray',    groupKey: 'D', groupLabel: 'D 待开发' },
-  { tag: 'D3', label: 'D3', desc: '沉默客户（不说话）',            badgeCls: 'badge-gray',    groupKey: 'D', groupLabel: 'D 待开发' },
-  { tag: 'T1', label: 'T1', desc: '疗程套餐退款',                  badgeCls: 'badge-danger',  groupKey: 'T', groupLabel: 'T 退款' },
-  { tag: 'T2', label: 'T2', desc: '体验卡退款',                    badgeCls: 'badge-danger',  groupKey: 'T', groupLabel: 'T 退款' },
-  { tag: 'S1', label: 'S1', desc: '流失客户（可回访）',            badgeCls: 'badge-gray',    groupKey: 'S', groupLabel: 'S 流失' },
-  { tag: 'S2', label: 'S2', desc: '流失客户（无效）',              badgeCls: 'badge-gray',    groupKey: 'S', groupLabel: 'S 流失' },
+  { tag: 'V1', label: 'V1', desc: '消费1W-3W之间VIP客户',          badgeCls: 'badge-purple',  groupKey: 'V', groupLabel: 'V VIP客户' },
+  { tag: 'V2', label: 'V2', desc: '消费3W以上SVIP客户',            badgeCls: 'badge-purple',  groupKey: 'V', groupLabel: 'V VIP客户' },
+  { tag: 'A1', label: 'A1', desc: '消费5000元以内，小疗程客户',     badgeCls: 'badge-success', groupKey: 'A', groupLabel: 'A 已升套餐' },
+  { tag: 'A2', label: 'A2', desc: '消费5000-1W元之间，大疗程客户', badgeCls: 'badge-success', groupKey: 'A', groupLabel: 'A 已升套餐' },
+  { tag: 'B1', label: 'B1', desc: '高意向',                        badgeCls: 'badge-warning', groupKey: 'B', groupLabel: 'B 已体验未升单' },
+  { tag: 'B2', label: 'B2', desc: '普通意向',                      badgeCls: 'badge-warning', groupKey: 'B', groupLabel: 'B 已体验未升单' },
+  { tag: 'C1', label: 'C1', desc: '待约具体时间',                  badgeCls: 'badge-info',    groupKey: 'C', groupLabel: 'C 已购体验卡' },
+  { tag: 'C2', label: 'C2', desc: '已约具体时间',                  badgeCls: 'badge-info',    groupKey: 'C', groupLabel: 'C 已购体验卡' },
+  { tag: 'D1', label: 'D1', desc: '高意向',                        badgeCls: 'badge-gray',    groupKey: 'D', groupLabel: 'D 种子客户' },
+  { tag: 'D2', label: 'D2', desc: '普通意向',                      badgeCls: 'badge-gray',    groupKey: 'D', groupLabel: 'D 种子客户' },
+  { tag: 'D3', label: 'D3', desc: '沉默客户（不说话）',            badgeCls: 'badge-gray',    groupKey: 'D', groupLabel: 'D 种子客户' },
+  { tag: 'T1', label: 'T1', desc: '疗程套餐退款',                  badgeCls: 'badge-danger',  groupKey: 'T', groupLabel: 'T 退款客户' },
+  { tag: 'T2', label: 'T2', desc: '体验卡退款',                    badgeCls: 'badge-danger',  groupKey: 'T', groupLabel: 'T 退款客户' },
+  { tag: 'S1', label: 'S1', desc: '流失客户（可回访）',            badgeCls: 'badge-gray',    groupKey: 'S', groupLabel: 'S 流失客户' },
+  { tag: 'S2', label: 'S2', desc: '流失客户（无效）',              badgeCls: 'badge-gray',    groupKey: 'S', groupLabel: 'S 流失客户' },
 ];
 
 /* ─── Filter option constants ────────────────────────── */
@@ -197,13 +244,21 @@ const CITY_OPTIONS = [
   { value: '漳州', label: '漳州' },
 ];
 
+interface FilterOption {
+  value: string;
+  label: string;
+  group?: string;
+}
+
+const FILTER_NONE = '__FILTER_NONE__';
+
 /* ─── Multi-Select Dropdown ──────────────────────────── */
 interface MultiSelectDropdownProps {
   label: string;
-  options: { value: string; label: string }[];
+  options: FilterOption[];
   selected: string[];
   onChange: (v: string[]) => void;
-  renderOption?: (opt: { value: string; label: string }) => React.ReactNode;
+  renderOption?: (opt: FilterOption) => React.ReactNode;
   grouped?: boolean;
 }
 
@@ -211,7 +266,23 @@ function MultiSelectDropdown({
   label, options, selected, onChange, renderOption, grouped = false,
 }: MultiSelectDropdownProps) {
   const [open, setOpen] = useState(false);
+  const [menuPos, setMenuPos] = useState({ top: 0, left: 0, width: 140 });
   const ref = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+
+  const menuWidth = grouped ? 280 : renderOption ? 240 : 140;
+
+  function updateMenuPosition() {
+    const rect = buttonRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const width = Math.max(menuWidth, rect.width);
+    const left = Math.min(rect.left, window.innerWidth - width - 12);
+    setMenuPos({
+      top: rect.bottom + 6,
+      left: Math.max(12, left),
+      width,
+    });
+  }
 
   useEffect(() => {
     function handler(e: MouseEvent) {
@@ -221,26 +292,59 @@ function MultiSelectDropdown({
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  const allSelected = selected.length === 0 || selected.length === options.length;
-  const displayLabel =
-    selected.length === 0 || selected.length === options.length
-      ? label
-      : selected.length === 1
-      ? options.find(o => o.value === selected[0])?.label ?? label
-      : `${label} (${selected.length})`;
+  useEffect(() => {
+    if (!open) return;
+    updateMenuPosition();
+    const reposition = () => updateMenuPosition();
+    window.addEventListener('resize', reposition);
+    window.addEventListener('scroll', reposition, true);
+    return () => {
+      window.removeEventListener('resize', reposition);
+      window.removeEventListener('scroll', reposition, true);
+    };
+  }, [open, options.length, grouped]);
 
-  function toggleAll() { onChange([]); }
+  const effectiveSelected = selected.filter(v => v !== FILTER_NONE);
+  const noneSelected = selected.includes(FILTER_NONE);
+  const allSelected = !noneSelected && (selected.length === 0 || effectiveSelected.length === options.length);
+  const displayLabel =
+    noneSelected
+      ? '未选择'
+      : selected.length === 0 || effectiveSelected.length === options.length
+      ? label
+      : effectiveSelected.length === 1
+      ? options.find(o => o.value === effectiveSelected[0])?.label ?? label
+      : `${label} (${effectiveSelected.length})`;
+
+  function toggleAll() {
+    onChange(allSelected ? [FILTER_NONE] : []);
+  }
+  function optionChecked(value: string) {
+    return allSelected || effectiveSelected.includes(value);
+  }
   function toggleOne(val: string) {
-    if (selected.includes(val)) {
-      onChange(selected.filter(v => v !== val));
+    if (effectiveSelected.includes(val)) {
+      const next = effectiveSelected.filter(v => v !== val);
+      onChange(next.length > 0 ? next : [FILTER_NONE]);
     } else {
-      onChange([...selected, val]);
+      onChange([...effectiveSelected, val]);
     }
   }
 
-  const groupOrder = grouped ? Array.from(new Set(TAG_DEFS.map(d => d.groupKey))) : [];
+  const groupedByOption = grouped && options.some(o => o.group);
+  const groupOrder = grouped
+    ? groupedByOption
+      ? Array.from(new Set(options.map(o => o.group || '其他')))
+      : Array.from(new Set(TAG_DEFS.map(d => d.groupKey)))
+    : [];
   const groupedOptions = grouped
-    ? groupOrder.map(gk => {
+    ? groupedByOption
+      ? groupOrder.map(gk => ({
+          groupKey: gk,
+          groupLabel: gk,
+          items: options.filter(o => (o.group || '其他') === gk),
+        })).filter(g => g.items.length > 0)
+      : groupOrder.map(gk => {
         const groupItems = TAG_DEFS.filter(d => d.groupKey === gk);
         return {
           groupKey: gk,
@@ -253,12 +357,16 @@ function MultiSelectDropdown({
   return (
     <div ref={ref} className="relative flex-shrink-0">
       <button
-        onClick={() => setOpen(v => !v)}
+        ref={buttonRef}
+        onClick={() => {
+          updateMenuPosition();
+          setOpen(v => !v);
+        }}
         className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm border transition-colors hover:border-brand"
         style={{
           background: 'var(--card)',
-          borderColor: selected.length > 0 && selected.length < options.length ? 'var(--brand)' : 'var(--border)',
-          color: selected.length > 0 && selected.length < options.length ? 'var(--brand)' : 'var(--foreground)',
+          borderColor: selected.length > 0 && !allSelected ? 'var(--brand)' : 'var(--border)',
+          color: selected.length > 0 && !allSelected ? 'var(--brand)' : 'var(--foreground)',
           whiteSpace: 'nowrap',
         }}
       >
@@ -268,15 +376,15 @@ function MultiSelectDropdown({
       <div
         className={open ? '' : 'hidden'}
         style={{
-          position: 'absolute',
-          top: 'calc(100% + 6px)',
-          left: 0,
-          zIndex: 50,
+          position: 'fixed',
+          top: menuPos.top,
+          left: menuPos.left,
+          zIndex: 9999,
           background: 'var(--card)',
           border: '1px solid var(--border)',
           borderRadius: 10,
           boxShadow: '0 6px 24px rgba(0,0,0,0.12)',
-          minWidth: grouped ? 280 : renderOption ? 240 : 140,
+          minWidth: menuPos.width,
           padding: '6px 0',
           maxHeight: 360,
           overflowY: 'auto',
@@ -309,7 +417,7 @@ function MultiSelectDropdown({
                 </span>
               </div>
               {g.items.map(opt => {
-                const checked = selected.includes(opt.value);
+                const checked = optionChecked(opt.value);
                 const def = TAG_DEFS.find(d => d.tag === opt.value);
                 return (
                   <div
@@ -327,8 +435,12 @@ function MultiSelectDropdown({
                     >
                       {checked && <CheckIcon size={10} className="text-white" />}
                     </div>
-                    <span className={`badge ${def?.badgeCls ?? 'badge-gray'}`} style={{ fontSize: 10, padding: '1px 5px', minWidth: 22 }}>{opt.label}</span>
-                    <span className="text-xs truncate" style={{ color: 'var(--muted-foreground)', maxWidth: 160 }}>{def?.desc}</span>
+                    {renderOption ? renderOption(opt) : (
+                      <>
+                        <span className={`badge ${def?.badgeCls ?? 'badge-gray'}`} style={{ fontSize: 10, padding: '1px 5px', minWidth: 22 }}>{opt.label}</span>
+                        <span className="text-xs truncate" style={{ color: 'var(--muted-foreground)', maxWidth: 160 }}>{def?.desc}</span>
+                      </>
+                    )}
                   </div>
                 );
               })}
@@ -336,7 +448,7 @@ function MultiSelectDropdown({
           ))
         ) : (
           options.map(opt => {
-            const checked = selected.includes(opt.value);
+            const checked = optionChecked(opt.value);
             return (
               <div
                 key={opt.value}
@@ -373,7 +485,7 @@ interface CustomerPickerProps {
 function CustomerPickerModal({ visible, onClose, onSelect }: CustomerPickerProps) {
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<Customer | null>(null);
-  const customersQ = useCustomers({ page: 1, pageSize: 1000 });
+  const customersQ = useCustomers({ page: 1, pageSize: 1000, includeOrdered: 1 });
   const CUSTOMERS: any[] = customersQ.data?.data ?? [];
 
   const sorted = [...CUSTOMERS].sort((a, b) =>
@@ -399,8 +511,10 @@ function CustomerPickerModal({ visible, onClose, onSelect }: CustomerPickerProps
     onClose();
   }
 
+  if (!visible) return null;
+
   return (
-    <div className={visible ? '' : 'hidden'}>
+    <div>
       <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.45)' }}>
         <div className="bg-card rounded-2xl shadow-custom flex flex-col" style={{ width: 740, maxHeight: '80vh' }}>
           <div className="flex items-center justify-between px-6 py-4" style={{ borderBottom: '1px solid var(--border)' }}>
@@ -616,7 +730,8 @@ function ServicePersonRow({ label, value, onChange }: ServicePersonRowProps) {
 interface OrderModalProps {
   visible: boolean;
   onClose: () => void;
-  isEdit?: boolean;
+  mode?: OrderModalMode;
+  order?: any | null;
   editOrderId?: string;
 }
 
@@ -627,20 +742,268 @@ const TABS = [
   { key: 'follow', label: '跟进情况', icon: MessageSquareIcon },
 ];
 
-function OrderModal({ visible, onClose, isEdit = false, editOrderId = '' }: OrderModalProps) {
+function payStatusToForm(status: string | undefined): NewPayStatus {
+  if (status === '已付款' || status === '已支付') return '已支付';
+  if (status === '已付定金') return '已付定金';
+  if (status === '已退款') return '已退款';
+  return '待支付';
+}
+
+function splitServiceItems(value: string | undefined): string[] {
+  return (value || '').split(/[，,、\n]/).map(s => s.trim()).filter(Boolean);
+}
+
+function getCustomerFollowTask(customer: any): string {
+  return customer?.profile?.followTask || '';
+}
+
+function getCustomerFollowRecords(customer: any): CustomerFollowRecord[] {
+  const records = customer?.profile?.followRecords;
+  return Array.isArray(records) ? records : [];
+}
+
+function profileValue(value: unknown, fallback = '—') {
+  if (value === null || value === undefined || value === '') return fallback;
+  return String(value);
+}
+
+function ensureArray<T>(value: unknown): T[] {
+  return Array.isArray(value) ? value as T[] : [];
+}
+
+function nowLocalDateTime() {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function displayDateTime(value: string | undefined) {
+  return value ? value.replace('T', ' ') : '-';
+}
+
+function readFileAsDataUrl(file: File): Promise<OrderAttachment> {
+  if (file.type.startsWith('image/')) {
+    return readImageAsCompressedAttachment(file);
+  }
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('file read failed'));
+    reader.onload = () => resolve({
+      id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      name: file.name,
+      type: file.type || 'application/octet-stream',
+      dataUrl: String(reader.result || ''),
+      uploadedAt: nowLocalDateTime(),
+    });
+    reader.readAsDataURL(file);
+  });
+}
+
+function readImageAsCompressedAttachment(file: File): Promise<OrderAttachment> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('image read failed'));
+    reader.onload = () => {
+      const source = String(reader.result || '');
+      const img = new Image();
+      img.onerror = () => reject(new Error('image decode failed'));
+      img.onload = () => {
+        const maxSide = 1600;
+        const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+        const width = Math.max(1, Math.round(img.width * scale));
+        const height = Math.max(1, Math.round(img.height * scale));
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          reject(new Error('canvas unavailable'));
+          return;
+        }
+        ctx.drawImage(img, 0, 0, width, height);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.78);
+        resolve({
+          id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          name: file.name.replace(/\.(png|jpe?g|webp|bmp)$/i, '.jpg'),
+          type: 'image/jpeg',
+          dataUrl,
+          uploadedAt: nowLocalDateTime(),
+        });
+      };
+      img.src = source;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function openAttachment(att: OrderAttachment) {
+  if (!att?.dataUrl) return;
+  const win = window.open('', '_blank');
+  if (!win) {
+    toast.error('浏览器已拦截新窗口');
+    return;
+  }
+  if (att.type?.startsWith('image/')) {
+    win.document.write(`<img src="${att.dataUrl}" style="max-width:100%;height:auto;display:block;margin:0 auto;" />`);
+  } else {
+    win.document.write(`<iframe src="${att.dataUrl}" style="width:100%;height:100vh;border:0;"></iframe>`);
+  }
+}
+
+function formFromOrder(order: any): OrderForm {
+  const orderId = order?.id || '';
+  const orderPeople = order?.servicePeople || {};
+  const savedTherapists = orderTherapistMap.get(orderId) || (orderPeople?.sp1 || orderPeople?.sp2 || orderPeople?.sp3 ? orderPeople : null);
+  const savedFollowRecords = getFollowRecords(orderId).map(r => ({
+    date: r.date,
+    content: r.content,
+    operator: r.operator,
+  }));
+  return {
+    customerId: order?.internalCustomerId || order?.customerId || order?.resolvedCustomerId || order?.customerCode || '',
+    customerName: order?.customerName || '',
+    customerPhone: order?.customerPhone || '',
+    customerArea: order?.area && order.area !== '—' ? order.area : '',
+    customerTag: order?.tag || '',
+    customerAdvisor: order?.advisor && order.advisor !== '—' ? order.advisor : '',
+    orderType: order?.type || '',
+    amount: order?.amount != null ? String(order.amount) : '',
+    payStatus: payStatusToForm(effectiveOrderPayStatus(order)),
+    purchaseDate: order?.createdAt || new Date().toISOString().slice(0, 10),
+    contractStatus: getContractStatus(orderId, order?.type || '体验卡'),
+    servicePerson1: savedTherapists?.sp1 || { type: '产康师', assign: '待分配' },
+    servicePerson2: savedTherapists?.sp2 || { type: '运动康复师', assign: '待分配' },
+    servicePerson3: savedTherapists?.sp3 || { type: '调理师', assign: '待分配' },
+    serviceItems: order?.serviceItems || orderServiceItemsMap.get(orderId) || '',
+    appointmentTime: order?.appointmentTime || '',
+    serviceNote: order?.serviceNote || '',
+    contractAttachments: ensureArray<OrderAttachment>(order?.contractAttachments),
+    servicePhotoRecords: ensureArray<ServicePhotoRecord>(order?.servicePhotoRecords),
+    editingPhotoRecordId: '',
+    newPhotoSeq: '',
+    newPhotoTime: '',
+    newPhotoRemark: '',
+    newPhotoFiles: [],
+    followRecords: savedFollowRecords,
+    newFollowDate: '',
+    newFollowContent: '',
+  };
+}
+
+function CustomerArchiveView({ customer, form }: { customer: any; form: OrderForm }) {
+  const c = customer || {};
+  const profile = c.profile || {};
+  const followRecords = getCustomerFollowRecords(c);
+  const basicRows: [string, string][] = [
+    ['客户ID', profileValue(c.id || form.customerId)],
+    ['客户姓名', profileValue(c.name || form.customerName)],
+    ['微信号', profileValue(c.wechat)],
+    ['联系电话', profileValue(c.phone || form.customerPhone)],
+    ['所在区域', profileValue(c.area || form.customerArea)],
+    ['来源渠道', profileValue(c.source)],
+    ['获客时间', profileValue(c.acquiredAt)],
+    ['客户标签', profileValue(c.tag || form.customerTag)],
+    ['归属客服', profileValue(c.advisor || form.customerAdvisor)],
+    ['跟进状态', profileValue(c.followStatus)],
+    ['下次跟进', profileValue(c.followDate)],
+    ['意向产品', profileValue(c.intendedProduct)],
+    ['客户需求', profileValue(c.situation)],
+    ['备注', profileValue(c.remark)],
+    ['跟进事项', profileValue(getCustomerFollowTask(c))],
+  ];
+  const profileRows: [string, string][] = [
+    ['年龄', profileValue(profile.age ? `${profile.age}岁` : '')],
+    ['生产时间', profileValue(profile.deliveryDate)],
+    ['分娩方式', profileValue(profile.deliveryType)],
+    ['第几胎', profileValue(profile.babyCount ? `第${profile.babyCount}胎` : '')],
+    ['喂养方式', profileValue(profile.feedingType)],
+  ];
+
+  return (
+    <div className="flex flex-col gap-4 mt-4">
+      <div className="rounded-xl p-4" style={{ background: 'var(--muted)', border: '1px solid var(--border)' }}>
+        <div className="text-sm font-semibold text-foreground mb-3">客户基本信息</div>
+        <div className="grid grid-cols-2 gap-x-6 gap-y-3">
+          {basicRows.map(([k, v]) => (
+            <div key={k} className={k === '客户需求' || k === '备注' || k === '跟进事项' ? 'col-span-2 flex items-start gap-3' : 'flex items-start gap-3'}>
+              <span className="text-xs w-16 flex-shrink-0 mt-0.5" style={{ color: 'var(--muted-foreground)' }}>{k}</span>
+              <span className="text-sm font-medium text-foreground whitespace-pre-wrap break-words">{v}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="rounded-xl p-4" style={{ background: 'var(--muted)', border: '1px solid var(--border)' }}>
+        <div className="flex items-center gap-2 mb-3">
+          <UserIcon size={14} style={{ color: 'var(--brand)' }} />
+          <span className="text-sm font-semibold text-foreground">客户画像</span>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {profileRows.map(([k, v]) => (
+            <div key={k} className="flex flex-col items-center rounded-lg px-4 py-2 gap-0.5"
+              style={{ background: 'var(--card)', minWidth: 88 }}>
+              <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>{k}</span>
+              <span className="text-sm font-semibold text-foreground">{v}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="rounded-xl p-4" style={{ background: 'var(--muted)', border: '1px solid var(--border)' }}>
+        <div className="flex items-center gap-2 mb-3">
+          <MessageSquareIcon size={14} style={{ color: 'var(--brand)' }} />
+          <span className="text-sm font-semibold text-foreground">跟进记录</span>
+          <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>共 {followRecords.length} 条</span>
+        </div>
+        {followRecords.length === 0 ? (
+          <div className="text-center py-8" style={{ color: 'var(--muted-foreground)' }}>
+            <MessageSquareIcon size={28} className="mx-auto mb-2 opacity-30" />
+            <div className="text-sm">暂无跟进记录</div>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-3">
+            {followRecords.map((rec, idx) => (
+              <div key={rec.id || idx} className="rounded-lg p-3" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-semibold" style={{ color: 'var(--brand)' }}>计划跟进：{rec.date || '—'}</span>
+                  <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>操作人：{rec.operator || '—'}</span>
+                </div>
+                {rec.content && <div className="text-sm text-foreground mb-1">事项：{rec.content}</div>}
+                {rec.feedback && <div className="text-sm text-foreground mb-1">反馈：{rec.feedback}</div>}
+                <div className="text-xs" style={{ color: 'var(--muted-foreground)' }}>记录时间：{rec.createdAt || '—'}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function OrderModal({ visible, onClose, mode = 'create', order = null, editOrderId = '' }: OrderModalProps) {
   const orderMutations = useOrderMutations();
   const { currentUser } = useApp();
   const [activeTab, setActiveTab] = useState('customer');
   const [form, setForm] = useState<OrderForm>(initForm());
   const [showPicker, setShowPicker] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
+  const contractFileRef = useRef<HTMLInputElement>(null);
+  const servicePhotoFileRef = useRef<HTMLInputElement>(null);
+  const isEdit = mode === 'edit';
+  const isView = mode === 'view';
+  const customerQuery = useCustomer(form.customerId || null);
+  const fullCustomer = customerQuery.data as any;
 
   useEffect(() => {
     if (!visible) {
       setActiveTab('customer');
       setForm(initForm());
+      setShowPicker(false);
+      return;
     }
-  }, [visible]);
+    setActiveTab('customer');
+    setShowPicker(false);
+    setForm(order && mode !== 'create' ? formFromOrder(order) : initForm());
+  }, [visible, mode, editOrderId, order]);
 
   function set<K extends keyof OrderForm>(key: K, val: OrderForm[K]) {
     setForm(prev => ({ ...prev, [key]: val }));
@@ -673,7 +1036,77 @@ function OrderModal({ visible, onClose, isEdit = false, editOrderId = '' }: Orde
     }));
   }
 
+  async function handleContractFiles(files: FileList | null) {
+    const selected = Array.from(files ?? []);
+    if (selected.length === 0) return;
+    const valid = selected.filter(f => f.type === 'application/pdf' || f.type.startsWith('image/'));
+    if (valid.length !== selected.length) toast.error('合同附件仅支持 PDF 或图片格式');
+    const attachments = await Promise.all(valid.map(readFileAsDataUrl));
+    set('contractAttachments', [...form.contractAttachments, ...attachments]);
+    if (contractFileRef.current) contractFileRef.current.value = '';
+  }
+
+  async function handleServicePhotoFiles(files: FileList | null) {
+    const selected = Array.from(files ?? []);
+    if (selected.length === 0) return;
+    const valid = selected.filter(f => f.type === 'image/png' || f.type === 'image/jpeg');
+    if (valid.length !== selected.length) toast.error('服务照片仅支持 PNG、JPG 格式');
+    const remaining = Math.max(0, 10 - form.newPhotoFiles.length);
+    if (valid.length > remaining) toast.error('每次服务最多上传 10 张图片');
+    const attachments = await Promise.all(valid.slice(0, remaining).map(readFileAsDataUrl));
+    set('newPhotoFiles', [...form.newPhotoFiles, ...attachments]);
+    if (servicePhotoFileRef.current) servicePhotoFileRef.current.value = '';
+  }
+
+  function resetPhotoDraft() {
+    setForm(prev => ({
+      ...prev,
+      editingPhotoRecordId: '',
+      newPhotoSeq: '',
+      newPhotoTime: '',
+      newPhotoRemark: '',
+      newPhotoFiles: [],
+    }));
+  }
+
+  function handleSavePhotoRecord() {
+    if (form.newPhotoFiles.length === 0) {
+      toast.error('请先上传服务照片');
+      return;
+    }
+    const record: ServicePhotoRecord = {
+      id: form.editingPhotoRecordId || `spr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      seq: Number(form.newPhotoSeq) || form.servicePhotoRecords.length + 1,
+      time: form.newPhotoTime || nowLocalDateTime(),
+      remark: form.newPhotoRemark,
+      photos: form.newPhotoFiles,
+    };
+    setForm(prev => ({
+      ...prev,
+      servicePhotoRecords: prev.editingPhotoRecordId
+        ? prev.servicePhotoRecords.map(r => r.id === prev.editingPhotoRecordId ? record : r)
+        : [...prev.servicePhotoRecords, record],
+      editingPhotoRecordId: '',
+      newPhotoSeq: '',
+      newPhotoTime: '',
+      newPhotoRemark: '',
+      newPhotoFiles: [],
+    }));
+  }
+
+  function handleEditPhotoRecord(record: ServicePhotoRecord) {
+    setForm(prev => ({
+      ...prev,
+      editingPhotoRecordId: record.id,
+      newPhotoSeq: String(record.seq || ''),
+      newPhotoTime: record.time || '',
+      newPhotoRemark: record.remark || '',
+      newPhotoFiles: record.photos || [],
+    }));
+  }
+
   async function handleSave() {
+    if (isView) return;
     // Persist to module-level maps
     const oid = editOrderId || `ORDER-${Date.now()}`;
     orderTherapistMap.set(oid, {
@@ -702,16 +1135,32 @@ function OrderModal({ visible, onClose, isEdit = false, editOrderId = '' }: Orde
     const payStatus = (form.payStatus === '已支付' ? '已付款' : form.payStatus === '待支付' ? '待付款' : form.payStatus) as any;
     const orderBody: any = {
       customerId: form.customerId,
+      customerName: form.customerName,
+      customerPhone: form.customerPhone,
+      customerArea: form.customerArea,
+      customerTag: form.customerTag,
+      customerAdvisor: form.customerAdvisor,
       type: form.orderType || '体验卡',
       amount: Number(form.amount) || 0,
       payStatus,
+      purchaseDate: form.purchaseDate,
+      serviceItems: form.serviceItems,
       totalTimes: form.orderType === '套餐' ? 10 : 1,
       contractSigned: form.contractStatus !== '无' && form.contractStatus !== '未回签',
-      serviceItemCount: form.serviceItems ? form.serviceItems.split(',').length : 1,
+      serviceItemCount: Math.max(1, splitServiceItems(form.serviceItems).length),
+      servicePeople: {
+        sp1: form.servicePerson1,
+        sp2: form.servicePerson2,
+        sp3: form.servicePerson3,
+      },
+      appointmentTime: form.appointmentTime,
+      serviceNote: form.serviceNote,
+      contractAttachments: form.contractAttachments,
+      servicePhotoRecords: form.servicePhotoRecords,
     };
     try {
       if (isEdit && editOrderId) {
-        await orderMutations.patchStatus({ id: editOrderId, status: payStatus });
+        await orderMutations.update({ id: editOrderId, body: orderBody });
       } else {
         await orderMutations.create(orderBody);
       }
@@ -727,15 +1176,17 @@ function OrderModal({ visible, onClose, isEdit = false, editOrderId = '' }: Orde
       ? ORDER_TYPE_AMOUNTS[form.orderType === '体验卡' ? '体验卡阶段' : '套餐阶段'] ?? []
       : [];
 
+  if (!visible) return null;
+
   return (
     <>
       <CustomerPickerModal visible={showPicker} onClose={() => setShowPicker(false)} onSelect={handleCustomerSelect} />
-      <div className={visible ? '' : 'hidden'}>
+      <div>
         <div className="fixed inset-0 z-40 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.45)' }}>
           <div className="bg-card rounded-2xl shadow-custom flex flex-col" style={{ width: 700, maxHeight: '92vh' }}>
             {/* Header */}
             <div className="flex items-center justify-between px-6 py-4" style={{ borderBottom: '1px solid var(--border)' }}>
-              <span className="font-semibold text-base text-foreground">{isEdit ? '编辑订单' : '新建订单'}</span>
+              <span className="font-semibold text-base text-foreground">{isView ? '查看订单' : isEdit ? '编辑订单' : '新建订单'}</span>
               <button onClick={onClose} className="p-1.5 rounded hover:bg-muted"><XIcon size={16} /></button>
             </div>
 
@@ -764,12 +1215,14 @@ function OrderModal({ visible, onClose, isEdit = false, editOrderId = '' }: Orde
 
             {/* Body */}
             <div className="overflow-y-auto flex-1 px-6 py-5">
+              <div className="contents">
 
               {/* ── 客户信息 ── */}
               <div className={activeTab === 'customer' ? '' : 'hidden'}>
                 <div className="flex items-center justify-between mb-4">
                   <span className="text-sm font-semibold text-foreground">客户基本信息</span>
                   <button
+                    disabled={isView}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-white hover:opacity-90"
                     style={{ background: 'var(--brand)' }}
                     onClick={() => setShowPicker(true)}
@@ -789,7 +1242,7 @@ function OrderModal({ visible, onClose, isEdit = false, editOrderId = '' }: Orde
                         <div className="text-xs" style={{ color: 'var(--muted-foreground)' }}>ID: {form.customerId}</div>
                       </div>
                       {form.customerTag && <span className={`badge ml-2 ${TAG_CLS[form.customerTag] ?? 'badge-gray'}`}>{form.customerTag}</span>}
-                      <button className="ml-auto text-xs px-2 py-1 rounded hover:bg-muted" style={{ color: 'var(--muted-foreground)' }} onClick={() => set('customerId', '')}>重新选择</button>
+                      {!isView && <button className="ml-auto text-xs px-2 py-1 rounded hover:bg-muted" style={{ color: 'var(--muted-foreground)' }} onClick={() => set('customerId', '')}>重新选择</button>}
                     </div>
                     <div className="flex flex-wrap gap-x-8 gap-y-1 text-sm">
                       <span><span style={{ color: 'var(--muted-foreground)' }}>手机：</span>{form.customerPhone}</span>
@@ -801,12 +1254,16 @@ function OrderModal({ visible, onClose, isEdit = false, editOrderId = '' }: Orde
                   <div
                     className="rounded-xl p-8 text-center cursor-pointer hover:border-brand transition-colors mb-3"
                     style={{ border: '2px dashed var(--border)', color: 'var(--muted-foreground)' }}
-                    onClick={() => setShowPicker(true)}
+                    onClick={() => !isView && setShowPicker(true)}
                   >
                     <UserIcon size={32} className="mx-auto mb-2 opacity-30" />
                     <div className="text-sm">点击从客户列表选择，或直接填写客户信息</div>
                   </div>
                 )}
+                {(isView || (isEdit && fullCustomer)) ? (
+                  <CustomerArchiveView customer={fullCustomer} form={form} />
+                ) : null}
+                {!isView && (
                 <div className="flex flex-col gap-3 mt-4">
                   <div className="flex gap-3">
                     <div className="flex-1 flex flex-col gap-1">
@@ -833,6 +1290,7 @@ function OrderModal({ visible, onClose, isEdit = false, editOrderId = '' }: Orde
                     </div>
                   </div>
                 </div>
+                )}
               </div>
 
               {/* ── 订单维护 ── */}
@@ -891,7 +1349,12 @@ function OrderModal({ visible, onClose, isEdit = false, editOrderId = '' }: Orde
                   <div className="flex flex-col gap-1">
                     <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>支付状态</label>
                     <div className="flex gap-3">
-                      {(['已支付', '待支付', '已付定金'] as NewPayStatus[]).map(s => (
+                      {([
+                        '已支付',
+                        '待支付',
+                        '已付定金',
+                        ...(form.payStatus === '已退款' ? ['已退款' as NewPayStatus] : []),
+                      ] as NewPayStatus[]).map(s => (
                         <button
                           key={s}
                           onClick={() => set('payStatus', s)}
@@ -901,7 +1364,7 @@ function OrderModal({ visible, onClose, isEdit = false, editOrderId = '' }: Orde
                             background: form.payStatus === s ? 'var(--accent)' : 'var(--muted)',
                             color: form.payStatus === s ? 'var(--brand)' : 'var(--foreground)',
                           }}
-                        >{s}</button>
+                        >{payStatusDisplay(s)}</button>
                       ))}
                     </div>
                   </div>
@@ -944,6 +1407,59 @@ function OrderModal({ visible, onClose, isEdit = false, editOrderId = '' }: Orde
                     <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>服务项目</label>
                     <ServiceItemsPicker value={form.serviceItems} onChange={v => set('serviceItems', v)} />
                   </div>
+
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>合同附件</label>
+                      {!isView && (
+                        <>
+                          <input
+                            ref={contractFileRef}
+                            type="file"
+                            accept="application/pdf,image/*"
+                            multiple
+                            className="hidden"
+                            onChange={e => handleContractFiles(e.target.files)}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => contractFileRef.current?.click()}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-white hover:opacity-90"
+                            style={{ background: 'var(--brand)' }}
+                          >
+                            <PlusIcon size={13} />
+                            上传附件
+                          </button>
+                        </>
+                      )}
+                    </div>
+                    {form.contractAttachments.length === 0 ? (
+                      <div className="rounded-lg p-4 text-center text-sm" style={{ background: 'var(--muted)', color: 'var(--muted-foreground)', border: '1px solid var(--border)' }}>
+                        暂无合同附件
+                      </div>
+                    ) : (
+                      <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+                        {form.contractAttachments.map(att => (
+                          <div key={att.id} className="flex items-center gap-3 px-3 py-2 text-sm" style={{ borderBottom: '1px solid var(--border)' }}>
+                            <FileTextIcon size={15} style={{ color: 'var(--brand)' }} />
+                            <span className="flex-1 truncate">{att.name}</span>
+                            <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>{displayDateTime(att.uploadedAt)}</span>
+                            <button type="button" className="text-xs hover:underline" style={{ color: 'var(--brand)' }} onClick={() => openAttachment(att)}>查看</button>
+                            {!isView && (
+                              <button
+                                type="button"
+                                className="text-xs hover:underline"
+                                style={{ color: 'var(--danger)' }}
+                                onClick={() => set('contractAttachments', form.contractAttachments.filter(x => x.id !== att.id))}
+                              >
+                                删除
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -985,33 +1501,142 @@ function OrderModal({ visible, onClose, isEdit = false, editOrderId = '' }: Orde
                     />
                   </div>
                   <div className="flex flex-col gap-2">
-                    <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>上传服务照片</label>
-                    <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={e => {
-                      const files = Array.from(e.target.files ?? []);
-                      const urls = files.map(f => URL.createObjectURL(f));
-                      set('photos', [...form.photos, ...urls]);
-                    }} />
-                    <div className="flex flex-wrap gap-2">
-                      {(form.photos ?? []).map((url, i) => (
-                        <div key={i} className="relative w-16 h-16 rounded-lg overflow-hidden" style={{ border: '1px solid var(--border)' }}>
-                          <img src={url} alt="" className="w-full h-full object-cover" />
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>服务照片维护</label>
+                      <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>每次最多 10 张 PNG/JPG</span>
+                    </div>
+                    {!isView && (
+                      <div className="rounded-xl p-3 flex flex-col gap-3" style={{ background: 'var(--muted)', border: '1px solid var(--border)' }}>
+                        <div className="grid grid-cols-3 gap-3">
+                          <div className="flex flex-col gap-1">
+                            <label className="text-xs" style={{ color: 'var(--muted-foreground)' }}>第几次</label>
+                            <input
+                              type="number"
+                              min={1}
+                              className="px-3 py-2 rounded-lg text-sm outline-none"
+                              style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
+                              value={form.newPhotoSeq}
+                              onChange={e => set('newPhotoSeq', e.target.value)}
+                              placeholder="如：1"
+                            />
+                          </div>
+                          <div className="flex flex-col gap-1 col-span-2">
+                            <label className="text-xs" style={{ color: 'var(--muted-foreground)' }}>上传/服务时间</label>
+                            <input
+                              type="datetime-local"
+                              className="px-3 py-2 rounded-lg text-sm outline-none"
+                              style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
+                              value={form.newPhotoTime}
+                              onChange={e => set('newPhotoTime', e.target.value)}
+                            />
+                          </div>
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <label className="text-xs" style={{ color: 'var(--muted-foreground)' }}>备注信息</label>
+                          <input
+                            className="px-3 py-2 rounded-lg text-sm outline-none"
+                            style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
+                            value={form.newPhotoRemark}
+                            onChange={e => set('newPhotoRemark', e.target.value)}
+                            placeholder="填写本次服务照片说明"
+                          />
+                        </div>
+                        <input
+                          ref={servicePhotoFileRef}
+                          type="file"
+                          accept="image/png,image/jpeg"
+                          multiple
+                          className="hidden"
+                          onChange={e => handleServicePhotoFiles(e.target.files)}
+                        />
+                        <div className="flex flex-wrap gap-2">
+                          {form.newPhotoFiles.map(photo => (
+                            <div key={photo.id} className="relative w-16 h-16 rounded-lg overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+                              <img src={photo.dataUrl} alt={photo.name} className="w-full h-full object-cover" />
+                              <button
+                                type="button"
+                                className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full flex items-center justify-center"
+                                style={{ background: 'rgba(0,0,0,0.5)' }}
+                                onClick={() => set('newPhotoFiles', form.newPhotoFiles.filter(x => x.id !== photo.id))}
+                              >
+                                <XIcon size={10} className="text-white" />
+                              </button>
+                            </div>
+                          ))}
                           <button
-                            className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full flex items-center justify-center"
-                            style={{ background: 'rgba(0,0,0,0.5)' }}
-                            onClick={() => set('photos', form.photos.filter((_, j) => j !== i))}
+                            type="button"
+                            onClick={() => servicePhotoFileRef.current?.click()}
+                            className="w-16 h-16 rounded-lg flex flex-col items-center justify-center gap-1 text-xs hover:border-brand transition-colors"
+                            style={{ border: '2px dashed var(--border)', color: 'var(--muted-foreground)' }}
                           >
-                            <XIcon size={10} className="text-white" />
+                            <ImageIcon size={18} />
+                            上传
                           </button>
                         </div>
-                      ))}
-                      <button
-                        onClick={() => fileRef.current?.click()}
-                        className="w-16 h-16 rounded-lg flex flex-col items-center justify-center gap-1 text-xs hover:border-brand transition-colors"
-                        style={{ border: '2px dashed var(--border)', color: 'var(--muted-foreground)' }}
-                      >
-                        <ImageIcon size={18} />
-                        上传
-                      </button>
+                        <div className="flex justify-end gap-2">
+                          {form.editingPhotoRecordId && (
+                            <button type="button" onClick={resetPhotoDraft} className="px-3 py-1.5 rounded-lg text-sm border hover:bg-muted" style={{ borderColor: 'var(--border)' }}>取消编辑</button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={handleSavePhotoRecord}
+                            className="px-4 py-1.5 rounded-lg text-sm text-white hover:opacity-90"
+                            style={{ background: 'var(--brand)' }}
+                          >
+                            {form.editingPhotoRecordId ? '保存本次' : '新增本次'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+                      <div className="grid grid-cols-[70px_140px_1fr_100px] gap-3 px-3 py-2 text-xs font-medium" style={{ background: 'var(--muted)', color: 'var(--muted-foreground)' }}>
+                        <span>次数</span>
+                        <span>时间</span>
+                        <span>图片/备注</span>
+                        <span>操作</span>
+                      </div>
+                      {form.servicePhotoRecords.length === 0 ? (
+                        <div className="p-6 text-center text-sm" style={{ color: 'var(--muted-foreground)' }}>暂无服务照片记录</div>
+                      ) : (
+                        [...form.servicePhotoRecords].sort((a, b) => (a.seq || 0) - (b.seq || 0)).map(record => (
+                          <div key={record.id} className="grid grid-cols-[70px_140px_1fr_100px] gap-3 px-3 py-3 items-start text-sm" style={{ borderTop: '1px solid var(--border)' }}>
+                            <span className="font-semibold text-foreground">第 {record.seq} 次</span>
+                            <span style={{ color: 'var(--muted-foreground)' }}>{displayDateTime(record.time)}</span>
+                            <div className="flex flex-col gap-2">
+                              <div className="flex flex-wrap gap-1.5">
+                                {(record.photos || []).map(photo => (
+                                  <button
+                                    type="button"
+                                    key={photo.id}
+                                    onClick={() => openAttachment(photo)}
+                                    className="w-12 h-12 rounded-lg overflow-hidden"
+                                    style={{ border: '1px solid var(--border)' }}
+                                  >
+                                    <img src={photo.dataUrl} alt={photo.name} className="w-full h-full object-cover" />
+                                  </button>
+                                ))}
+                              </div>
+                              {record.remark && <div className="text-xs break-words" style={{ color: 'var(--muted-foreground)' }}>{record.remark}</div>}
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              {record.photos?.[0] && <button type="button" className="text-xs hover:underline" style={{ color: 'var(--brand)' }} onClick={() => openAttachment(record.photos[0])}>查看</button>}
+                              {!isView && (
+                                <>
+                                  <button type="button" className="text-xs hover:underline" style={{ color: 'var(--brand)' }} onClick={() => handleEditPhotoRecord(record)}>编辑</button>
+                                  <button
+                                    type="button"
+                                    className="text-xs hover:underline"
+                                    style={{ color: 'var(--danger)' }}
+                                    onClick={() => set('servicePhotoRecords', form.servicePhotoRecords.filter(x => x.id !== record.id))}
+                                  >
+                                    删除
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        ))
+                      )}
                     </div>
                   </div>
                 </div>
@@ -1086,6 +1711,7 @@ function OrderModal({ visible, onClose, isEdit = false, editOrderId = '' }: Orde
                   )}
                 </div>
               </div>
+              </div>
             </div>
 
             {/* Footer */}
@@ -1120,6 +1746,12 @@ function OrderModal({ visible, onClose, isEdit = false, editOrderId = '' }: Orde
                       if (idx < TABS.length - 1) setActiveTab(TABS[idx + 1].key);
                     }}
                   >下一步</button>
+                ) : isView ? (
+                  <button
+                    className="px-5 py-1.5 rounded-lg text-sm text-white font-medium hover:opacity-90"
+                    style={{ background: 'var(--brand)' }}
+                    onClick={onClose}
+                  >关闭</button>
                 ) : (
                   <button
                     className="px-5 py-1.5 rounded-lg text-sm text-white font-medium hover:opacity-90"
@@ -1127,7 +1759,7 @@ function OrderModal({ visible, onClose, isEdit = false, editOrderId = '' }: Orde
                     onClick={handleSave}
                   >{isEdit ? '保存修改' : '创建订单'}</button>
                 )}
-                <button className="px-4 py-1.5 rounded-lg text-sm border hover:bg-muted" style={{ borderColor: 'var(--border)' }} onClick={onClose}>取消</button>
+                <button className="px-4 py-1.5 rounded-lg text-sm border hover:bg-muted" style={{ borderColor: 'var(--border)' }} onClick={onClose}>{isView ? '关闭' : '取消'}</button>
               </div>
             </div>
           </div>
@@ -1146,7 +1778,13 @@ function initForm(): OrderForm {
     servicePerson2: { type: '运动康复师', assign: '待分配' },
     servicePerson3: { type: '调理师', assign: '待分配' },
     serviceItems: '', appointmentTime: '', serviceNote: '',
-    photos: [],
+    contractAttachments: [],
+    servicePhotoRecords: [],
+    editingPhotoRecordId: '',
+    newPhotoSeq: '',
+    newPhotoTime: '',
+    newPhotoRemark: '',
+    newPhotoFiles: [],
     followRecords: [], newFollowDate: '', newFollowContent: '',
   };
 }
@@ -1201,8 +1839,9 @@ export default function OrdersListPage() {
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [showModal, setShowModal] = useState(false);
-  const [isEdit, setIsEdit] = useState(false);
+  const [modalMode, setModalMode] = useState<OrderModalMode>('create');
   const [editOrderId, setEditOrderId] = useState('');
+  const [selectedOrder, setSelectedOrder] = useState<any | null>(null);
   const pageSize = 10;
 
   // Multi-select filter states
@@ -1216,48 +1855,72 @@ export default function OrdersListPage() {
   const isReadOnly = currentUser.role === 'finance';
 
   // Build option lists from data
-  const customersQ = useCustomers({ page: 1, pageSize: 1000 });
+  const customersQ = useCustomers({ page: 1, pageSize: 1000, includeOrdered: 1 });
   const therapistsQ = useTherapists({ page: 1, pageSize: 1000 });
   const ordersQ = useOrders({ page: 1, pageSize: 1000 });
-  const orderMutations = useOrderMutations();
   const CUSTOMERS: any[] = customersQ.data?.data ?? [];
   const THERAPISTS: any[] = therapistsQ.data?.data ?? [];
   const ORDERS: any[] = ordersQ.data?.data ?? [];
-  const customerById = new Map(CUSTOMERS.map(c => [c.id, c]));
+  const customerById = new Map(CUSTOMERS.flatMap(c => [[c.id, c], [c._id, c]].filter(([id]) => !!id) as [string, any][]));
   const customerByName = new Map(CUSTOMERS.map(c => [c.name, c]));
-  const allAdvisors = Array.from(new Set(CUSTOMERS.map(c => c.advisor).filter(Boolean))).sort();
-
   const TYPE_OPTIONS = [
     { value: '体验卡', label: '体验卡' },
     { value: '套餐', label: '套餐' },
   ];
   const PAY_OPTIONS = [
-    { value: '已支付', label: '已支付' },
-    { value: '待支付', label: '待支付' },
+    { value: '已付款', label: '已支付' },
+    { value: '待付款', label: '待支付' },
   ];
-  const TAG_OPTIONS = TAG_DEFS.map(d => ({ value: d.tag, label: d.tag }));
-  const ADVISOR_OPTIONS = allAdvisors.map(a => ({ value: a, label: a }));
-  const THERAPIST_OPTIONS = THERAPISTS
-    .filter(t => t.status === '在职')
-    .map(t => ({ value: t.name, label: t.name }));
 
   // Enrich orders with customer area/advisor/tag
   const enrichedOrders = ORDERS.map(o => {
     const cust = customerByName.get(o.customerName) ?? customerById.get(o.customerId);
     return {
       ...o,
-      area: cust?.area ?? '—',
-      advisor: cust?.advisor ?? '—',
-      tag: (cust?.tag ?? null) as CustomerTag | null,
-      resolvedCustomerId: cust?.id ?? o.customerId ?? '—',
+      area: o.area || cust?.area || '—',
+      customerPhone: o.customerPhone || cust?.phone || '',
+      advisor: o.advisor || cust?.advisor || '—',
+      tag: (o.tag || cust?.tag || null) as CustomerTag | null,
+      resolvedCustomerId: o.customerCode || cust?.id || o.customerId || '—',
+      internalCustomerId: o.customerId || cust?._id || '',
     };
   });
+
+  const toOptions = (values: string[]) =>
+    Array.from(new Set(values.map(v => v.trim()).filter(v => v && v !== '—')))
+      .sort((a, b) => a.localeCompare(b, 'zh-CN'))
+      .map(v => ({ value: v, label: v }));
+
+  const TAG_OPTIONS = TAG_DEFS.map(d => ({ value: d.tag, label: d.tag }));
+  const AREA_OPTIONS = CITY_OPTIONS;
+  const ADVISOR_OPTIONS = toOptions([
+    ...CUSTOMERS.map(c => c.advisor),
+    ...enrichedOrders.map(o => o.advisor),
+  ]);
+  const assignedTherapistNames = enrichedOrders.flatMap(o =>
+    getTherapistDisplay(o.id).split(/[，,、]/).map(name => name.trim()).filter(name => name && name !== '待分配')
+  );
+  const therapistTypeOrder = ['产康师', '调理师', '运动康复师'];
+  const THERAPIST_OPTIONS: FilterOption[] = [
+    ...THERAPISTS
+      .filter(t => t.status === '在职')
+      .sort((a, b) => {
+        const at = therapistTypeOrder.indexOf(a.therapistType);
+        const bt = therapistTypeOrder.indexOf(b.therapistType);
+        return (at === -1 ? 99 : at) - (bt === -1 ? 99 : bt) || a.name.localeCompare(b.name, 'zh-CN');
+      })
+      .map(t => ({ value: t.name, label: t.name, group: t.therapistType || '其他' })),
+    ...assignedTherapistNames
+      .filter(name => !THERAPISTS.some(t => t.name === name))
+      .map(name => ({ value: name, label: name, group: '其他' })),
+  ];
 
   const filtered = enrichedOrders.filter(o => {
     const matchSearch = !search || o.customerName.includes(search) || o.id.includes(search);
     const matchType = fType.length === 0 || fType.includes(o.type);
-    const matchPay = fPay.length === 0 || fPay.includes(o.payStatus);
-    const matchArea = fArea.length === 0 || fArea.includes(o.area);
+    const normalizedPay = o.payStatus === '已支付' ? '已付款' : o.payStatus === '待支付' ? '待付款' : o.payStatus;
+    const matchPay = fPay.length === 0 || fPay.includes(normalizedPay);
+    const matchArea = fArea.length === 0 || fArea.some(area => String(o.area || '').includes(area));
     const matchTag = fTag.length === 0 || (o.tag !== null && fTag.includes(o.tag));
     const matchAdvisor = fAdvisor.length === 0 || fAdvisor.includes(o.advisor);
     const therapistDisplay = getTherapistDisplay(o.id);
@@ -1271,8 +1934,8 @@ export default function OrdersListPage() {
   useEffect(() => { setPage(1); }, [search, fType, fPay, fArea, fTag, fAdvisor, fTherapist]);
 
   /* ── Column widths for non-frozen cols ── */
-  // 订单类型(80) | 服务项目(160) | 跟进状态(76) | 跟进时间(82) | 跟进事项(120) | 付款状态(76) | 金额(80) | 合同状态(76) | 归属客服(76) | 技师(88) | 操作(72)
-  const NORMAL_COLS = [80, 160, 76, 82, 120, 76, 80, 76, 76, 88, 72];
+  // 区域(92) | 订单类型(80) | 服务项目(160) | 跟进状态(76) | 跟进时间(82) | 跟进事项(120) | 付款状态(76) | 金额(80) | 合同状态(76) | 归属客服(76) | 技师(88) | 操作(96)
+  const NORMAL_COLS = [92, 80, 160, 76, 82, 120, 76, 80, 76, 76, 88, 96];
   const totalNormal = NORMAL_COLS.reduce((s, w) => s + w, 0);
   const tableMinW = FREEZE_TOTAL + totalNormal;
 
@@ -1280,8 +1943,9 @@ export default function OrdersListPage() {
     <>
       <OrderModal
         visible={showModal}
-        onClose={() => setShowModal(false)}
-        isEdit={isEdit}
+        onClose={() => { setShowModal(false); setSelectedOrder(null); }}
+        mode={modalMode}
+        order={selectedOrder}
         editOrderId={editOrderId}
       />
 
@@ -1308,7 +1972,7 @@ export default function OrdersListPage() {
             <div className="w-px h-5 flex-shrink-0" style={{ background: 'var(--border)' }} />
             <MultiSelectDropdown label="付款状态" options={PAY_OPTIONS} selected={fPay} onChange={setFPay} />
             <div className="w-px h-5 flex-shrink-0" style={{ background: 'var(--border)' }} />
-            <MultiSelectDropdown label="区域" options={CITY_OPTIONS} selected={fArea} onChange={setFArea} />
+            <MultiSelectDropdown label="区域" options={AREA_OPTIONS} selected={fArea} onChange={setFArea} />
             <div className="w-px h-5 flex-shrink-0" style={{ background: 'var(--border)' }} />
             <MultiSelectDropdown
               label="标签"
@@ -1320,14 +1984,26 @@ export default function OrdersListPage() {
             <div className="w-px h-5 flex-shrink-0" style={{ background: 'var(--border)' }} />
             <MultiSelectDropdown label="客服" options={ADVISOR_OPTIONS} selected={fAdvisor} onChange={setFAdvisor} />
             <div className="w-px h-5 flex-shrink-0" style={{ background: 'var(--border)' }} />
-            <MultiSelectDropdown label="技师" options={THERAPIST_OPTIONS} selected={fTherapist} onChange={setFTherapist} />
+            <MultiSelectDropdown
+              label="技师"
+              options={THERAPIST_OPTIONS}
+              selected={fTherapist}
+              onChange={setFTherapist}
+              grouped={true}
+              renderOption={opt => (
+                <>
+                  <span className="text-sm font-medium">{opt.label}</span>
+                  <span className="text-xs ml-auto" style={{ color: 'var(--muted-foreground)' }}>{opt.group}</span>
+                </>
+              )}
+            />
             {/* Count + new button */}
             <span className="text-sm flex-shrink-0 ml-1" style={{ color: 'var(--muted-foreground)', whiteSpace: 'nowrap' }}>共 {filtered.length} 条</span>
             {!isReadOnly && (
               <button
                 className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm text-white font-medium hover:opacity-90 flex-shrink-0"
                 style={{ background: 'var(--brand)' }}
-                onClick={() => { setIsEdit(false); setEditOrderId(''); setShowModal(true); }}
+                onClick={() => { setModalMode('create'); setEditOrderId(''); setSelectedOrder(null); setShowModal(true); }}
               >
                 <PlusIcon size={14} />
                 新建订单
@@ -1355,6 +2031,7 @@ export default function OrdersListPage() {
                   <th style={STICKY_TH_STYLE(2)}>客户姓名</th>
                   <th style={STICKY_TH_STYLE(3)}>标签</th>
                   {/* Normal cols */}
+                  <th>区域</th>
                   <th style={{ textAlign: 'center' }}>订单类型</th>
                   <th>服务项目</th>
                   <th style={{ textAlign: 'center' }}>跟进状态</th>
@@ -1376,12 +2053,14 @@ export default function OrdersListPage() {
                   const serviceItemsText = (() => {
                     const saved = orderServiceItemsMap.get(o.id);
                     if (saved && saved.trim()) return saved;
-                    return o.serviceItemCount > 0 ? `共${o.serviceItemCount}项` : '—';
+                    if (o.serviceItems && o.serviceItems.trim()) return o.serviceItems;
+                    return '—';
                   })();
 
                   const therapistDisplay = getTherapistDisplay(o.id);
                   const contractStatus = getContractStatus(o.id, o.type);
                   const followInfo = getFollowDisplay(o.id);
+                  const displayPayStatus = effectiveOrderPayStatus(o);
 
                   return (
                     <tr key={o.id}>
@@ -1411,6 +2090,24 @@ export default function OrdersListPage() {
                         )}
                       </td>
 
+                      {/* 区域 */}
+                      <td>
+                        <span
+                          className="text-xs"
+                          style={{
+                            color: o.area && o.area !== '—' ? 'var(--foreground)' : 'var(--muted-foreground)',
+                            display: 'block',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                            maxWidth: 84,
+                          }}
+                          title={o.area}
+                        >
+                          {o.area || '—'}
+                        </span>
+                      </td>
+
                       {/* 订单类型 */}
                       <td style={{ textAlign: 'center' }}>
                         <span
@@ -1432,7 +2129,7 @@ export default function OrdersListPage() {
                         <span
                           className="text-xs"
                           style={{
-                            color: o.serviceItemCount > 0 ? 'var(--foreground)' : 'var(--muted-foreground)',
+                            color: serviceItemsText !== '—' ? 'var(--foreground)' : 'var(--muted-foreground)',
                             display: 'block',
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',
@@ -1485,7 +2182,7 @@ export default function OrdersListPage() {
 
                       {/* 付款状态 */}
                       <td style={{ textAlign: 'center' }}>
-                        <span className={`badge ${PAY_STATUS_COLORS[o.payStatus]}`}>{o.payStatus}</span>
+                        <span className={`badge ${PAY_STATUS_COLORS[displayPayStatus] ?? 'badge-gray'}`}>{payStatusDisplay(displayPayStatus)}</span>
                       </td>
 
                       {/* 金额 */}
@@ -1526,21 +2223,21 @@ export default function OrdersListPage() {
                       <td style={{ textAlign: 'center' }}>
                         <div className="flex items-center justify-center gap-1">
                           <button
-                            className="p-1.5 rounded hover:bg-muted transition-colors"
+                            className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium hover:opacity-80 transition-opacity"
                             title="查看"
-                            style={{ color: 'var(--muted-foreground)' }}
-                            onClick={() => { setIsEdit(false); setEditOrderId(o.id); setShowModal(true); }}
+                            style={{ background: 'rgba(30,136,229,0.1)', color: 'var(--brand)' }}
+                            onClick={() => { setModalMode('view'); setEditOrderId(o.id); setSelectedOrder(o); setShowModal(true); }}
                           >
-                            <EyeIcon size={14} />
+                            <EyeIcon size={11} />查看
                           </button>
                           {!isReadOnly && (
                             <button
-                              className="p-1.5 rounded hover:bg-muted transition-colors"
+                              className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium hover:opacity-80 transition-opacity"
                               title="编辑"
-                              style={{ color: 'var(--muted-foreground)' }}
-                              onClick={() => { setIsEdit(true); setEditOrderId(o.id); setShowModal(true); }}
+                              style={{ background: 'rgba(100,100,100,0.1)', color: 'var(--foreground)' }}
+                              onClick={() => { setModalMode('edit'); setEditOrderId(o.id); setSelectedOrder(o); setShowModal(true); }}
                             >
-                              <PencilIcon size={14} />
+                              <PencilIcon size={11} />编辑
                             </button>
                           )}
                         </div>
@@ -1551,7 +2248,7 @@ export default function OrdersListPage() {
 
                 {paginated.length === 0 && (
                   <tr>
-                    <td colSpan={15} className="text-center py-12" style={{ color: 'var(--muted-foreground)' }}>
+                    <td colSpan={16} className="text-center py-12" style={{ color: 'var(--muted-foreground)' }}>
                       <FileTextIcon size={36} className="mx-auto mb-3 opacity-20" />
                       <div className="text-sm">暂无订单数据</div>
                     </td>

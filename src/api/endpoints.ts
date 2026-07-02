@@ -10,6 +10,11 @@ export interface UserInfo {
   phone?: string | null;
   email?: string | null;
 }
+export interface SystemUserDto {
+  id: string; username: string; name: string; role: string; phone?: string;
+  email?: string; wechat?: string; avatar?: string; status: 'active' | 'disabled';
+  permissions?: string[] | null; createdAt: string;
+}
 export const authApi = {
   login: (username: string, password: string) =>
     api.post<{ token: string; user: UserInfo }>('/auth/login', { username, password }),
@@ -37,22 +42,35 @@ export const customersApi = {
   remove: (id: string) => api.delete<{ message: string }>(`/customers/${id}`),
 };
 
+// ====== Users ======
+export const usersApi = {
+  list: () => api.get<{ data: SystemUserDto[] }>('/users'),
+  create: (body: Partial<SystemUserDto> & { password?: string }) => api.post<{ id: string }>('/users', body),
+  update: (id: string, body: Partial<SystemUserDto> & { password?: string }) => api.put<{ message: string }>(`/users/${id}`, body),
+  remove: (id: string) => api.delete<{ message: string }>(`/users/${id}`),
+};
+
 // ====== Orders ======
 export interface Order {
   id: string; _id?: string;
-  customerId: string; customerName: string;
+  customerId: string; customerCode?: string; customerName: string; customerPhone?: string;
+  area?: string; advisor?: string; tag?: string;
   type: string; amount: number; payStatus: string;
   createdAt: string; paidAt?: string | null;
   usedTimes: number; totalTimes: number;
   isUpgrade: boolean; contractSigned: boolean; hasCoupon: boolean; serviceItemCount: number;
+  serviceItems?: string; servicePeople?: any; appointmentTime?: string; serviceNote?: string;
+  contractAttachments?: any[]; servicePhotoRecords?: any[];
 }
 export const ordersApi = {
   list: (params: Record<string, any>) => api.get<Paged<Order>>('/orders', params),
   create: (body: Partial<Order>) => api.post<{ id: string; orderNo: string }>('/orders', body),
+  update: (id: string, body: Partial<Order>) => api.put<{ message: string }>(`/orders/${id}`, body),
   patchStatus: (id: string, status: string) =>
     api.patch<{ message: string }>(`/orders/${id}/status`, { status }),
   patchContract: (id: string, signed: boolean) =>
     api.patch<{ message: string }>(`/orders/${id}/contract`, { signed }),
+  remove: (id: string) => api.delete<{ message: string }>(`/orders/${id}`),
 };
 
 // ====== Appointments ======
@@ -111,6 +129,8 @@ export const financeApi = {
   salary: (month: string) => api.get<{ month: string; data: SalaryRecord[] }>('/finance/salary', { month }),
   settle: (id: string) => api.post<{ message: string }>(`/finance/salary/${id}/settle`),
   income: () => api.get<{ monthly: any[]; summary: any }>('/finance/income'),
+  exportSalary: (month: string) => api.download('/finance/salary/export', { month }),
+  exportIncome: () => api.download('/finance/income/export'),
 };
 
 // ====== Contracts ======

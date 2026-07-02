@@ -32,10 +32,18 @@ router.get('/', authenticateToken, async (req, res, next) => {
     const total = (countRows as any[])[0].cnt;
 
     const [rows] = await db.query(
-      `SELECT o.*, c.name AS customer_name
-       FROM orders o LEFT JOIN customers c ON c.id = o.customer_id
-       ${whereSql}
-       ORDER BY o.created_at DESC LIMIT ? OFFSET ?`,
+      `SELECT o.id, o.order_no, o.customer_id, o.type, o.amount, o.pay_status,
+              o.contract_signed, o.created_at, c.name AS customer_name
+       FROM (
+         SELECT o.id
+         FROM orders o
+         ${whereSql}
+         ORDER BY o.created_at DESC
+         LIMIT ? OFFSET ?
+       ) page_orders
+       JOIN orders o ON o.id = page_orders.id
+       LEFT JOIN customers c ON c.id = o.customer_id
+       ORDER BY o.created_at DESC`,
       [pageSize, offset]
     );
     res.json({ total, page, pageSize, data: (rows as any[]).map(mapRow) });

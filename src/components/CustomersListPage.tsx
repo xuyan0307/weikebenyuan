@@ -52,6 +52,10 @@ function getTagDef(tag: CustomerTag): TagDef {
   return TAG_DEFS.find(d => d.tag === tag) ?? TAG_DEFS[TAG_DEFS.length - 1];
 }
 
+function textOf(value: unknown): string {
+  return value === null || value === undefined ? '' : String(value);
+}
+
 const ALL_TAGS: CustomerTag[] = TAG_DEFS.map(d => d.tag);
 
 // ─────────────────────────── New follow status system ───────────────────────────
@@ -112,6 +116,7 @@ const AREA_OPTIONS = ['厦门', '泉州', '漳州'];
 const PRODUCT_OPTIONS = ['盆底肌', '骨盆', '腹直肌', '运动康复', '身体调理', '其他'];
 const INIT_TAG_OPTIONS: CustomerTag[] = ['D1', 'D2', 'D3'];
 const SERVICE_ADVISORS = ['张管理员', '李客服'];
+const defaultAdvisor = (name: string) => SERVICE_ADVISORS.includes(name) ? name : SERVICE_ADVISORS[0];
 
 // ─────────────────────────── Date filter ───────────────────────────
 type DateRange = 'all' | 'today' | 'week' | 'month';
@@ -150,11 +155,25 @@ function downloadCsvTemplate() {
 }
 
 // ─────────────────────────── Helpers ───────────────────────────
-function profileSummary(p: CustomerProfile): string {
-  return `${p.age}岁 · ${p.deliveryDate} · ${p.deliveryType} · 第${p.babyCount}胎 · ${p.feedingType}`;
+function profileSummary(p: CustomerProfile | null | undefined): string {
+  const profile = {
+    age: 0,
+    deliveryDate: '',
+    deliveryType: '',
+    babyCount: 1,
+    feedingType: '',
+    ...(p ?? {}),
+  };
+  return `${profile.age || '—'}岁 · ${profile.deliveryDate || '—'} · ${profile.deliveryType || '—'} · 第${profile.babyCount || 1}胎 · ${profile.feedingType || '—'}`;
 }
 
-function todayStr(): string { return new Date().toISOString().slice(0, 10); }
+function todayStr(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
 
 function nowIso(): string { return new Date().toISOString().slice(0, 19).replace('T', ' '); }
 
@@ -164,7 +183,14 @@ type PersistedCustomerProfile = CustomerProfile & {
 };
 
 function getPersistedProfile(c: Customer): PersistedCustomerProfile {
-  return (c.profile ?? {}) as PersistedCustomerProfile;
+  return {
+    age: 0,
+    deliveryDate: '',
+    deliveryType: '顺产',
+    babyCount: 1,
+    feedingType: '母乳',
+    ...(c.profile ?? {}),
+  } as PersistedCustomerProfile;
 }
 
 function getFollowTask(c: Customer): string {
@@ -279,18 +305,19 @@ function blankForm(advisor: string): CustomerForm {
 }
 
 function customerToForm(c: Customer): CustomerForm {
-  const birthYear = c.profile.age > 0
-    ? String(new Date().getFullYear() - c.profile.age)
+  const profile = getPersistedProfile(c);
+  const birthYear = profile.age > 0
+    ? String(new Date().getFullYear() - profile.age)
     : '';
   return {
-    acquiredAt: c.acquiredAt, source: c.source, name: c.name, wechat: c.wechat,
-    phone: c.phone, area: c.area,
-    intendedProducts: c.intendedProduct ? c.intendedProduct.split(',').map(s => s.trim()).filter(Boolean) : [],
-    deliveryDate: c.profile.deliveryDate, babyCount: String(c.profile.babyCount),
-    deliveryType: c.profile.deliveryType, feedingType: c.profile.feedingType,
-    birthYear, situation: c.situation, tag: c.tag,
-    advisor: c.advisor, remark: c.remark,
-    followStatus: c.followStatus, followDate: c.followDate ?? '', followContent: '',
+    acquiredAt: textOf(c.acquiredAt) || todayStr(), source: textOf(c.source), name: textOf(c.name), wechat: textOf(c.wechat),
+    phone: textOf(c.phone), area: textOf(c.area),
+    intendedProducts: textOf(c.intendedProduct).split(',').map(s => s.trim()).filter(Boolean),
+    deliveryDate: textOf(profile.deliveryDate), babyCount: String(profile.babyCount || 1),
+    deliveryType: profile.deliveryType || '顺产', feedingType: profile.feedingType || '母乳',
+    birthYear, situation: textOf(c.situation), tag: (textOf(c.tag) || 'D1') as CustomerTag,
+    advisor: textOf(c.advisor) || defaultAdvisor(''), remark: textOf(c.remark),
+    followStatus: c.followStatus, followDate: textOf(c.followDate), followContent: '',
     followTask: getFollowTask(c),
   };
 }
@@ -589,11 +616,13 @@ export default function CustomersListPage() {
   // Local follow task map state (for re-rendering)
 
   const [showAdd, setShowAdd] = useState(false);
-  const [addForm, setAddForm] = useState<CustomerForm>(blankForm(currentUser.name));
+  const [addForm, setAddForm] = useState<CustomerForm>(blankForm(defaultAdvisor(currentUser.name)));
+  const addFormRef = useRef(addForm);
   const [addErrors, setAddErrors] = useState<Partial<Record<keyof CustomerForm, string>>>({});
 
   const [editId, setEditId] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState<CustomerForm>(blankForm(currentUser.name));
+  const [editForm, setEditForm] = useState<CustomerForm>(blankForm(defaultAdvisor(currentUser.name)));
+  const editFormRef = useRef(editForm);
   const [editErrors, setEditErrors] = useState<Partial<Record<keyof CustomerForm, string>>>({});
 
   const [showLegend, setShowLegend] = useState(false);
@@ -611,14 +640,23 @@ export default function CustomersListPage() {
   // ── filter ──
   const filtered = customers.filter(c => {
     const q = search.trim();
-    const matchSearch = !q || c.name.includes(q) || c.phone.includes(q) || c.id.includes(q) || c.wechat.includes(q);
-    const matchDate = matchDateRange(c.acquiredAt, dateRange);
-    const matchArea = areaFilter.length === 0 || areaFilter.some(a => c.area.includes(a)) || areaFilter.length === AREA_OPTIONS.length;
-    const matchSource = sourceFilter.length === 0 || sourceFilter.includes(c.source) || sourceFilter.length === SOURCE_OPTIONS.length;
+    const name = textOf(c.name);
+    const phone = textOf(c.phone);
+    const id = textOf(c.id);
+    const wechat = textOf(c.wechat);
+    const acquiredAt = textOf(c.acquiredAt);
+    const area = textOf(c.area);
+    const source = textOf(c.source);
+    const advisor = textOf(c.advisor);
+    const tag = textOf(c.tag) as CustomerTag;
+    const matchSearch = !q || name.includes(q) || phone.includes(q) || id.includes(q) || wechat.includes(q);
+    const matchDate = matchDateRange(acquiredAt, dateRange);
+    const matchArea = areaFilter.length === 0 || areaFilter.some(a => area.includes(a)) || areaFilter.length === AREA_OPTIONS.length;
+    const matchSource = sourceFilter.length === 0 || sourceFilter.includes(source) || sourceFilter.length === SOURCE_OPTIONS.length;
     const displaySt = customerDisplayStatus(c);
     const matchStatus = statusFilter.length === 0 || statusFilter.includes(displaySt) || statusFilter.length === FILTER_STATUSES.length;
-    const matchTag = tagFilter.length === 0 || tagFilter.includes(c.tag) || tagFilter.length === ALL_TAGS.length;
-    const matchAdvisor = advisorFilter.length === 0 || advisorFilter.includes(c.advisor) || advisorFilter.length === SERVICE_ADVISORS.length;
+    const matchTag = tagFilter.length === 0 || tagFilter.includes(tag) || tagFilter.length === ALL_TAGS.length;
+    const matchAdvisor = advisorFilter.length === 0 || advisorFilter.includes(advisor) || advisorFilter.length === SERVICE_ADVISORS.length;
     return matchSearch && matchDate && matchArea && matchSource && matchStatus && matchTag && matchAdvisor;
   });
 
@@ -641,30 +679,29 @@ export default function CustomersListPage() {
 
   // ── add ──
   async function handleAdd() {
-    const errs = validate(addForm);
+    const draft = addFormRef.current;
+    const errs = validate(draft);
     if (Object.keys(errs).length) { setAddErrors(errs); return; }
-    const birthYearNum = Number(addForm.birthYear);
+    const birthYearNum = Number(draft.birthYear);
     const computedAge = birthYearNum > 1900 ? new Date().getFullYear() - birthYearNum : 0;
-    const newId = String(100000 + customers.length + 1);
     const nc: any = {
-      id: newId,
-      name: addForm.name.trim(), wechat: addForm.wechat.trim(),
-      phone: addForm.phone.trim(), area: addForm.area.trim(),
-      source: addForm.source, acquiredAt: addForm.acquiredAt,
-      tag: addForm.tag, followStatus: '待跟进', followDate: '',
-      advisor: addForm.advisor, totalOrders: 0, lastFollow: todayStr(),
+      name: draft.name.trim(), wechat: draft.wechat.trim(),
+      phone: draft.phone.trim(), area: draft.area.trim(),
+      source: draft.source, acquiredAt: draft.acquiredAt,
+      tag: draft.tag, followStatus: '待跟进', followDate: '',
+      advisor: draft.advisor, totalOrders: 0, lastFollow: todayStr(),
       profile: {
         age: computedAge,
-        deliveryDate: addForm.deliveryDate,
-        deliveryType: addForm.deliveryType,
-        babyCount: Number(addForm.babyCount) || 1,
-        feedingType: addForm.feedingType,
-        followTask: addForm.followTask,
+        deliveryDate: draft.deliveryDate,
+        deliveryType: draft.deliveryType,
+        babyCount: Number(draft.babyCount) || 1,
+        feedingType: draft.feedingType,
+        followTask: draft.followTask,
         followRecords: [],
       },
-      situation: addForm.situation,
-      intendedProduct: addForm.intendedProducts.join(','),
-      remark: addForm.remark,
+      situation: draft.situation,
+      intendedProduct: draft.intendedProducts.join(','),
+      remark: draft.remark,
     };
     try {
       await mutations.create(nc);
@@ -678,9 +715,10 @@ export default function CustomersListPage() {
   // ── edit ──
   async function handleEdit() {
     if (!editId) return;
-    const errs = validate(editForm);
+    const draft = editFormRef.current;
+    const errs = validate(draft);
     if (Object.keys(errs).length) { setEditErrors(errs); return; }
-    const birthYearNum = Number(editForm.birthYear);
+    const birthYearNum = Number(draft.birthYear);
     const computedAge = birthYearNum > 1900 ? new Date().getFullYear() - birthYearNum : 0;
 
     const existingCustomer = customers.find(c => c.id === editId);
@@ -688,16 +726,16 @@ export default function CustomersListPage() {
     let nextFollowRecords = existingCustomer ? getFollowRecords(existingCustomer) : [];
 
     // Append follow record if there is feedback or follow content
-    const hasUpdate = editForm.followContent.trim() || editForm.followTask.trim();
+    const hasUpdate = draft.followContent.trim() || draft.followTask.trim();
     if (hasUpdate) {
-      const newDisplayStatus: NewFollowStatus = editForm.followStatus === '已成交' || editForm.followStatus === '已预约'
+      const newDisplayStatus: NewFollowStatus = draft.followStatus === '已成交' || draft.followStatus === '已预约'
         ? '已完成'
-        : editForm.followStatus === '跟进中' ? '跟进中' : '待跟进';
+        : draft.followStatus === '跟进中' ? '跟进中' : '待跟进';
       const rec: FollowRecord = {
         id: `fr_${Date.now()}_${Math.random().toString(36).slice(2)}`,
-        date: editForm.followDate || todayStr(),
-        content: editForm.followTask.trim(),
-        feedback: editForm.followContent.trim(),
+        date: draft.followDate || todayStr(),
+        content: draft.followTask.trim(),
+        feedback: draft.followContent.trim(),
         status: newDisplayStatus,
         operator: currentUser.name,
         createdAt: nowIso(),
@@ -706,23 +744,23 @@ export default function CustomersListPage() {
     }
 
     const updated: any = {
-      name: editForm.name.trim(), wechat: editForm.wechat.trim(),
-      phone: editForm.phone.trim(), area: editForm.area.trim(),
-      source: editForm.source, acquiredAt: editForm.acquiredAt,
-      tag: editForm.tag, advisor: editForm.advisor,
-      intendedProduct: editForm.intendedProducts.join(','),
-      situation: editForm.situation,
-      remark: editForm.remark,
-      followStatus: editForm.followStatus,
-      followDate: editForm.followDate,
+      name: draft.name.trim(), wechat: draft.wechat.trim(),
+      phone: draft.phone.trim(), area: draft.area.trim(),
+      source: draft.source, acquiredAt: draft.acquiredAt,
+      tag: draft.tag, advisor: draft.advisor,
+      intendedProduct: draft.intendedProducts.join(','),
+      situation: draft.situation,
+      remark: draft.remark,
+      followStatus: draft.followStatus,
+      followDate: draft.followDate,
       profile: {
         ...(existingProfile ?? {}),
         age: computedAge > 0 ? computedAge : 0,
-        deliveryDate: editForm.deliveryDate,
-        deliveryType: editForm.deliveryType,
-        babyCount: Number(editForm.babyCount) || 1,
-        feedingType: editForm.feedingType,
-        followTask: editForm.followTask,
+        deliveryDate: draft.deliveryDate,
+        deliveryType: draft.deliveryType,
+        babyCount: Number(draft.babyCount) || 1,
+        feedingType: draft.feedingType,
+        followTask: draft.followTask,
         followRecords: nextFollowRecords,
       },
     };
@@ -736,20 +774,28 @@ export default function CustomersListPage() {
   }
 
   // ── form field update ──
-  function patchAdd(k: keyof CustomerForm, v: string) {
-    setAddForm(p => ({ ...p, [k]: v }));
-    setAddErrors(p => { const n = { ...p }; delete n[k]; return n; });
+  function patchAdd(k: keyof CustomerForm, v: string, render = true) {
+    const next = { ...addFormRef.current, [k]: v };
+    addFormRef.current = next;
+    if (render) setAddForm(next);
+    if (addErrors[k]) setAddErrors(p => { const n = { ...p }; delete n[k]; return n; });
   }
-  function patchEdit(k: keyof CustomerForm, v: string) {
-    setEditForm(p => ({ ...p, [k]: v }));
-    setEditErrors(p => { const n = { ...p }; delete n[k]; return n; });
+  function patchEdit(k: keyof CustomerForm, v: string, render = true) {
+    const next = { ...editFormRef.current, [k]: v };
+    editFormRef.current = next;
+    if (render) setEditForm(next);
+    if (editErrors[k]) setEditErrors(p => { const n = { ...p }; delete n[k]; return n; });
   }
 
   function patchAddProducts(products: string[]) {
-    setAddForm(p => ({ ...p, intendedProducts: products }));
+    const next = { ...addFormRef.current, intendedProducts: products };
+    addFormRef.current = next;
+    setAddForm(next);
   }
   function patchEditProducts(products: string[]) {
-    setEditForm(p => ({ ...p, intendedProducts: products }));
+    const next = { ...editFormRef.current, intendedProducts: products };
+    editFormRef.current = next;
+    setEditForm(next);
   }
 
   // ── CSV import ──
@@ -761,7 +807,7 @@ export default function CustomersListPage() {
       const lines = text.replace(/\r/g, '').split('\n').filter(l => l.trim());
       if (lines.length < 2) { setImportMsg('文件内容为空或格式有误'); return; }
       const dataLines = lines.slice(1);
-      const newCustomers: Customer[] = [];
+      const newCustomers: Partial<Customer>[] = [];
       dataLines.forEach((line, idx) => {
         const cols = line.split(',');
         const name = cols[0]?.trim() ?? '';
@@ -783,12 +829,10 @@ export default function CustomersListPage() {
           rawFeeding === '奶粉' ? '奶粉' : rawFeeding === '混合喂养' ? '混合喂养' : '母乳';
         const situation = cols[12]?.trim() ?? '';
         const remark = cols[13]?.trim() ?? '';
-        const newId = String(200000 + customers.length + newCustomers.length + idx + 1);
-        const nc: Customer = {
-          id: newId,
+        const nc: Partial<Customer> = {
           name, wechat, phone, area, source, acquiredAt,
           tag: 'D1', followStatus: '待跟进', followDate: '',
-          advisor: currentUser.name, totalOrders: 0, lastFollow: todayStr(),
+          advisor: defaultAdvisor(currentUser.name), totalOrders: 0, lastFollow: todayStr(),
           profile: { age, deliveryDate, deliveryType, babyCount, feedingType, followTask: '', followRecords: [] } as PersistedCustomerProfile,
           situation, intendedProduct, remark,
         };
@@ -810,7 +854,7 @@ export default function CustomersListPage() {
   // ── shared form render ──
   function renderForm(
     form: CustomerForm,
-    patch: (k: keyof CustomerForm, v: string) => void,
+    patch: (k: keyof CustomerForm, v: string, render?: boolean) => void,
     patchProducts: (products: string[]) => void,
     errors: Partial<Record<keyof CustomerForm, string>>,
     isEdit: boolean,
@@ -869,21 +913,21 @@ export default function CustomersListPage() {
           <div className="flex-1">
             <FF label="客户姓名" required>
               <input className={inputCls} style={inputStyle} placeholder="请输入姓名"
-                value={form.name} onChange={e => patch('name', e.target.value)} />
+                defaultValue={form.name} onChange={e => patch('name', e.target.value, false)} />
               {errors.name && <span className="text-xs text-red-500">{errors.name}</span>}
             </FF>
           </div>
           <div className="flex-1">
             <FF label="微信号" required>
               <input className={inputCls} style={inputStyle} placeholder="请输入微信号"
-                value={form.wechat} onChange={e => patch('wechat', e.target.value)} />
+                defaultValue={form.wechat} onChange={e => patch('wechat', e.target.value, false)} />
               {errors.wechat && <span className="text-xs text-red-500">{errors.wechat}</span>}
             </FF>
           </div>
           <div className="flex-1">
             <FF label="联系方式">
               <input className={inputCls} style={inputStyle} placeholder="手机号（选填）"
-                value={form.phone} onChange={e => patch('phone', e.target.value)} />
+                defaultValue={form.phone} onChange={e => patch('phone', e.target.value, false)} />
             </FF>
           </div>
         </div>
@@ -893,7 +937,7 @@ export default function CustomersListPage() {
           <div className="flex-1">
             <FF label="所在地址">
               <input className={inputCls} style={inputStyle} placeholder="区域/小区"
-                value={form.area} onChange={e => patch('area', e.target.value)} />
+                defaultValue={form.area} onChange={e => patch('area', e.target.value, false)} />
             </FF>
           </div>
           <div className="flex-1">
@@ -945,12 +989,12 @@ export default function CustomersListPage() {
             <FF label="跟进事项（当前待办）">
               <textarea className={inputCls} style={{ ...inputStyle, minHeight: 56, resize: 'vertical' }}
                 placeholder="记录本次跟进的任务和待办事项..."
-                value={form.followTask} onChange={e => patch('followTask', e.target.value)} />
+                defaultValue={form.followTask} onChange={e => patch('followTask', e.target.value, false)} />
             </FF>
             <FF label="跟进反馈（本次备注）">
               <textarea className={inputCls} style={{ ...inputStyle, minHeight: 68, resize: 'vertical' }}
                 placeholder="记录本次跟进情况，如：电话沟通，了解客户意向..."
-                value={form.followContent} onChange={e => patch('followContent', e.target.value)} />
+                defaultValue={form.followContent} onChange={e => patch('followContent', e.target.value, false)} />
             </FF>
           </div>
         )}
@@ -962,8 +1006,8 @@ export default function CustomersListPage() {
             <div className="flex-1">
               <FF label="出生年份">
                 <input type="number" className={inputCls} style={inputStyle} placeholder="例：1995"
-                  min={1970} max={2010} value={form.birthYear}
-                  onChange={e => patch('birthYear', e.target.value)} />
+                  min={1970} max={2010} defaultValue={form.birthYear}
+                  onChange={e => patch('birthYear', e.target.value, false)} />
               </FF>
             </div>
             <div className="flex-1">
@@ -1005,11 +1049,11 @@ export default function CustomersListPage() {
         <FF label="需求及痛点">
           <textarea className={inputCls} style={{ ...inputStyle, minHeight: 72, resize: 'vertical' }}
             placeholder="客户主要需求、痛点描述..."
-            value={form.situation} onChange={e => patch('situation', e.target.value)} />
+            defaultValue={form.situation} onChange={e => patch('situation', e.target.value, false)} />
         </FF>
         <FF label="备注">
           <input className={inputCls} style={inputStyle} placeholder="其他备注"
-            value={form.remark} onChange={e => patch('remark', e.target.value)} />
+            defaultValue={form.remark} onChange={e => patch('remark', e.target.value, false)} />
         </FF>
       </div>
     );
@@ -1020,9 +1064,10 @@ export default function CustomersListPage() {
     show: boolean; title: string; onClose: () => void; onConfirm: () => void;
     confirmLabel?: string; children: React.ReactNode; width?: number;
   }) {
+    if (!show) return null;
+
     return (
-      <div className={`fixed inset-0 z-50 flex items-center justify-center transition-opacity duration-200
-        ${show ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
+      <div className="fixed inset-0 z-50 flex items-center justify-center transition-opacity duration-200 opacity-100 pointer-events-auto"
         style={{ background: 'rgba(0,0,0,0.45)' }}>
         <div className="bg-card rounded-2xl shadow-custom flex flex-col overflow-hidden"
           style={{ width, maxHeight: '90vh' }}>
@@ -1098,7 +1143,13 @@ export default function CustomersListPage() {
               </button>
               <button className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium text-white hover:opacity-90 transition-opacity"
                 style={{ background: 'var(--brand)' }}
-                onClick={() => { setAddForm(blankForm(currentUser.name)); setAddErrors({}); setShowAdd(true); }}>
+                onClick={() => {
+                  const nextForm = blankForm(defaultAdvisor(currentUser.name));
+                  addFormRef.current = nextForm;
+                  setAddForm(nextForm);
+                  setAddErrors({});
+                  setShowAdd(true);
+                }}>
                 <PlusIcon size={14} />新增客户
               </button>
             </>
@@ -1339,7 +1390,13 @@ export default function CustomersListPage() {
                         {canEdit && (
                           <button className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium hover:opacity-80 transition-opacity"
                             style={{ background: 'rgba(100,100,100,0.1)', color: 'var(--foreground)' }}
-                            onClick={() => { setEditForm(customerToForm(c)); setEditErrors({}); setEditId(c.id); }}>
+                            onClick={() => {
+                              const nextForm = customerToForm(c);
+                              editFormRef.current = nextForm;
+                              setEditForm(nextForm);
+                              setEditErrors({});
+                              setEditId(c.id);
+                            }}>
                             <EditIcon size={11} />编辑
                           </button>
                         )}
@@ -1387,7 +1444,7 @@ export default function CustomersListPage() {
 
       {/* ══ Detail Modal ══ */}
       <div className={`fixed inset-0 z-50 flex items-center justify-center transition-opacity duration-200
-        ${detailId ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
+        ${detailId ? 'opacity-100 pointer-events-auto' : 'hidden opacity-0 pointer-events-none'}`}
         style={{ background: 'rgba(0,0,0,0.4)' }}>
         <div className="bg-card rounded-2xl shadow-custom flex flex-col overflow-hidden"
           style={{ width: 700, maxHeight: '88vh' }}>
@@ -1469,11 +1526,11 @@ export default function CustomersListPage() {
                       </div>
                       <div className="flex flex-wrap gap-2">
                         {([
-                          ['年龄', `${detailCustomer.profile.age}岁`],
-                          ['生产时间', detailCustomer.profile.deliveryDate],
-                          ['分娩方式', detailCustomer.profile.deliveryType],
-                          ['第几胎', `第${detailCustomer.profile.babyCount}胎`],
-                          ['喂养方式', detailCustomer.profile.feedingType],
+                          ['年龄', getPersistedProfile(detailCustomer).age ? `${getPersistedProfile(detailCustomer).age}岁` : '—'],
+                          ['生产时间', textOf(getPersistedProfile(detailCustomer).deliveryDate) || '—'],
+                          ['分娩方式', textOf(getPersistedProfile(detailCustomer).deliveryType) || '—'],
+                          ['第几胎', getPersistedProfile(detailCustomer).babyCount ? `第${getPersistedProfile(detailCustomer).babyCount}胎` : '—'],
+                          ['喂养方式', textOf(getPersistedProfile(detailCustomer).feedingType) || '—'],
                         ] as [string, string][]).map(([k, v]) => (
                           <div key={k} className="flex flex-col items-center rounded-lg px-4 py-2 gap-0.5"
                             style={{ background: 'var(--card)', minWidth: 88 }}>
@@ -1704,7 +1761,9 @@ export default function CustomersListPage() {
                     style={{ background: 'var(--brand)' }}
                     onClick={() => {
                       if (!detailCustomer) return;
-                      setEditForm(customerToForm(detailCustomer));
+                      const nextForm = customerToForm(detailCustomer);
+                      editFormRef.current = nextForm;
+                      setEditForm(nextForm);
                       setEditErrors({});
                       setEditId(detailCustomer.id);
                       setDetailId(null);
@@ -1721,7 +1780,7 @@ export default function CustomersListPage() {
       {/* ══ Add Modal ══ */}
       <ModalWrap show={showAdd} title="新增客户"
         onClose={() => setShowAdd(false)} onConfirm={handleAdd}>
-        {renderForm(addForm, patchAdd, patchAddProducts, addErrors, false, String(100000 + customers.length + 1))}
+        {renderForm(addForm, patchAdd, patchAddProducts, addErrors, false, '自动生成')}
       </ModalWrap>
 
       {/* ══ Edit Modal ══ */}
@@ -1732,7 +1791,7 @@ export default function CustomersListPage() {
 
       {/* ══ Import Modal ══ */}
       <div className={`fixed inset-0 z-50 flex items-center justify-center transition-opacity duration-200
-        ${showImport ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
+        ${showImport ? 'opacity-100 pointer-events-auto' : 'hidden opacity-0 pointer-events-none'}`}
         style={{ background: 'rgba(0,0,0,0.45)' }}>
         <div className="bg-card rounded-2xl shadow-custom flex flex-col overflow-hidden"
           style={{ width: 560, maxHeight: '90vh' }}>

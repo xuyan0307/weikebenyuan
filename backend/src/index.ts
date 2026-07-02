@@ -15,6 +15,7 @@ import { financeRouter } from './routes/finance';
 import { contractsRouter } from './routes/contracts';
 import { dashboardRouter } from './routes/dashboard';
 import { operationLogsRouter } from './routes/operation-logs';
+import { usersRouter } from './routes/users';
 import { errorHandler } from './middleware/errorHandler';
 
 dotenv.config();
@@ -28,8 +29,8 @@ app.use(cors({
   origin: process.env.ALLOWED_ORIGINS?.split(',') || '*',
   credentials: true
 }));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '30mb' }));
+app.use(express.urlencoded({ extended: true, limit: '30mb' }));
 app.use(morgan('combined'));
 
 // 健康检查
@@ -51,6 +52,7 @@ app.use('/api/finance', financeRouter);
 app.use('/api/contracts', contractsRouter);
 app.use('/api/dashboard', dashboardRouter);
 app.use('/api/operation-logs', operationLogsRouter);
+app.use('/api/users', usersRouter);
 
 // 404处理
 app.use((_req: Request, res: Response) => {

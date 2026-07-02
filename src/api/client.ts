@@ -62,12 +62,33 @@ async function request<T>(method: string, path: string, body?: any, params?: Rec
   return data as T;
 }
 
+async function download(path: string, params?: Record<string, any>): Promise<Blob> {
+  const token = getToken();
+  const headers: Record<string, string> = {};
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  let url = `${BASE_URL}${path}`;
+  if (params) {
+    const usp = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && v !== '') usp.append(k, String(v));
+    });
+    const qs = usp.toString();
+    if (qs) url += `?${qs}`;
+  }
+
+  const resp = await fetch(url, { headers });
+  if (!resp.ok) throw { status: resp.status, message: `下载失败 (${resp.status})` };
+  return resp.blob();
+}
+
 export const api = {
   get: <T>(path: string, params?: Record<string, any>) => request<T>('GET', path, undefined, params),
   post: <T>(path: string, body?: any) => request<T>('POST', path, body),
   put: <T>(path: string, body?: any) => request<T>('PUT', path, body),
   patch: <T>(path: string, body?: any) => request<T>('PATCH', path, body),
   delete: <T>(path: string) => request<T>('DELETE', path),
+  download,
 };
 
 export interface Paged<T> { total: number; page: number; pageSize: number; data: T[]; }

@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   authApi, customersApi, ordersApi, appointmentsApi, therapistsApi,
   serviceRecordsApi, financeApi, contractsApi, dashboardApi, operationLogsApi,
+  usersApi,
 } from './endpoints';
 import type { Customer, Order, Appointment, Therapist } from './endpoints';
 
@@ -21,6 +22,7 @@ export const qk = {
   dashboardTodos: () => ['dashboard', 'todos'] as const,
   dashboardChart: () => ['dashboard', 'chart'] as const,
   operationLogs: (params: any) => ['operation-logs', params] as const,
+  users: () => ['users'] as const,
 };
 
 // ====== Customers ======
@@ -53,8 +55,10 @@ export function useOrderMutations() {
   const invalidate = () => { qc.invalidateQueries({ queryKey: ['orders'] }); qc.invalidateQueries({ queryKey: ['dashboard'] }); qc.invalidateQueries({ queryKey: ['contracts'] }); };
   return {
     create: useMutation({ mutationFn: (b: Partial<Order>) => ordersApi.create(b), onSuccess: invalidate }).mutateAsync,
+    update: useMutation({ mutationFn: ({ id, body }: { id: string; body: Partial<Order> }) => ordersApi.update(id, body), onSuccess: invalidate }).mutateAsync,
     patchStatus: useMutation({ mutationFn: ({ id, status }: { id: string; status: string }) => ordersApi.patchStatus(id, status), onSuccess: invalidate }).mutateAsync,
     patchContract: useMutation({ mutationFn: ({ id, signed }: { id: string; signed: boolean }) => ordersApi.patchContract(id, signed), onSuccess: invalidate }).mutateAsync,
+    remove: useMutation({ mutationFn: (id: string) => ordersApi.remove(id), onSuccess: invalidate }).mutateAsync,
   };
 }
 
@@ -138,6 +142,20 @@ export function useDashboardChart() {
 // ====== Operation Logs ======
 export function useOperationLogs(params: Record<string, any>) {
   return useQuery({ queryKey: qk.operationLogs(params), queryFn: () => operationLogsApi.list(params) });
+}
+
+// ====== Users ======
+export function useSystemUsers() {
+  return useQuery({ queryKey: qk.users(), queryFn: () => usersApi.list() });
+}
+export function useSystemUserMutations() {
+  const qc = useQueryClient();
+  const invalidate = () => qc.invalidateQueries({ queryKey: ['users'] });
+  return {
+    create: useMutation({ mutationFn: (body: any) => usersApi.create(body), onSuccess: invalidate }).mutateAsync,
+    update: useMutation({ mutationFn: ({ id, body }: { id: string; body: any }) => usersApi.update(id, body), onSuccess: invalidate }).mutateAsync,
+    remove: useMutation({ mutationFn: (id: string) => usersApi.remove(id), onSuccess: invalidate }).mutateAsync,
+  };
 }
 
 // ====== Auth ======

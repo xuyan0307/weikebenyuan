@@ -61,7 +61,7 @@ CREATE TABLE `orders` (
   `customer_id` varchar(36) NOT NULL COMMENT '客户ID',
   `type` enum('体验卡','套餐') NOT NULL COMMENT '订单类型',
   `amount` decimal(10,2) NOT NULL COMMENT '订单金额',
-  `pay_status` enum('已付款','待付款','已退款') DEFAULT '待付款' COMMENT '支付状态',
+  `pay_status` enum('已付款','待付款','已退款','已付定金') DEFAULT '待付款' COMMENT '支付状态',
   `paid_at` datetime DEFAULT NULL COMMENT '支付时间',
   `used_times` int DEFAULT 0 COMMENT '已使用次数',
   `total_times` int NOT NULL COMMENT '总次数',
@@ -69,13 +69,20 @@ CREATE TABLE `orders` (
   `contract_signed` tinyint(1) DEFAULT 0 COMMENT '是否签合同',
   `has_coupon` tinyint(1) DEFAULT 0 COMMENT '是否有抵扣券',
   `service_item_count` int DEFAULT 1 COMMENT '服务项目数量',
+  `service_items` varchar(500) DEFAULT NULL COMMENT '服务项目名称',
+  `service_people` json DEFAULT NULL COMMENT '服务人员分配',
+  `appointment_time` varchar(50) DEFAULT NULL COMMENT '预约时间',
+  `service_note` text DEFAULT NULL COMMENT '服务备注',
+  `contract_attachments` json DEFAULT NULL COMMENT '合同附件',
+  `service_photo_records` json DEFAULT NULL COMMENT '服务照片记录',
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_order_no` (`order_no`),
   KEY `idx_customer` (`customer_id`),
   KEY `idx_pay_status` (`pay_status`),
-  KEY `idx_created_at` (`created_at`)
+  KEY `idx_created_at` (`created_at`),
+  KEY `idx_customer_created_at` (`customer_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='订单表';
 
 -- 预约表

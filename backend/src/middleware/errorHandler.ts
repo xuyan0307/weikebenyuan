@@ -11,8 +11,11 @@ export function errorHandler(
   res: Response,
   _next: NextFunction
 ) {
-  const statusCode = err.statusCode || 500;
-  const message = err.isOperational ? err.message : 'Internal server error';
+  const isPayloadTooLarge = (err as any).type === 'entity.too.large' || /request entity too large/i.test(err.message || '');
+  const statusCode = isPayloadTooLarge ? 413 : (err.statusCode || 500);
+  const message = isPayloadTooLarge
+    ? '上传内容过大，请压缩图片后重试'
+    : err.isOperational ? err.message : 'Internal server error';
 
   console.error('Error:', {
     message: err.message,
