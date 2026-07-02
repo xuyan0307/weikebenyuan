@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import multer from 'multer';
-import OSS from 'ali-oss';
 import { randomUUID } from 'crypto';
 import { authenticateToken } from '../middleware/auth';
+import { createOssClient, ossFileUrl } from '../utils/oss';
 
 const router: Router = Router();
 
@@ -19,25 +19,6 @@ const allowedTypes = new Set([
   'image/webp',
 ]);
 
-function requireEnv(name: string): string {
-  const value = process.env[name];
-  if (!value) {
-    throw new Error(`${name} is required for OSS uploads`);
-  }
-  return value;
-}
-
-function createClient() {
-  return new OSS({
-    region: requireEnv('OSS_REGION'),
-    endpoint: process.env.OSS_ENDPOINT || undefined,
-    accessKeyId: requireEnv('OSS_ACCESS_KEY_ID'),
-    accessKeySecret: requireEnv('OSS_ACCESS_KEY_SECRET'),
-    bucket: requireEnv('OSS_BUCKET'),
-    secure: true,
-  });
-}
-
 function safeExt(file: Express.Multer.File): string {
   const original = file.originalname || '';
   const ext = original.includes('.') ? original.split('.').pop()?.toLowerCase() : '';
@@ -46,16 +27,6 @@ function safeExt(file: Express.Multer.File): string {
   if (file.mimetype === 'image/png') return 'png';
   if (file.mimetype === 'image/webp') return 'webp';
   return 'jpg';
-}
-
-function publicUrl(objectKey: string): string {
-  const cdnBase = process.env.OSS_PUBLIC_BASE_URL?.replace(/\/+$/, '');
-  if (cdnBase) return `${cdnBase}/${objectKey}`;
-  const bucket = requireEnv('OSS_BUCKET');
-  const endpoint = (process.env.OSS_ENDPOINT || `${requireEnv('OSS_REGION')}.aliyuncs.com`)
-    .replace(/^https?:\/\//, '')
-    .replace(/\/+$/, '');
-  return `https://${bucket}.${endpoint}/${objectKey}`;
 }
 
 router.post('/', authenticateToken, upload.array('files', 10), async (req, res, next) => {
@@ -76,7 +47,7 @@ router.post('/', authenticateToken, upload.array('files', 10), async (req, res, 
       return;
     }
 
-    const client = createClient();
+    const client = createOssClient();
     const today = new Date().toISOString().slice(0, 10);
     const uploadedAt = new Date().toISOString();
     const data = [];
@@ -87,7 +58,6 @@ router.post('/', authenticateToken, upload.array('files', 10), async (req, res, 
         headers: {
           'Content-Type': file.mimetype,
           'Cache-Control': 'public, max-age=31536000, immutable',
-          'x-oss-object-acl': 'public-read',
         },
       });
       data.push({
@@ -96,7 +66,7 @@ router.post('/', authenticateToken, upload.array('files', 10), async (req, res, 
         type: file.mimetype,
         size: file.size,
         objectKey,
-        url: publicUrl(objectKey),
+        url: ossFileUrl(objectKey),
         uploadedAt,
       });
     }

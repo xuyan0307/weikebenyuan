@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto';
 import { authenticateToken } from '../middleware/auth';
 import { auditLog } from '../middleware/auditLog';
 import { getDb } from '../config/database';
+import { ossFileUrl } from '../utils/oss';
 
 const router: Router = Router();
 
@@ -16,6 +17,27 @@ function parseJson(v: any, fallback: any) {
 
 function jsonOrNull(value: unknown) {
   return value == null ? null : JSON.stringify(value);
+}
+
+function withSignedAttachmentUrls<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map(item => withSignedAttachmentUrls(item)) as T;
+  }
+  if (value && typeof value === 'object') {
+    const next: any = { ...(value as any) };
+    if (typeof next.objectKey === 'string' && next.objectKey) {
+      try {
+        next.url = ossFileUrl(next.objectKey);
+      } catch {
+        // Keep the stored URL as a fallback when OSS is not configured.
+      }
+    }
+    for (const key of Object.keys(next)) {
+      if (Array.isArray(next[key])) next[key] = withSignedAttachmentUrls(next[key]);
+    }
+    return next;
+  }
+  return value;
 }
 
 function normalizePayStatus(status: string | undefined): '已付款' | '待付款' | '已退款' | '已付定金' {
@@ -112,8 +134,8 @@ function mapRow(r: any) {
     servicePeople: parseJson(r.service_people, null),
     appointmentTime: r.appointment_time || '',
     serviceNote: r.service_note || '',
-    contractAttachments: parseJson(r.contract_attachments, []),
-    servicePhotoRecords: parseJson(r.service_photo_records, []),
+    contractAttachments: withSignedAttachmentUrls(parseJson(r.contract_attachments, [])),
+    servicePhotoRecords: withSignedAttachmentUrls(parseJson(r.service_photo_records, [])),
   };
 }
 
