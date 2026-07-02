@@ -50,6 +50,25 @@ export const usersApi = {
   remove: (id: string) => api.delete<{ message: string }>(`/users/${id}`),
 };
 
+// ====== Uploads ======
+export interface UploadedFile {
+  id: string;
+  name: string;
+  type: string;
+  size: number;
+  objectKey: string;
+  url: string;
+  uploadedAt: string;
+}
+export const uploadsApi = {
+  files: (files: File[], scope = 'general') => {
+    const form = new FormData();
+    form.append('scope', scope);
+    files.forEach(file => form.append('files', file));
+    return api.upload<{ data: UploadedFile[] }>('/uploads', form);
+  },
+};
+
 // ====== Orders ======
 export interface Order {
   id: string; _id?: string;

@@ -16,6 +16,7 @@ import { contractsRouter } from './routes/contracts';
 import { dashboardRouter } from './routes/dashboard';
 import { operationLogsRouter } from './routes/operation-logs';
 import { usersRouter } from './routes/users';
+import { uploadsRouter } from './routes/uploads';
 import { errorHandler } from './middleware/errorHandler';
 
 dotenv.config();
@@ -53,6 +54,7 @@ app.use('/api/contracts', contractsRouter);
 app.use('/api/dashboard', dashboardRouter);
 app.use('/api/operation-logs', operationLogsRouter);
 app.use('/api/users', usersRouter);
+app.use('/api/uploads', uploadsRouter);
 
 // 404处理
 app.use((_req: Request, res: Response) => {

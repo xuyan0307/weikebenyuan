@@ -8,6 +8,7 @@ import {
 import type { OrderType, PayStatus, Customer, CustomerTag } from '../data/mockData';
 import { useApp } from '../hooks/useApp';
 import { useOrders, useOrderMutations, useCustomers, useCustomer, useTherapists } from '../api/hooks';
+import { uploadsApi } from '../api/endpoints';
 import { toast } from 'sonner';
 
 /* ─── Types ─────────────────────────────────────────── */
@@ -32,7 +33,10 @@ interface OrderAttachment {
   id: string;
   name: string;
   type: string;
-  dataUrl: string;
+  dataUrl?: string;
+  url?: string;
+  objectKey?: string;
+  size?: number;
   uploadedAt: string;
 }
 
@@ -781,73 +785,23 @@ function displayDateTime(value: string | undefined) {
   return value ? value.replace('T', ' ') : '-';
 }
 
-function readFileAsDataUrl(file: File): Promise<OrderAttachment> {
-  if (file.type.startsWith('image/')) {
-    return readImageAsCompressedAttachment(file);
-  }
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error('file read failed'));
-    reader.onload = () => resolve({
-      id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      name: file.name,
-      type: file.type || 'application/octet-stream',
-      dataUrl: String(reader.result || ''),
-      uploadedAt: nowLocalDateTime(),
-    });
-    reader.readAsDataURL(file);
-  });
-}
-
-function readImageAsCompressedAttachment(file: File): Promise<OrderAttachment> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error('image read failed'));
-    reader.onload = () => {
-      const source = String(reader.result || '');
-      const img = new Image();
-      img.onerror = () => reject(new Error('image decode failed'));
-      img.onload = () => {
-        const maxSide = 1600;
-        const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
-        const width = Math.max(1, Math.round(img.width * scale));
-        const height = Math.max(1, Math.round(img.height * scale));
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          reject(new Error('canvas unavailable'));
-          return;
-        }
-        ctx.drawImage(img, 0, 0, width, height);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.78);
-        resolve({
-          id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-          name: file.name.replace(/\.(png|jpe?g|webp|bmp)$/i, '.jpg'),
-          type: 'image/jpeg',
-          dataUrl,
-          uploadedAt: nowLocalDateTime(),
-        });
-      };
-      img.src = source;
-    };
-    reader.readAsDataURL(file);
-  });
-}
-
 function openAttachment(att: OrderAttachment) {
-  if (!att?.dataUrl) return;
+  const src = attachmentSrc(att);
+  if (!src) return;
   const win = window.open('', '_blank');
   if (!win) {
     toast.error('浏览器已拦截新窗口');
     return;
   }
   if (att.type?.startsWith('image/')) {
-    win.document.write(`<img src="${att.dataUrl}" style="max-width:100%;height:auto;display:block;margin:0 auto;" />`);
+    win.document.write(`<img src="${src}" style="max-width:100%;height:auto;display:block;margin:0 auto;" />`);
   } else {
-    win.document.write(`<iframe src="${att.dataUrl}" style="width:100%;height:100vh;border:0;"></iframe>`);
+    win.document.write(`<iframe src="${src}" style="width:100%;height:100vh;border:0;"></iframe>`);
   }
+}
+
+function attachmentSrc(att: OrderAttachment | undefined) {
+  return att?.url || att?.dataUrl || '';
 }
 
 function formFromOrder(order: any): OrderForm {
@@ -1041,9 +995,16 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
     if (selected.length === 0) return;
     const valid = selected.filter(f => f.type === 'application/pdf' || f.type.startsWith('image/'));
     if (valid.length !== selected.length) toast.error('合同附件仅支持 PDF 或图片格式');
-    const attachments = await Promise.all(valid.map(readFileAsDataUrl));
-    set('contractAttachments', [...form.contractAttachments, ...attachments]);
-    if (contractFileRef.current) contractFileRef.current.value = '';
+    if (valid.length === 0) return;
+    try {
+      const uploaded = await uploadsApi.files(valid, 'contracts');
+      set('contractAttachments', [...form.contractAttachments, ...uploaded.data]);
+      toast.success('上传成功');
+    } catch (error: any) {
+      toast.error(error?.message || '上传失败');
+    } finally {
+      if (contractFileRef.current) contractFileRef.current.value = '';
+    }
   }
 
   async function handleServicePhotoFiles(files: FileList | null) {
@@ -1053,9 +1014,16 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
     if (valid.length !== selected.length) toast.error('服务照片仅支持 PNG、JPG 格式');
     const remaining = Math.max(0, 10 - form.newPhotoFiles.length);
     if (valid.length > remaining) toast.error('每次服务最多上传 10 张图片');
-    const attachments = await Promise.all(valid.slice(0, remaining).map(readFileAsDataUrl));
-    set('newPhotoFiles', [...form.newPhotoFiles, ...attachments]);
-    if (servicePhotoFileRef.current) servicePhotoFileRef.current.value = '';
+    if (valid.length === 0 || remaining === 0) return;
+    try {
+      const uploaded = await uploadsApi.files(valid.slice(0, remaining), 'service-photos');
+      set('newPhotoFiles', [...form.newPhotoFiles, ...uploaded.data]);
+      toast.success('上传成功');
+    } catch (error: any) {
+      toast.error(error?.message || '上传失败');
+    } finally {
+      if (servicePhotoFileRef.current) servicePhotoFileRef.current.value = '';
+    }
   }
 
   function resetPhotoDraft() {
@@ -1552,7 +1520,7 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
                         <div className="flex flex-wrap gap-2">
                           {form.newPhotoFiles.map(photo => (
                             <div key={photo.id} className="relative w-16 h-16 rounded-lg overflow-hidden" style={{ border: '1px solid var(--border)' }}>
-                              <img src={photo.dataUrl} alt={photo.name} className="w-full h-full object-cover" />
+                              <img src={attachmentSrc(photo)} alt={photo.name} className="w-full h-full object-cover" />
                               <button
                                 type="button"
                                 className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full flex items-center justify-center"
@@ -1612,7 +1580,7 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
                                     className="w-12 h-12 rounded-lg overflow-hidden"
                                     style={{ border: '1px solid var(--border)' }}
                                   >
-                                    <img src={photo.dataUrl} alt={photo.name} className="w-full h-full object-cover" />
+                                    <img src={attachmentSrc(photo)} alt={photo.name} className="w-full h-full object-cover" />
                                   </button>
                                 ))}
                               </div>

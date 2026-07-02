@@ -82,12 +82,46 @@ async function download(path: string, params?: Record<string, any>): Promise<Blo
   return resp.blob();
 }
 
+async function upload<T>(path: string, formData: FormData): Promise<T> {
+  const token = getToken();
+  const headers: Record<string, string> = {};
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  const resp = await fetch(`${BASE_URL}${path}`, {
+    method: 'POST',
+    headers,
+    body: formData,
+  });
+
+  let data: any = null;
+  const ct = resp.headers.get('content-type') || '';
+  if (ct.includes('application/json')) {
+    data = await resp.json().catch(() => null);
+  } else {
+    data = await resp.text().catch(() => null);
+  }
+
+  if (!resp.ok) {
+    const message = (data && data.error) || `请求失败 (${resp.status})`;
+    if (resp.status === 401) {
+      setToken(null);
+      if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
+        window.location.href = '/login';
+      }
+    }
+    const err: ApiError = { status: resp.status, message, data };
+    throw err;
+  }
+  return data as T;
+}
+
 export const api = {
   get: <T>(path: string, params?: Record<string, any>) => request<T>('GET', path, undefined, params),
   post: <T>(path: string, body?: any) => request<T>('POST', path, body),
   put: <T>(path: string, body?: any) => request<T>('PUT', path, body),
   patch: <T>(path: string, body?: any) => request<T>('PATCH', path, body),
   delete: <T>(path: string) => request<T>('DELETE', path),
+  upload,
   download,
 };
 
