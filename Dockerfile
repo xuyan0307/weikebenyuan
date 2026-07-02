@@ -5,8 +5,7 @@ WORKDIR /app
 
 COPY package.json package-lock.json .npmrc ./
 
-RUN apk add --no-cache python3 make g++ && \
-    npm ci --include=dev
+RUN npm ci --include=dev
 
 COPY . .
 
