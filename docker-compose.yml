@@ -16,7 +16,7 @@ services:
       - mysql_data:/var/lib/mysql
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     ports:
-      - "3306:3306"
+      - "127.0.0.1:3306:3306"
     networks:
       - chankang-network
     healthcheck:
@@ -31,7 +31,7 @@ services:
     container_name: chankang-redis
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
     networks:
@@ -66,7 +66,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:-change_this_in_production}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     networks:
       - chankang-network
     healthcheck:
