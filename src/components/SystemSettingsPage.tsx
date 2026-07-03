@@ -78,7 +78,7 @@ const PERMISSION_GROUPS: PermissionGroup[] = [
       { key: 'customers-list', label: '客户列表' },
       { key: 'customers-pool', label: '客户公海' },
       { key: 'orders-list', label: '订单列表' },
-      { key: 'orders-contracts', label: '合同管理' },
+      { key: 'orders-contracts', label: '数据报表' },
     ],
   },
   {

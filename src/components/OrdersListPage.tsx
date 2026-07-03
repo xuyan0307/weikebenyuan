@@ -335,6 +335,30 @@ function MultiSelectDropdown({
     }
   }
 
+  function groupValues(items: FilterOption[]) {
+    return items.map(item => item.value);
+  }
+
+  function groupAllSelected(items: FilterOption[]) {
+    const values = groupValues(items);
+    return values.length > 0 && values.every(value => optionChecked(value));
+  }
+
+  function toggleGroup(items: FilterOption[]) {
+    const values = groupValues(items);
+    if (allSelected) {
+      const next = options.map(opt => opt.value).filter(value => !values.includes(value));
+      onChange(next.length > 0 ? next : [FILTER_NONE]);
+      return;
+    }
+    if (groupAllSelected(items)) {
+      const next = effectiveSelected.filter(value => !values.includes(value));
+      onChange(next.length > 0 ? next : [FILTER_NONE]);
+      return;
+    }
+    onChange(Array.from(new Set([...effectiveSelected, ...values])));
+  }
+
   const groupedByOption = grouped && options.some(o => o.group);
   const groupOrder = grouped
     ? groupedByOption
@@ -415,7 +439,19 @@ function MultiSelectDropdown({
           groupedOptions.map((g, gi) => (
             <div key={g.groupKey}>
               {gi > 0 && <div style={{ borderTop: '1px solid var(--border)', margin: '3px 0' }} />}
-              <div className="px-3 py-1 flex items-center gap-2">
+              <div
+                className="px-3 py-1 flex items-center gap-2 cursor-pointer hover:bg-muted"
+                onClick={() => toggleGroup(g.items)}
+              >
+                <div
+                  className="w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0"
+                  style={{
+                    borderColor: groupAllSelected(g.items) ? 'var(--brand)' : 'var(--border)',
+                    background: groupAllSelected(g.items) ? 'var(--brand)' : 'transparent',
+                  }}
+                >
+                  {groupAllSelected(g.items) && <CheckIcon size={10} className="text-white" />}
+                </div>
                 <span className="text-xs font-semibold" style={{ color: 'var(--muted-foreground)', letterSpacing: '0.04em' }}>
                   {g.groupLabel}
                 </span>

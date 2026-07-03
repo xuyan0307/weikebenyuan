@@ -142,7 +142,7 @@ function matchDateRange(dateStr: string, range: DateRange): boolean {
 }
 
 // ─────────────────────────── CSV Template ───────────────────────────
-const CSV_HEADERS = '姓名,微信号,联系电话,所在区域,来源渠道,获客时间,意向产品,出生年份,生产年月,第几胎,分娩方式,喂养方式,需求情况,备注';
+const CSV_HEADERS = '姓名,微信号,联系电话,所在区域,来源渠道,获客时间,意向产品,出生年份,生产时间,第几胎,分娩方式,喂养方式,需求情况,备注';
 
 function downloadCsvTemplate() {
   const blob = new Blob(['\uFEFF' + CSV_HEADERS + '\n'], { type: 'text/csv;charset=utf-8;' });
@@ -176,6 +176,12 @@ function todayStr(): string {
 }
 
 function nowIso(): string { return new Date().toISOString().slice(0, 19).replace('T', ' '); }
+
+function normalizeDateInput(value: unknown): string {
+  const text = textOf(value).trim();
+  if (/^\d{4}-\d{2}$/.test(text)) return `${text}-01`;
+  return text;
+}
 
 type PersistedCustomerProfile = CustomerProfile & {
   followTask?: string;
@@ -313,7 +319,7 @@ function customerToForm(c: Customer): CustomerForm {
     acquiredAt: textOf(c.acquiredAt) || todayStr(), source: textOf(c.source), name: textOf(c.name), wechat: textOf(c.wechat),
     phone: textOf(c.phone), area: textOf(c.area),
     intendedProducts: textOf(c.intendedProduct).split(',').map(s => s.trim()).filter(Boolean),
-    deliveryDate: textOf(profile.deliveryDate), babyCount: String(profile.babyCount || 1),
+    deliveryDate: normalizeDateInput(profile.deliveryDate), babyCount: String(profile.babyCount || 1),
     deliveryType: profile.deliveryType || '顺产', feedingType: profile.feedingType || '母乳',
     birthYear, situation: textOf(c.situation), tag: (textOf(c.tag) || 'D1') as CustomerTag,
     advisor: textOf(c.advisor) || defaultAdvisor(''), remark: textOf(c.remark),
@@ -1011,8 +1017,8 @@ export default function CustomersListPage() {
               </FF>
             </div>
             <div className="flex-1">
-              <FF label="生产年月">
-                <input type="month" className={inputCls} style={inputStyle}
+              <FF label="生产时间">
+                <input type="date" className={inputCls} style={inputStyle}
                   value={form.deliveryDate} onChange={e => patch('deliveryDate', e.target.value)} />
               </FF>
             </div>
@@ -1780,13 +1786,13 @@ export default function CustomersListPage() {
       {/* ══ Add Modal ══ */}
       <ModalWrap show={showAdd} title="新增客户"
         onClose={() => setShowAdd(false)} onConfirm={handleAdd}>
-        {renderForm(addForm, patchAdd, patchAddProducts, addErrors, false, '自动生成')}
+        {renderForm(addFormRef.current, patchAdd, patchAddProducts, addErrors, false, '自动生成')}
       </ModalWrap>
 
       {/* ══ Edit Modal ══ */}
       <ModalWrap show={!!editId} title={`编辑客户 — ${editCustomer?.name ?? ''}`}
         onClose={() => setEditId(null)} onConfirm={handleEdit}>
-        {renderForm(editForm, patchEdit, patchEditProducts, editErrors, true, editId ?? undefined)}
+        {renderForm(editFormRef.current, patchEdit, patchEditProducts, editErrors, true, editId ?? undefined)}
       </ModalWrap>
 
       {/* ══ Import Modal ══ */}

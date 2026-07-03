@@ -17,7 +17,7 @@ const NAV_ITEMS = [
     children: [
       { key: 'customers-list', label: '客户列表' },
       { key: 'orders-list', label: '订单列表' },
-      { key: 'orders-contracts', label: '合同管理' },
+      { key: 'orders-contracts', label: '数据报表' },
     ],
   },
   {
@@ -82,6 +82,21 @@ export default function Sidebar() {
         flexShrink: 0,
       }}
     >
+      <button
+        className="absolute z-20 w-6 h-6 rounded-full flex items-center justify-center shadow-custom transition-colors hover:bg-brand"
+        style={{
+          top: 24,
+          right: -12,
+          background: 'var(--sidebar)',
+          color: 'var(--sidebar-foreground)',
+          border: '1px solid var(--sidebar-border)',
+        }}
+        title={sidebarCollapsed ? '展开菜单' : '收起菜单'}
+        onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+      >
+        {sidebarCollapsed ? <ChevronRightIcon size={14} /> : <ChevronLeftIcon size={14} />}
+      </button>
+
       {/* Logo */}
       <div className="flex items-center gap-2 px-4 py-4" style={{ minHeight: 60, borderBottom: '1px solid var(--sidebar-border)' }}>
         <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: 'var(--brand)' }}>
@@ -93,13 +108,6 @@ export default function Sidebar() {
             <span style={{ color: 'var(--sidebar-foreground)', fontSize: 11 }}>专业上门产康服务</span>
           </div>
         )}
-        <button
-          className="ml-auto p-1 rounded hover:bg-white/10 transition-colors"
-          style={{ color: 'var(--sidebar-foreground)' }}
-          onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-        >
-          {sidebarCollapsed ? <ChevronRightIcon size={16} /> : <ChevronLeftIcon size={16} />}
-        </button>
       </div>
 
       {/* Nav */}

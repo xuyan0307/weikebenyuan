@@ -2,10 +2,11 @@ import { useState, useRef, useEffect } from 'react';
 import { toast } from 'sonner';
 import {
   PlusIcon, SearchIcon, PencilIcon, Trash2Icon, EyeIcon,
-  StarIcon, UploadIcon, XIcon, PlusCircleIcon, ChevronDownIcon,
+  UploadIcon, XIcon, PlusCircleIcon, ChevronDownIcon,
 } from 'lucide-react';
 import type { Therapist, CertWithExpiry, MultiCert } from '../data/mockData';
 import { useTherapists, useTherapistMutations } from '../api/hooks';
+import { useApp } from '../hooks/useApp';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -26,6 +27,7 @@ interface TherapistForm {
   status: '在职' | '离职' | '休假';
   rating: string;
   upgradeRate: string;
+  gradeKey: TherapistGradeKey;
   remark: string;
   healthCert: CertWithExpiry;
   firstAidCert: MultiCertFormValue;
@@ -33,14 +35,53 @@ interface TherapistForm {
   associationCert: MultiCertFormValue;
 }
 
+type TherapistGradeKey = 'observer' | 'A' | 'B' | 'S' | 'ace';
+
+interface TherapistGradeDef {
+  key: TherapistGradeKey;
+  label: string;
+  range: string;
+  incomeRule: string;
+  bonus: string;
+  position: string;
+  badgeCls: string;
+}
+
+const THERAPIST_GRADE_DEFS: TherapistGradeDef[] = [
+  { key: 'observer', label: '观察池', range: '低于 40%', incomeRule: '仅手工费，无提成', bonus: '无', position: '待提升/新人观察', badgeCls: 'bg-gray-100 text-gray-600' },
+  { key: 'A', label: 'A档产康师', range: '40%-49%', incomeRule: '手工费 + 6%提成', bonus: '无', position: '基础交付', badgeCls: 'bg-blue-50 text-blue-700' },
+  { key: 'B', label: 'B档产康师', range: '50%-59%', incomeRule: '手工费 + 8%提成', bonus: '300元/单', position: '稳定产出', badgeCls: 'bg-emerald-50 text-emerald-700' },
+  { key: 'S', label: 'S档产康师', range: '60%-74%', incomeRule: '手工费 + 12%提成', bonus: '400元/单', position: '核心产康师', badgeCls: 'bg-purple-50 text-purple-700' },
+  { key: 'ace', label: '王牌产康师', range: '75%及以上', incomeRule: '手工费 + 15%提成', bonus: '500元/单', position: '当月王牌/浮动荣誉档', badgeCls: 'bg-amber-50 text-amber-700' },
+];
+
+const GRADE_ORDER: TherapistGradeKey[] = ['observer', 'A', 'B', 'S', 'ace'];
+
+const GRADE_DEFAULT_RATE: Record<TherapistGradeKey, string> = {
+  observer: '30',
+  A: '40',
+  B: '50',
+  S: '60',
+  ace: '75',
+};
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function calcStarLevel(upgradeRate: number, rating: number): 1 | 2 | 3 | 4 | 5 {
-  if (upgradeRate >= 70 && rating >= 4.8) return 5;
-  if (upgradeRate >= 60 && rating >= 4.5) return 4;
-  if (upgradeRate >= 45 && rating >= 4.0) return 3;
-  if (upgradeRate >= 30) return 2;
+function calcLegacyStarLevel(upgradeRate: number): 1 | 2 | 3 | 4 | 5 {
+  const grade = calcTherapistGrade(upgradeRate).key;
+  if (grade === 'ace') return 5;
+  if (grade === 'S') return 4;
+  if (grade === 'B') return 3;
+  if (grade === 'A') return 2;
   return 1;
+}
+
+function calcTherapistGrade(upgradeRate: number): TherapistGradeDef {
+  if (upgradeRate >= 75) return THERAPIST_GRADE_DEFS[4];
+  if (upgradeRate >= 60) return THERAPIST_GRADE_DEFS[3];
+  if (upgradeRate >= 50) return THERAPIST_GRADE_DEFS[2];
+  if (upgradeRate >= 40) return THERAPIST_GRADE_DEFS[1];
+  return THERAPIST_GRADE_DEFS[0];
 }
 
 function upgradeRateColor(rate: number): string {
@@ -53,16 +94,10 @@ function truncate(str: string, max = 30): string {
   return str.length > max ? str.slice(0, max) + '…' : str;
 }
 
-function StarDisplay({ level }: { level: 1 | 2 | 3 | 4 | 5 }) {
+function GradeBadge({ grade }: { grade: TherapistGradeDef }) {
   return (
-    <span className="flex justify-center gap-px">
-      {Array.from({ length: 5 }).map((_, i) => (
-        <StarIcon
-          key={i}
-          size={13}
-          className={i < level ? 'text-yellow-400 fill-yellow-400' : 'text-gray-300 fill-gray-200'}
-        />
-      ))}
+    <span className={`inline-flex items-center justify-center px-2 py-0.5 rounded text-xs font-semibold whitespace-nowrap ${grade.badgeCls}`}>
+      {grade.label}
     </span>
   );
 }
@@ -196,18 +231,17 @@ function MultiSelectDropdown({
   );
 }
 
-// ─── StarFilter Dropdown ──────────────────────────────────────────────────────
+// ─── GradeFilter Dropdown ─────────────────────────────────────────────────────
 
-interface StarFilterDropdownProps {
-  selected: number[];
-  onChange: (vals: number[]) => void;
+interface GradeFilterDropdownProps {
+  selected: TherapistGradeKey[];
+  onChange: (vals: TherapistGradeKey[]) => void;
 }
 
-function StarFilterDropdown({ selected, onChange }: StarFilterDropdownProps) {
+function GradeFilterDropdown({ selected, onChange }: GradeFilterDropdownProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const ALL_STARS = [1, 2, 3, 4, 5];
-  const allSelected = selected.length === 0 || selected.length === ALL_STARS.length;
+  const allSelected = selected.length === 0 || selected.length === GRADE_ORDER.length;
 
   useEffect(() => {
     function handler(e: MouseEvent) {
@@ -220,10 +254,10 @@ function StarFilterDropdown({ selected, onChange }: StarFilterDropdownProps) {
   }, []);
 
   function toggleAll() {
-    onChange(allSelected ? [] : [...ALL_STARS]);
+    onChange(allSelected ? [] : [...GRADE_ORDER]);
   }
 
-  function toggleOne(v: number) {
+  function toggleOne(v: TherapistGradeKey) {
     if (selected.includes(v)) {
       onChange(selected.filter(s => s !== v));
     } else {
@@ -232,10 +266,10 @@ function StarFilterDropdown({ selected, onChange }: StarFilterDropdownProps) {
   }
 
   const displayLabel = allSelected
-    ? '星级'
+    ? '等级'
     : selected.length === 1
-      ? `${selected[0]} 星`
-      : `星级 (${selected.length})`;
+      ? (THERAPIST_GRADE_DEFS.find(g => g.key === selected[0])?.label ?? '等级')
+      : `等级 (${selected.length})`;
 
   return (
     <div className="relative" ref={ref}>
@@ -260,19 +294,17 @@ function StarFilterDropdown({ selected, onChange }: StarFilterDropdownProps) {
             />
             <span className="text-xs text-gray-500 font-medium">全部</span>
           </label>
-          {ALL_STARS.slice().reverse().map(n => (
-            <label key={n} className="flex items-center gap-2 px-3 py-1.5 cursor-pointer hover:bg-blue-50">
+          {THERAPIST_GRADE_DEFS.slice().reverse().map(grade => (
+            <label key={grade.key} className="flex items-center gap-2 px-3 py-1.5 cursor-pointer hover:bg-blue-50">
               <input
                 type="checkbox"
-                checked={selected.includes(n)}
-                onChange={() => toggleOne(n)}
+                checked={selected.includes(grade.key)}
+                onChange={() => toggleOne(grade.key)}
                 className="accent-blue-600 w-3.5 h-3.5"
               />
-              <span className="flex items-center gap-0.5">
-                {Array.from({ length: n }).map((_, i) => (
-                  <StarIcon key={i} size={12} className="text-yellow-400 fill-yellow-400" />
-                ))}
-                <span className="text-xs text-gray-600 ml-1">{n} 星</span>
+              <span className="flex items-center gap-1.5">
+                <GradeBadge grade={grade} />
+                <span className="text-xs text-gray-500">{grade.range}</span>
               </span>
             </label>
           ))}
@@ -401,7 +433,7 @@ function TherapistDetailModal({ therapist, onClose }: TherapistDetailModalProps)
     </div>
   );
 
-  const star = calcStarLevel(therapist.upgradeRate, therapist.rating);
+  const grade = calcTherapistGrade(therapist.upgradeRate);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.35)' }}>
@@ -451,14 +483,17 @@ function TherapistDetailModal({ therapist, onClose }: TherapistDetailModalProps)
                 value={<span className={upgradeRateColor(therapist.upgradeRate)}>{therapist.upgradeRate}%</span>}
               />
               <InfoRow
-                label="技师星级"
+                label="等级档位"
                 value={
-                  <span className="flex items-center gap-1">
-                    <StarDisplay level={star} />
-                    <span className="text-xs text-gray-500 ml-1">{star} 星</span>
+                  <span className="flex items-center gap-2">
+                    <GradeBadge grade={grade} />
+                    <span className="text-xs text-gray-500">{grade.range}</span>
                   </span>
                 }
               />
+              <InfoRow label="收入规则" value={grade.incomeRule} />
+              <InfoRow label="每单奖金" value={grade.bonus} />
+              <InfoRow label="等级定位" value={grade.position} />
             </div>
           </div>
 
@@ -491,12 +526,20 @@ interface EditModalProps {
   onSave: () => void;
   onDelete: () => void;
   isNew: boolean;
+  canEditGrade: boolean;
 }
 
-function EditModal({ form, onChange, onClose, onSave, onDelete, isNew }: EditModalProps) {
+function EditModal({ form, onChange, onClose, onSave, onDelete, isNew, canEditGrade }: EditModalProps) {
   function f(k: keyof TherapistForm, v: string | CertWithExpiry | MultiCertFormValue) {
     onChange({ ...form, [k]: v });
   }
+
+  function setGrade(key: TherapistGradeKey) {
+    if (!canEditGrade) return;
+    onChange({ ...form, gradeKey: key, upgradeRate: GRADE_DEFAULT_RATE[key] });
+  }
+
+  const selectedGrade = THERAPIST_GRADE_DEFS.find(g => g.key === form.gradeKey) ?? calcTherapistGrade(Number(form.upgradeRate) || 0);
 
   const inputCls = 'border border-gray-300 rounded px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400 w-full';
   const labelCls = 'block text-xs text-gray-500 mb-0.5';
@@ -571,13 +614,56 @@ function EditModal({ form, onChange, onClose, onSave, onDelete, isNew }: EditMod
           {/* ── 绩效信息 ── */}
           <p className="text-xs font-semibold text-blue-600 uppercase tracking-wider mt-2 mb-3">绩效信息</p>
           <div className="grid grid-cols-2 gap-x-4">
+            <div className={`${fieldCls} col-span-2`}>
+              <label className={labelCls}>等级档位</label>
+              {canEditGrade ? (
+                <select
+                  className={inputCls}
+                  value={selectedGrade.key}
+                  onChange={e => setGrade(e.target.value as TherapistGradeKey)}
+                >
+                  {THERAPIST_GRADE_DEFS.map(grade => (
+                    <option key={grade.key} value={grade.key}>
+                      {grade.label}（{grade.range}｜{grade.incomeRule}｜{grade.bonus}）
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <div className="flex items-center gap-2 min-h-[34px]">
+                  <GradeBadge grade={selectedGrade} />
+                  <span className="text-xs text-gray-500">{selectedGrade.range}，仅管理员可变更</span>
+                </div>
+              )}
+              <div className="text-xs text-gray-500 mt-1">
+                {selectedGrade.position}；{selectedGrade.incomeRule}；每单奖金：{selectedGrade.bonus}
+              </div>
+            </div>
             <div className={fieldCls}>
               <label className={labelCls}>服务评分 (0–5)</label>
               <input type="number" min="0" max="5" step="0.1" className={inputCls} value={form.rating} onChange={e => f('rating', e.target.value)} />
             </div>
             <div className={fieldCls}>
               <label className={labelCls}>升单率 (0–100 %)</label>
-              <input type="number" min="0" max="100" className={inputCls} value={form.upgradeRate} onChange={e => f('upgradeRate', e.target.value)} />
+              <input
+                type="number"
+                min="0"
+                max="100"
+                className={`${inputCls} ${!canEditGrade ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : ''}`}
+                value={form.upgradeRate}
+                disabled={!canEditGrade}
+                onChange={e => {
+                  const next = e.target.value;
+                  const nextNum = Number(next);
+                  onChange({
+                    ...form,
+                    upgradeRate: next,
+                    gradeKey: Number.isFinite(nextNum) ? calcTherapistGrade(nextNum).key : form.gradeKey,
+                  });
+                }}
+              />
+              {!canEditGrade && (
+                <p className="text-[11px] text-gray-400 mt-1">仅管理员和超级管理员可调整等级相关数据</p>
+              )}
             </div>
           </div>
 
@@ -663,7 +749,8 @@ const BLANK_FORM: TherapistForm = {
   characteristics: '',
   status: '在职',
   rating: '4.5',
-  upgradeRate: '50',
+  upgradeRate: '30',
+  gradeKey: 'observer',
   remark: '',
   healthCert: { state: '无证书' },
   firstAidCert: { state: '无', items: [] },
@@ -689,6 +776,7 @@ const TYPE_OPTIONS: MultiSelectOption[] = [
 ];
 
 export default function TherapistListPage() {
+  const { currentUser } = useApp();
   const therapistsQ = useTherapists({ page: 1, pageSize: 1000 });
   const therapists: Therapist[] = (therapistsQ.data?.data ?? []) as any;
   const mutations = useTherapistMutations();
@@ -697,13 +785,14 @@ export default function TherapistListPage() {
   // 多选筛选 — 空数组代表全选
   const [filterCities, setFilterCities] = useState<string[]>([]);
   const [filterTypes, setFilterTypes] = useState<string[]>([]);
-  const [filterStars, setFilterStars] = useState<number[]>([]);
+  const [filterGrades, setFilterGrades] = useState<TherapistGradeKey[]>([]);
 
   const [detailTarget, setDetailTarget] = useState<Therapist | null>(null);
   const [editOpen, setEditOpen] = useState(false);
   const [editIsNew, setEditIsNew] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [form, setForm] = useState<TherapistForm>(BLANK_FORM);
+  const canEditGrade = currentUser.role === 'admin' || currentUser.role === 'superadmin';
 
   // ── filtered list ──
   const filtered = therapists.filter(t => {
@@ -711,9 +800,9 @@ export default function TherapistListPage() {
     const matchSearch = !q || t.name.includes(q) || t.phone.includes(q) || t.area.includes(q);
     const matchCity = filterCities.length === 0 || filterCities.includes(t.city);
     const matchType = filterTypes.length === 0 || filterTypes.includes(t.therapistType);
-    const tStar = calcStarLevel(t.upgradeRate, t.rating);
-    const matchStar = filterStars.length === 0 || filterStars.includes(tStar);
-    return matchSearch && matchCity && matchType && matchStar;
+    const grade = calcTherapistGrade(t.upgradeRate);
+    const matchGrade = filterGrades.length === 0 || filterGrades.includes(grade.key);
+    return matchSearch && matchCity && matchType && matchGrade;
   });
 
   // ── open new ──
@@ -740,6 +829,7 @@ export default function TherapistListPage() {
       status: t.status,
       rating: String(t.rating),
       upgradeRate: String(t.upgradeRate),
+      gradeKey: calcTherapistGrade(t.upgradeRate).key,
       remark: t.remark ?? '',
       healthCert: { ...t.healthCert },
       firstAidCert: {
@@ -769,7 +859,8 @@ export default function TherapistListPage() {
     if (isNaN(ratingNum) || ratingNum < 0 || ratingNum > 5) { toast.error('评分须在 0~5 之间'); return; }
     if (isNaN(upgradeNum) || upgradeNum < 0 || upgradeNum > 100) { toast.error('升单率须在 0~100 之间'); return; }
 
-    const star = calcStarLevel(upgradeNum, ratingNum);
+    const normalizedUpgradeNum = upgradeNum;
+    const star = calcLegacyStarLevel(normalizedUpgradeNum);
 
     try {
       if (editIsNew) {
@@ -788,7 +879,7 @@ export default function TherapistListPage() {
           status: form.status,
           orders: 0,
           rating: ratingNum,
-          upgradeRate: upgradeNum,
+          upgradeRate: normalizedUpgradeNum,
           starLevel: star,
           healthCert: form.healthCert,
           firstAidCert: toMultiCert(form.firstAidCert),
@@ -813,7 +904,7 @@ export default function TherapistListPage() {
           transport: form.transport,
           status: form.status,
           rating: ratingNum,
-          upgradeRate: upgradeNum,
+          upgradeRate: normalizedUpgradeNum,
           starLevel: star,
           healthCert: form.healthCert,
           firstAidCert: toMultiCert(form.firstAidCert),
@@ -893,8 +984,8 @@ export default function TherapistListPage() {
           onChange={setFilterTypes}
         />
 
-        {/* 星级多选 */}
-        <StarFilterDropdown selected={filterStars} onChange={setFilterStars} />
+        {/* 等级多选 */}
+        <GradeFilterDropdown selected={filterGrades} onChange={setFilterGrades} />
 
         <div className="flex-1" />
         <button
@@ -926,7 +1017,7 @@ export default function TherapistListPage() {
           <thead>
             <tr className="bg-gray-50 border-b border-gray-200">
               {['序号', '技师类型', '姓名', '出生年份', '可接单范围', '详细住址', '电话',
-                '服务方式', '技师特点', '升单率', '服务评分', '星级', '操作',
+                '服务方式', '技师特点', '综合升单率', '服务评分', '等级', '操作',
               ].map(h => (
                 <th key={h} className="px-2 py-2.5 text-xs font-semibold text-gray-600 text-center whitespace-nowrap">
                   {h}
@@ -936,7 +1027,7 @@ export default function TherapistListPage() {
           </thead>
           <tbody>
             {filtered.map((t, idx) => {
-              const star = calcStarLevel(t.upgradeRate, t.rating);
+              const grade = calcTherapistGrade(t.upgradeRate);
               return (
                 <tr key={t.id} className="border-b border-gray-100 hover:bg-blue-50/30 transition-colors">
                   <td className="px-2 py-2 text-center text-xs text-gray-400">{idx + 1}</td>
@@ -972,8 +1063,8 @@ export default function TherapistListPage() {
                   </td>
                   <td className={`px-2 py-2 text-center text-xs ${upgradeRateColor(t.upgradeRate)}`}>{t.upgradeRate}%</td>
                   <td className="px-2 py-2 text-center text-xs font-medium text-gray-700">{t.rating.toFixed(1)}</td>
-                  <td className="px-2 py-2">
-                    <StarDisplay level={star} />
+                  <td className="px-2 py-2 text-center">
+                    <GradeBadge grade={grade} />
                   </td>
                   {/* 操作列：仅详情 + 编辑，无删除 */}
                   <td className="px-2 py-2">
@@ -1016,6 +1107,7 @@ export default function TherapistListPage() {
           onSave={handleSave}
           onDelete={handleDeleteFromModal}
           isNew={editIsNew}
+          canEditGrade={canEditGrade}
         />
       )}
     </div>

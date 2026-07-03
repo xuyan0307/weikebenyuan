@@ -21,7 +21,7 @@ const PAGE_TITLES: Record<string, string> = {
   'customers-list': '客户列表',
   'customers-pool': '客户公海',
   'orders-list': '订单列表',
-  'orders-contracts': '合同管理',
+  'orders-contracts': '数据报表',
   'appointments-calendar': '预约日历',
   'appointments-list': '预约列表',
   'services-records': '服务记录',

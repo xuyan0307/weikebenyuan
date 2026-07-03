@@ -32,7 +32,7 @@ export type FollowStatus = '待跟进' | '跟进中' | '已预约' | '已成交'
 // 产后信息画像
 export interface CustomerProfile {
   age: number;           // 年龄
-  deliveryDate: string;  // 生产时间 YYYY-MM
+  deliveryDate: string;  // 生产时间 YYYY-MM-DD
   deliveryType: '顺产' | '剖腹产';
   babyCount: number;     // 第几胎
   feedingType: '母乳' | '奶粉' | '混合喂养';
