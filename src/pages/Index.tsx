@@ -120,7 +120,7 @@ function AppShell() {
     >
       {/* Sidebar */}
       <div
-        className="flex-shrink-0 h-full overflow-y-auto transition-all duration-200"
+        className="flex-shrink-0 h-full overflow-hidden transition-all duration-200"
         style={{ width: sidebarW }}
       >
         <Sidebar />

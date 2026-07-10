@@ -4,8 +4,7 @@ import { useLogin } from '../api/hooks';
 import { setToken } from '../api/client';
 import type { UserInfo } from '../api/endpoints';
 
-const LOGO_URL =
-  'https://bosyun-pri-prod.obs.cn-east-3.myhuaweicloud.com:443/aigc_channel/a8g1m201000djc7pi19t90w4pmqtmfvm/agent_fs/inputs/ab2c4be2_c73f_46ea_b8a1_35b5e3ac?AWSAccessKeyId=BTVJCLZNPXKRECB9GLOR&Expires=1782608858&Signature=tryfL1klXuNZ%2FF75cFKPUQFWLcM%3D';
+const LOGO_URL = '/logo.jpg';
 
 function WaterDrop({ size = 80, opacity = 0.12, className = '' }: { size?: number; opacity?: number; className?: string }) {
   return (
@@ -33,13 +32,18 @@ export default function Login() {
   const [error, setError] = useState('');
   const [accountFocus, setAccountFocus] = useState(false);
   const [pwdFocus, setPwdFocus] = useState(false);
+  const demoMode = import.meta.env.VITE_DEMO_MODE === 'true';
 
   async function handleLogin() {
-    if (!account.trim()) { setError('请输入账号'); return; }
-    if (!password.trim()) { setError('请输入密码'); return; }
+    await submitLogin(account, password);
+  }
+
+  async function submitLogin(nextAccount: string, nextPassword: string) {
+    if (!nextAccount.trim()) { setError('请输入账号'); return; }
+    if (!nextPassword.trim()) { setError('请输入密码'); return; }
     setError('');
     try {
-      const res = await loginMut.mutateAsync({ username: account.trim(), password });
+      const res = await loginMut.mutateAsync({ username: nextAccount.trim(), password: nextPassword });
       setToken(res.token);
       const user: UserInfo = res.user;
       void user;
@@ -209,8 +213,29 @@ export default function Login() {
               )}
             </button>
 
+            {demoMode && (
+              <button
+                type="button"
+                className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl font-medium text-sm transition-all duration-200"
+                style={{
+                  background: 'rgba(30,136,229,0.10)',
+                  color: '#1565C0',
+                  border: '1px solid rgba(30,136,229,0.18)',
+                }}
+                onClick={() => {
+                  setAccount('admin');
+                  setPassword('admin123');
+                  void submitLogin('admin', 'admin123');
+                }}
+              >
+                演示登录
+              </button>
+            )}
+
             <div className="flex items-center justify-between mt-1">
-              <span className="text-xs" style={{ color: '#9CC4E0' }}>忘记密码？请联系管理员</span>
+              <span className="text-xs" style={{ color: '#9CC4E0' }}>
+                {demoMode ? '演示账号：admin / admin123' : '忘记密码？请联系管理员'}
+              </span>
               <span className="text-xs" style={{ color: '#9CC4E0' }}>v2.0.0</span>
             </div>
           </div>

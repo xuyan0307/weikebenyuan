@@ -5,14 +5,15 @@ import {
   LockIcon, UnlockIcon, EyeIcon, EyeOffIcon, SaveIcon, UserIcon,
   ChevronDownIcon, AlertCircleIcon, BadgeCheckIcon
 } from 'lucide-react';
-import type { Role } from '../data/mockData';
 import { useApp } from '../hooks/useApp';
+import { useSystemUserMutations, useSystemUsers } from '../api/hooks';
+import type { SystemUserDto } from '../api/endpoints';
 
 // ──────────────────────────────────────────────────────────────────────────────
 // 类型定义
 // ──────────────────────────────────────────────────────────────────────────────
 
-type SystemRole = 'superadmin' | 'admin' | 'sales';
+type SystemRole = 'superadmin' | 'admin' | 'service';
 
 interface SystemUser {
   id: string;
@@ -109,26 +110,26 @@ const ALL_PERMS: PermissionKey[] = PERMISSION_GROUPS.flatMap(g => g.items.map(i 
 const ROLE_DEFAULT_PERMS: Record<SystemRole, PermissionKey[]> = {
   superadmin: [...ALL_PERMS],
   admin: [...ALL_PERMS],
-  sales: ['dashboard', 'customers-list', 'customers-pool', 'orders-list', 'orders-contracts',
+  service: ['dashboard', 'customers-list', 'customers-pool', 'orders-list', 'orders-contracts',
     'therapists-list', 'appointments-calendar', 'appointments-list', 'services-records', 'services-change'],
 };
 
 const ROLE_LABELS: Record<SystemRole, string> = {
   superadmin: '超级管理员',
   admin: '管理员',
-  sales: '销售顾问',
+  service: '销售顾问',
 };
 
 const ROLE_COLORS: Record<SystemRole, string> = {
   superadmin: 'bg-rose-100 text-rose-700 border-rose-200',
   admin: 'bg-brand/10 text-brand border-brand/20',
-  sales: 'bg-green-100 text-green-700 border-green-200',
+  service: 'bg-green-100 text-green-700 border-green-200',
 };
 
 const ROLE_ICONS: Record<SystemRole, React.ReactNode> = {
   superadmin: <ShieldCheckIcon size={13} />,
   admin: <ShieldIcon size={13} />,
-  sales: <UserIcon size={13} />,
+  service: <UserIcon size={13} />,
 };
 
 const EVENT_LABELS: Record<string, string> = {
@@ -141,8 +142,6 @@ const EVENT_LABELS: Record<string, string> = {
   systemAlert: '系统告警提醒',
 };
 
-let _uid = 100;
-function uid() { return String(++_uid); }
 
 // ──────────────────────────────────────────────────────────────────────────────
 // 初始数据
@@ -163,15 +162,15 @@ const INIT_USERS: SystemUser[] = [
   },
   {
     id: 'u3', name: '王美玲', username: 'sales_wang', password: '123456',
-    role: 'sales', phone: '18800003333', wechat: 'wang_meiling',
+    role: 'service', phone: '18800003333', wechat: 'wang_meiling',
     status: 'active', createdAt: '2024-03-10', avatar: '王',
-    permissions: [...ROLE_DEFAULT_PERMS.sales],
+    permissions: [...ROLE_DEFAULT_PERMS.service],
   },
   {
     id: 'u4', name: '林佳怡', username: 'sales_lin', password: '123456',
-    role: 'sales', phone: '18800004444', wechat: 'lin_jiayi',
+    role: 'service', phone: '18800004444', wechat: 'lin_jiayi',
     status: 'disabled', createdAt: '2024-04-20', avatar: '林',
-    permissions: [...ROLE_DEFAULT_PERMS.sales],
+    permissions: [...ROLE_DEFAULT_PERMS.service],
   },
   {
     id: 'u5', name: '黄晓燕', username: 'admin_huang', password: '123456',
@@ -187,11 +186,11 @@ const INIT_NOTIFY: NotifyConfig[] = INIT_USERS.map(u => ({
   phone: u.phone,
   wechat: u.wechat,
   bindPhone: true,
-  bindWechat: u.role !== 'sales',
+  bindWechat: u.role !== 'service',
   events: {
     newOrder: true,
     newAppointment: true,
-    cancelAppointment: u.role !== 'sales',
+    cancelAppointment: u.role !== 'service',
     salarySettle: u.role === 'superadmin' || u.role === 'admin',
     customerFollow: true,
     contractSign: true,
@@ -205,10 +204,46 @@ const INIT_NOTIFY: NotifyConfig[] = INIT_USERS.map(u => ({
 
 const emptyForm = (): Omit<SystemUser, 'id' | 'createdAt' | 'avatar'> => ({
   name: '', username: '', password: '',
-  role: 'sales', phone: '', wechat: '',
+  role: 'service', phone: '', wechat: '',
   status: 'active',
-  permissions: [...ROLE_DEFAULT_PERMS.sales],
+  permissions: [...ROLE_DEFAULT_PERMS.service],
 });
+
+function normalizeSystemRole(role: unknown): SystemRole {
+  return role === 'superadmin' || role === 'admin' || role === 'service' ? role : 'service';
+}
+
+function dtoToSystemUser(u: SystemUserDto): SystemUser {
+  const role = normalizeSystemRole(u.role);
+  return {
+    id: u.id,
+    name: u.name,
+    username: u.username,
+    password: '',
+    role,
+    phone: u.phone || '',
+    wechat: u.wechat || '',
+    status: u.status === 'active' ? 'active' : 'disabled',
+    createdAt: u.createdAt || '',
+    avatar: u.avatar || u.name?.slice(0, 1) || 'U',
+    permissions: Array.isArray(u.permissions) ? (u.permissions as PermissionKey[]) : [...ROLE_DEFAULT_PERMS[role]],
+  };
+}
+
+function formToPayload(form: Omit<SystemUser, 'id' | 'createdAt' | 'avatar'>) {
+  const payload: Record<string, unknown> = {
+    name: form.name.trim(),
+    username: form.username.trim(),
+    role: form.role,
+    phone: form.phone.trim(),
+    wechat: form.wechat.trim(),
+    status: form.status,
+    permissions: form.permissions,
+  };
+  const password = form.password.trim();
+  if (password) payload.password = password;
+  return payload;
+}
 
 // ──────────────────────────────────────────────────────────────────────────────
 // 小组件
@@ -240,9 +275,11 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean
 export default function SystemSettingsPage() {
   const { currentUser } = useApp();
   const isSuperAdmin = (currentUser.role as string) === 'superadmin';
+  const { data: usersResp } = useSystemUsers();
+  const userMutations = useSystemUserMutations();
+  const users = (usersResp?.data || []).map(dtoToSystemUser);
 
   const [activeTab, setActiveTab] = useState<'accounts' | 'notify'>('accounts');
-  const [users, setUsers] = useState<SystemUser[]>(INIT_USERS);
   const [notifyConfigs, setNotifyConfigs] = useState<NotifyConfig[]>(INIT_NOTIFY);
 
   // 弹窗状态
@@ -270,7 +307,7 @@ export default function SystemSettingsPage() {
 
   function openEdit(u: SystemUser) {
     setEditingId(u.id);
-    setForm({ name: u.name, username: u.username, password: u.password, role: u.role, phone: u.phone, wechat: u.wechat, status: u.status, permissions: [...u.permissions] });
+    setForm({ name: u.name, username: u.username, password: '', role: u.role, phone: u.phone, wechat: u.wechat, status: u.status, permissions: [...u.permissions] });
     setShowPassword(false);
     setShowModal(true);
   }
@@ -279,43 +316,51 @@ export default function SystemSettingsPage() {
     setForm(prev => ({ ...prev, role: r, permissions: [...ROLE_DEFAULT_PERMS[r]] }));
   }
 
-  function saveForm() {
+  async function saveForm() {
     if (!form.name.trim() || !form.username.trim()) return;
-    if (editingId) {
-      setUsers(prev => prev.map(u => u.id === editingId
-        ? { ...u, ...form }
-        : u
-      ));
-    } else {
-      const newUser: SystemUser = {
-        id: uid(),
-        ...form,
-        avatar: form.name[0] ?? '?',
-        createdAt: new Date().toISOString().slice(0, 10),
-      };
-      setUsers(prev => [...prev, newUser]);
-      setNotifyConfigs(prev => [...prev, {
-        userId: newUser.id,
-        enablePush: true,
-        phone: newUser.phone,
-        wechat: newUser.wechat,
-        bindPhone: false, bindWechat: false,
-        events: { newOrder: true, newAppointment: true, cancelAppointment: false, salarySettle: false, customerFollow: true, contractSign: false, systemAlert: false },
-      }]);
+    try {
+      if (editingId) {
+        await userMutations.update({ id: editingId, body: formToPayload(form) });
+      } else {
+        const payload = formToPayload(form);
+        if (!payload.password) payload.password = '123456';
+        const res = await userMutations.create(payload);
+        setNotifyConfigs(prev => [...prev, {
+          userId: res.id,
+          enablePush: true,
+          phone: form.phone,
+          wechat: form.wechat,
+          bindPhone: false, bindWechat: false,
+          events: { newOrder: true, newAppointment: true, cancelAppointment: false, salarySettle: false, customerFollow: true, contractSign: false, systemAlert: false },
+        }]);
+      }
+      setShowModal(false);
+    } catch (err: any) {
+      alert(err?.message || '保存账号失败');
     }
-    setShowModal(false);
   }
 
-  function deleteUser(id: string) {
-    setUsers(prev => prev.filter(u => u.id !== id));
-    setNotifyConfigs(prev => prev.filter(c => c.userId !== id));
-    setDeleteConfirmId(null);
+  async function deleteUser(id: string) {
+    try {
+      await userMutations.remove(id);
+      setNotifyConfigs(prev => prev.filter(c => c.userId !== id));
+      setDeleteConfirmId(null);
+    } catch (err: any) {
+      alert(err?.message || '删除账号失败');
+    }
   }
 
-  function toggleStatus(id: string) {
-    setUsers(prev => prev.map(u =>
-      u.id === id ? { ...u, status: u.status === 'active' ? 'disabled' : 'active' } : u
-    ));
+  async function toggleStatus(id: string) {
+    const target = users.find(u => u.id === id);
+    if (!target) return;
+    try {
+      await userMutations.update({
+        id,
+        body: formToPayload({ ...target, password: '', status: target.status === 'active' ? 'disabled' : 'active' }),
+      });
+    } catch (err: any) {
+      alert(err?.message || '更新账号状态失败');
+    }
   }
 
   // ── 权限编辑 ──────────────────────────────────────────────────────────────
@@ -330,10 +375,16 @@ export default function SystemSettingsPage() {
     setPermDraft(prev => prev.includes(k) ? prev.filter(p => p !== k) : [...prev, k]);
   }
 
-  function savePerms() {
+  async function savePerms() {
     if (!permUserId) return;
-    setUsers(prev => prev.map(u => u.id === permUserId ? { ...u, permissions: [...permDraft] } : u));
-    setShowPermModal(false);
+    const target = users.find(u => u.id === permUserId);
+    if (!target) return;
+    try {
+      await userMutations.update({ id: permUserId, body: formToPayload({ ...target, password: '', permissions: [...permDraft] }) });
+      setShowPermModal(false);
+    } catch (err: any) {
+      alert(err?.message || '保存权限失败');
+    }
   }
 
   // ── 通知设置 ──────────────────────────────────────────────────────────────
@@ -404,7 +455,7 @@ export default function SystemSettingsPage() {
             {[
               { role: 'superadmin' as SystemRole, desc: '拥有全部权限，可新增/编辑/删除任意账号（包括管理员），不可被删除' },
               { role: 'admin' as SystemRole, desc: '拥有全部页面权限，可管理销售顾问账号，不可删除其他管理员' },
-              { role: 'sales' as SystemRole, desc: '默认拥有客户管理和服务管理权限，可按需定制' },
+              { role: 'service' as SystemRole, desc: '默认拥有客户管理和服务管理权限，可按需定制' },
             ].map(({ role, desc }) => (
               <div key={role} className="flex-1 min-w-[200px] bg-card rounded-lg px-3 py-2.5 border border-border flex flex-col gap-1.5">
                 <RoleBadge role={role} />
@@ -431,7 +482,7 @@ export default function SystemSettingsPage() {
               <option value="__all__">全部角色</option>
               <option value="superadmin">超级管理员</option>
               <option value="admin">管理员</option>
-              <option value="sales">销售顾问</option>
+              <option value="service">销售顾问</option>
             </select>
             <ChevronDownIcon size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
           </div>
@@ -490,7 +541,7 @@ export default function SystemSettingsPage() {
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1">
                       {/* 编辑 */}
-                      {(isSuperAdmin || (currentUser.role === 'admin' && u.role === 'sales')) && (
+                      {(isSuperAdmin || (currentUser.role === 'admin' && u.role === 'service')) && (
                         <button
                           onClick={() => openEdit(u)}
                           className="p-1.5 rounded hover:bg-brand/10 text-brand transition-colors"
@@ -500,7 +551,7 @@ export default function SystemSettingsPage() {
                         </button>
                       )}
                       {/* 权限 */}
-                      {(isSuperAdmin || (currentUser.role === 'admin' && u.role === 'sales')) && (
+                      {(isSuperAdmin || (currentUser.role === 'admin' && u.role === 'service')) && (
                         <button
                           onClick={() => openPermEdit(u)}
                           className="p-1.5 rounded hover:bg-purple-500/10 text-purple-500 transition-colors"
@@ -718,7 +769,7 @@ export default function SystemSettingsPage() {
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-semibold text-muted-foreground">角色</label>
               <div className="flex gap-2">
-                {(isSuperAdmin ? ['superadmin', 'admin', 'sales'] : ['sales']).map(r => (
+                {(isSuperAdmin ? ['superadmin', 'admin', 'service'] : ['service']).map(r => (
                   <button
                     key={r}
                     onClick={() => handleFormRoleChange(r as SystemRole)}

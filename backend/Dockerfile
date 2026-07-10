@@ -2,6 +2,8 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
+RUN npm config set registry https://registry.npmmirror.com/
+
 COPY package*.json ./
 RUN npm ci --include=dev
 

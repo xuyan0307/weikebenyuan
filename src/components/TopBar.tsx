@@ -247,7 +247,7 @@ function ProfileModal({
 }
 
 export default function TopBar() {
-  const { activePage, notifications, currentUser, setCurrentUser, setActivePage } = useApp();
+  const { activePage, notifications, currentUser, setCurrentUser, setActivePage, logout } = useApp();
   const title = PAGE_TITLES[activePage] ?? '产康管理系统';
   const crumbs = BREADCRUMBS[activePage] ?? [title];
   const today = new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' });
@@ -255,6 +255,7 @@ export default function TopBar() {
   const [showDropdown, setShowDropdown] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [showRoleSwitch, setShowRoleSwitch] = useState(false);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // 点击外部关闭
@@ -456,7 +457,10 @@ export default function TopBar() {
             <button
               className="w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors hover:bg-muted"
               style={{ color: 'var(--danger)' }}
-              onClick={() => { setShowDropdown(false); }}
+              onClick={() => {
+                setShowDropdown(false);
+                setShowLogoutConfirm(true);
+              }}
             >
               <LogOutIcon size={15} />
               <span>退出登录</span>
@@ -471,6 +475,51 @@ export default function TopBar() {
         onClose={() => setShowProfile(false)}
         currentUser={currentUser}
       />
+
+      {showLogoutConfirm && (
+        <div>
+          <div
+            className="fixed inset-0 z-50"
+            style={{ background: 'rgba(0,0,0,0.35)' }}
+            onClick={() => setShowLogoutConfirm(false)}
+          />
+          <div
+            className="fixed z-50 rounded-xl shadow-custom p-6"
+            style={{
+              top: '50%',
+              left: '50%',
+              transform: 'translate(-50%, -50%)',
+              width: 360,
+              background: 'var(--card)',
+              border: '1px solid var(--border)',
+            }}
+          >
+            <div className="text-base font-bold text-foreground">确认退出登录？</div>
+            <div className="text-sm mt-2" style={{ color: 'var(--muted-foreground)' }}>
+              退出后需要重新登录才能继续使用系统。
+            </div>
+            <div className="flex justify-end gap-2 mt-6">
+              <button
+                className="px-4 py-2 rounded-lg text-sm font-medium transition-colors hover:bg-muted"
+                style={{ border: '1px solid var(--border)', color: 'var(--foreground)' }}
+                onClick={() => setShowLogoutConfirm(false)}
+              >
+                取消
+              </button>
+              <button
+                className="px-4 py-2 rounded-lg text-sm font-medium text-white transition-opacity hover:opacity-90"
+                style={{ background: 'var(--danger)' }}
+                onClick={() => {
+                  setShowLogoutConfirm(false);
+                  logout();
+                }}
+              >
+                确认退出
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </header>
   );
 }

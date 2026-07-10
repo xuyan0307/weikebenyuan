@@ -1,4 +1,5 @@
 const TOKEN_KEY = 'ck_token';
+const DEMO_MODE = import.meta.env.VITE_DEMO_MODE === 'true';
 
 export const BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 
@@ -20,6 +21,11 @@ export interface ApiError {
 }
 
 async function request<T>(method: string, path: string, body?: any, params?: Record<string, any>): Promise<T> {
+  if (DEMO_MODE) {
+    const { handleDemoRequest } = await import('./demo');
+    return handleDemoRequest<T>(method as any, path, body, params);
+  }
+
   const token = getToken();
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -63,6 +69,11 @@ async function request<T>(method: string, path: string, body?: any, params?: Rec
 }
 
 async function download(path: string, params?: Record<string, any>): Promise<Blob> {
+  if (DEMO_MODE) {
+    const { handleDemoDownload } = await import('./demo');
+    return handleDemoDownload();
+  }
+
   const token = getToken();
   const headers: Record<string, string> = {};
   if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -83,6 +94,11 @@ async function download(path: string, params?: Record<string, any>): Promise<Blo
 }
 
 async function upload<T>(path: string, formData: FormData): Promise<T> {
+  if (DEMO_MODE) {
+    const { handleDemoUpload } = await import('./demo');
+    return handleDemoUpload<T>(path, formData);
+  }
+
   const token = getToken();
   const headers: Record<string, string> = {};
   if (token) headers['Authorization'] = `Bearer ${token}`;

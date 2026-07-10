@@ -1,5 +1,14 @@
 import OSS from 'ali-oss';
 
+export function hasOssConfig(): boolean {
+  return Boolean(
+    process.env.OSS_REGION &&
+    process.env.OSS_BUCKET &&
+    process.env.OSS_ACCESS_KEY_ID &&
+    process.env.OSS_ACCESS_KEY_SECRET
+  );
+}
+
 function requireEnv(name: string): string {
   const value = process.env[name];
   if (!value) {

@@ -35,6 +35,8 @@ auto-imports.d.ts
 # Deployment files
 deploy.log
 *.backup
+certs/
+.deploy-certs-check*/
 
 # Docker volumes
 docker-volumes

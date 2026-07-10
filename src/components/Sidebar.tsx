@@ -83,18 +83,18 @@ export default function Sidebar() {
       }}
     >
       <button
-        className="absolute z-20 w-6 h-6 rounded-full flex items-center justify-center shadow-custom transition-colors hover:bg-brand"
+        className="absolute z-20 w-10 h-10 rounded-lg flex items-center justify-center transition-colors hover:bg-brand"
         style={{
-          top: 24,
-          right: -12,
-          background: 'var(--sidebar)',
+          top: 10,
+          right: 10,
+          background: 'rgba(255,255,255,0.08)',
           color: 'var(--sidebar-foreground)',
-          border: '1px solid var(--sidebar-border)',
+          border: '1px solid rgba(255,255,255,0.12)',
         }}
         title={sidebarCollapsed ? '展开菜单' : '收起菜单'}
         onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
       >
-        {sidebarCollapsed ? <ChevronRightIcon size={14} /> : <ChevronLeftIcon size={14} />}
+        {sidebarCollapsed ? <ChevronRightIcon size={20} /> : <ChevronLeftIcon size={20} />}
       </button>
 
       {/* Logo */}
@@ -111,7 +111,7 @@ export default function Sidebar() {
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 overflow-y-auto py-3 px-2" style={{ overflowX: 'hidden' }}>
+      <nav className="sidebar-no-scrollbar flex-1 overflow-y-auto py-3 px-2" style={{ overflowX: 'hidden' }}>
         {visibleNavItems.map(item => {
           const Icon = item.icon;
           const isExpanded = expandedKeys.includes(item.key);
