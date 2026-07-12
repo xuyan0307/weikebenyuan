@@ -145,8 +145,8 @@ export function useOperationLogs(params: Record<string, any>) {
 }
 
 // ====== Users ======
-export function useSystemUsers() {
-  return useQuery({ queryKey: qk.users(), queryFn: () => usersApi.list() });
+export function useSystemUsers(enabled = true) {
+  return useQuery({ queryKey: qk.users(), queryFn: () => usersApi.list(), enabled });
 }
 export function useSystemUserMutations() {
   const qc = useQueryClient();

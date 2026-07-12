@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import type { Customer, CustomerTag, FollowStatus, CustomerProfile, Order } from '../data/mockData';
 import { useApp } from '../hooks/useApp';
-import { useCustomers, useCustomerMutations, useOrders } from '../api/hooks';
+import { useCustomers, useCustomerMutations, useOrders, useSystemUsers } from '../api/hooks';
 import { toast } from 'sonner';
 
 // ─────────────────────────── Tag system ───────────────────────────
@@ -68,6 +68,8 @@ interface FollowRecord {
   feedback: string;   // post-follow feedback entered by advisor
   status: NewFollowStatus;
   operator: string;
+  followerId?: string;
+  followerName?: string;
   createdAt: string;
 }
 
@@ -85,8 +87,21 @@ const NEW_STATUS_BADGE: Record<NewFollowStatus, string> = {
   '延迟':    'badge-danger',
 };
 
+function isNewFollowStatus(value: unknown): value is NewFollowStatus {
+  return value === '跟进中' || value === '待跟进' || value === '已完成' || value === '延迟';
+}
+
+function toStoredFollowStatus(status: NewFollowStatus): FollowStatus {
+  if (status === '已完成') return '已预约';
+  if (status === '延迟') return '跟进中';
+  return status;
+}
+
 /** Compute the visual follow status from customer data */
-function computeDisplayStatus(c: Customer, storedStatus: FollowStatus): NewFollowStatus {
+function computeDisplayStatus(c: Customer, storedStatus: string): NewFollowStatus {
+  const persistedStatus = getPersistedProfile(c).followDisplayStatus;
+  if (isNewFollowStatus(persistedStatus)) return persistedStatus;
+  if (isNewFollowStatus(storedStatus)) return storedStatus;
   if (!c.followDate) {
     if (storedStatus === '跟进中') return '跟进中';
     return '待跟进';
@@ -107,7 +122,7 @@ function computeDisplayStatus(c: Customer, storedStatus: FollowStatus): NewFollo
 }
 
 // ─────────────────────────── Old status (kept for stored value) ───────────────────────────
-const ALL_STATUSES: FollowStatus[] = ['待跟进', '跟进中', '已预约', '已成交', '已流失'];
+const ALL_STATUSES: NewFollowStatus[] = ['跟进中', '待跟进', '已完成', '延迟'];
 const FILTER_STATUSES = ['跟进中', '待跟进', '已完成', '延迟'];
 
 // ─────────────────────────── Options ───────────────────────────
@@ -177,6 +192,13 @@ function todayStr(): string {
 
 function nowIso(): string { return new Date().toISOString().slice(0, 19).replace('T', ' '); }
 
+function recordTimeValue(value: unknown): number {
+  const text = textOf(value).trim();
+  if (!/\d{1,2}:\d{2}/.test(text)) return 0;
+  const parsed = Date.parse(text.replace(' ', 'T'));
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
 function normalizeDateInput(value: unknown): string {
   const text = textOf(value).trim();
   if (/^\d{4}-\d{2}$/.test(text)) return `${text}-01`;
@@ -185,6 +207,7 @@ function normalizeDateInput(value: unknown): string {
 
 type PersistedCustomerProfile = CustomerProfile & {
   followTask?: string;
+  followDisplayStatus?: NewFollowStatus;
   followRecords?: FollowRecord[];
 };
 
@@ -205,7 +228,9 @@ function getFollowTask(c: Customer): string {
 
 function getFollowRecords(c: Customer): FollowRecord[] {
   const records = getPersistedProfile(c).followRecords;
-  return Array.isArray(records) ? records : [];
+  return Array.isArray(records)
+    ? [...records].sort((a, b) => recordTimeValue(b.createdAt) - recordTimeValue(a.createdAt))
+    : [];
 }
 
 // ─────────────────────────── TaskTooltip ───────────────────────────
@@ -296,22 +321,24 @@ interface CustomerForm {
   phone: string; area: string; intendedProducts: string[]; deliveryDate: string;
   babyCount: string; deliveryType: '顺产' | '剖腹产'; feedingType: '母乳' | '奶粉' | '混合喂养';
   birthYear: string; situation: string; tag: CustomerTag; advisor: string; remark: string;
-  followStatus: FollowStatus; followDate: string; followContent: string;
+  followStatus: NewFollowStatus; followDate: string; followContent: string;
+  followerId: string; followerName: string;
   followTask: string; // NEW: follow task/todo item
 }
 
-function blankForm(advisor: string): CustomerForm {
+function blankForm(advisor: string, followerId = '', followerName = advisor): CustomerForm {
   return {
     acquiredAt: todayStr(), source: '小红书', name: '', wechat: '', phone: '',
     area: '', intendedProducts: [], deliveryDate: '', babyCount: '1',
     deliveryType: '顺产', feedingType: '母乳', birthYear: '', situation: '',
     tag: 'D1', advisor, remark: '',
-    followStatus: '待跟进', followDate: '', followContent: '', followTask: '',
+    followStatus: '待跟进', followDate: '', followContent: '', followerId, followerName, followTask: '',
   };
 }
 
-function customerToForm(c: Customer): CustomerForm {
+function customerToForm(c: Customer, followerId = '', followerName = ''): CustomerForm {
   const profile = getPersistedProfile(c);
+  const latestOpenRecord = getFollowRecords(c).find(r => r.status !== '已完成');
   const birthYear = profile.age > 0
     ? String(new Date().getFullYear() - profile.age)
     : '';
@@ -323,8 +350,12 @@ function customerToForm(c: Customer): CustomerForm {
     deliveryType: profile.deliveryType || '顺产', feedingType: profile.feedingType || '母乳',
     birthYear, situation: textOf(c.situation), tag: (textOf(c.tag) || 'D1') as CustomerTag,
     advisor: textOf(c.advisor) || defaultAdvisor(''), remark: textOf(c.remark),
-    followStatus: c.followStatus, followDate: textOf(c.followDate), followContent: '',
-    followTask: getFollowTask(c),
+    followStatus: latestOpenRecord?.status ?? computeDisplayStatus(c, c.followStatus),
+    followDate: latestOpenRecord?.date ?? textOf(c.followDate),
+    followContent: latestOpenRecord?.feedback ?? '',
+    followerId: latestOpenRecord?.followerId || followerId || '',
+    followerName: latestOpenRecord?.followerName || followerName || textOf(c.advisor) || defaultAdvisor(''),
+    followTask: latestOpenRecord?.content ?? getFollowTask(c),
   };
 }
 
@@ -601,6 +632,14 @@ const STICKY_TD_STYLE = (i: 0 | 1 | 2 | 3, bg: string): React.CSSProperties => (
 // ─────────────────────────── Main component ───────────────────────────
 export default function CustomersListPage() {
   const { currentUser } = useApp();
+  const canChooseFollower = currentUser.role === 'superadmin' || currentUser.role === 'admin';
+  const usersQuery = useSystemUsers(canChooseFollower);
+  const followerOptions = canChooseFollower
+    ? (usersQuery.data?.data ?? [])
+      .filter(u => u.status === 'active' && (u.role === 'superadmin' || u.role === 'admin' || u.role === 'service'))
+      .map(u => ({ id: u.id, name: u.name }))
+    : [{ id: currentUser.id, name: currentUser.name }];
+  const defaultFollower = followerOptions.find(u => u.id === currentUser.id) ?? followerOptions[0] ?? { id: currentUser.id, name: currentUser.name };
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const pageSize = 10;
@@ -622,12 +661,12 @@ export default function CustomersListPage() {
   // Local follow task map state (for re-rendering)
 
   const [showAdd, setShowAdd] = useState(false);
-  const [addForm, setAddForm] = useState<CustomerForm>(blankForm(defaultAdvisor(currentUser.name)));
+  const [addForm, setAddForm] = useState<CustomerForm>(blankForm(defaultAdvisor(currentUser.name), currentUser.id, currentUser.name));
   const addFormRef = useRef(addForm);
   const [addErrors, setAddErrors] = useState<Partial<Record<keyof CustomerForm, string>>>({});
 
   const [editId, setEditId] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState<CustomerForm>(blankForm(defaultAdvisor(currentUser.name)));
+  const [editForm, setEditForm] = useState<CustomerForm>(blankForm(defaultAdvisor(currentUser.name), currentUser.id, currentUser.name));
   const editFormRef = useRef(editForm);
   const [editErrors, setEditErrors] = useState<Partial<Record<keyof CustomerForm, string>>>({});
 
@@ -703,6 +742,7 @@ export default function CustomersListPage() {
         babyCount: Number(draft.babyCount) || 1,
         feedingType: draft.feedingType,
         followTask: draft.followTask,
+        followDisplayStatus: draft.followStatus,
         followRecords: [],
       },
       situation: draft.situation,
@@ -731,22 +771,29 @@ export default function CustomersListPage() {
     const existingProfile = existingCustomer ? getPersistedProfile(existingCustomer) : null;
     let nextFollowRecords = existingCustomer ? getFollowRecords(existingCustomer) : [];
 
-    // Append follow record if there is feedback or follow content
-    const hasUpdate = draft.followContent.trim() || draft.followTask.trim();
+    // Append follow record when any follow field changes or receives feedback.
+    const previousDisplayStatus = existingCustomer ? computeDisplayStatus(existingCustomer, existingCustomer.followStatus) : '待跟进';
+    const hasUpdate =
+      Boolean(draft.followContent.trim()) ||
+      draft.followTask.trim() !== textOf(existingProfile?.followTask).trim() ||
+      draft.followDate !== textOf(existingCustomer?.followDate) ||
+      draft.followStatus !== previousDisplayStatus;
     if (hasUpdate) {
-      const newDisplayStatus: NewFollowStatus = draft.followStatus === '已成交' || draft.followStatus === '已预约'
-        ? '已完成'
-        : draft.followStatus === '跟进中' ? '跟进中' : '待跟进';
+      const latestRecord = nextFollowRecords[0];
       const rec: FollowRecord = {
-        id: `fr_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+        id: latestRecord && latestRecord.status !== '已完成' ? latestRecord.id : `fr_${Date.now()}_${Math.random().toString(36).slice(2)}`,
         date: draft.followDate || todayStr(),
         content: draft.followTask.trim(),
         feedback: draft.followContent.trim(),
-        status: newDisplayStatus,
-        operator: currentUser.name,
+        status: draft.followStatus,
+        operator: draft.followerName || currentUser.name,
+        followerId: draft.followerId || currentUser.id,
+        followerName: draft.followerName || currentUser.name,
         createdAt: nowIso(),
       };
-      nextFollowRecords = [rec, ...nextFollowRecords];
+      nextFollowRecords = latestRecord && latestRecord.status !== '已完成'
+        ? [rec, ...nextFollowRecords.slice(1)]
+        : [rec, ...nextFollowRecords];
     }
 
     const updated: any = {
@@ -757,7 +804,7 @@ export default function CustomersListPage() {
       intendedProduct: draft.intendedProducts.join(','),
       situation: draft.situation,
       remark: draft.remark,
-      followStatus: draft.followStatus,
+      followStatus: toStoredFollowStatus(draft.followStatus),
       followDate: draft.followDate,
       profile: {
         ...(existingProfile ?? {}),
@@ -767,6 +814,7 @@ export default function CustomersListPage() {
         babyCount: Number(draft.babyCount) || 1,
         feedingType: draft.feedingType,
         followTask: draft.followTask,
+        followDisplayStatus: draft.followStatus,
         followRecords: nextFollowRecords,
       },
     };
@@ -839,7 +887,7 @@ export default function CustomersListPage() {
           name, wechat, phone, area, source, acquiredAt,
           tag: 'D1', followStatus: '待跟进', followDate: '',
           advisor: defaultAdvisor(currentUser.name), totalOrders: 0, lastFollow: todayStr(),
-          profile: { age, deliveryDate, deliveryType, babyCount, feedingType, followTask: '', followRecords: [] } as PersistedCustomerProfile,
+          profile: { age, deliveryDate, deliveryType, babyCount, feedingType, followTask: '', followDisplayStatus: '待跟进', followRecords: [] } as PersistedCustomerProfile,
           situation, intendedProduct, remark,
         };
         newCustomers.push(nc);
@@ -978,9 +1026,26 @@ export default function CustomersListPage() {
             <span className="text-xs font-semibold" style={{ color: 'var(--muted-foreground)' }}>跟进信息</span>
             <div className="flex gap-3">
               <div className="flex-1">
+                <FF label="跟进人员">
+                  <select
+                    className={inputCls + ' cursor-pointer'}
+                    style={inputStyle}
+                    value={form.followerId || currentUser.id}
+                    disabled={!canChooseFollower}
+                    onChange={e => {
+                      const selected = followerOptions.find(u => u.id === e.target.value) ?? defaultFollower;
+                      patch('followerId', selected.id);
+                      patch('followerName', selected.name);
+                    }}
+                  >
+                    {followerOptions.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                  </select>
+                </FF>
+              </div>
+              <div className="flex-1">
                 <FF label="跟进状态">
                   <select className={inputCls + ' cursor-pointer'} style={inputStyle}
-                    value={form.followStatus} onChange={e => patch('followStatus', e.target.value as FollowStatus)}>
+                    value={form.followStatus} onChange={e => patch('followStatus', e.target.value as NewFollowStatus)}>
                     {ALL_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
                   </select>
                 </FF>
@@ -1150,7 +1215,7 @@ export default function CustomersListPage() {
               <button className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium text-white hover:opacity-90 transition-opacity"
                 style={{ background: 'var(--brand)' }}
                 onClick={() => {
-                  const nextForm = blankForm(defaultAdvisor(currentUser.name));
+                  const nextForm = blankForm(defaultAdvisor(currentUser.name), defaultFollower.id, defaultFollower.name);
                   addFormRef.current = nextForm;
                   setAddForm(nextForm);
                   setAddErrors({});
@@ -1398,6 +1463,8 @@ export default function CustomersListPage() {
                             style={{ background: 'rgba(100,100,100,0.1)', color: 'var(--foreground)' }}
                             onClick={() => {
                               const nextForm = customerToForm(c);
+                              nextForm.followerId = defaultFollower.id;
+                              nextForm.followerName = defaultFollower.name;
                               editFormRef.current = nextForm;
                               setEditForm(nextForm);
                               setEditErrors({});
@@ -1583,7 +1650,7 @@ export default function CustomersListPage() {
                               </div>
                               <div className="flex items-center gap-2">
                                 <span className={`badge ${NEW_STATUS_BADGE[rec.status]} text-xs`}>{rec.status}</span>
-                                <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>操作人：{rec.operator}</span>
+                                <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>跟进人员：{rec.followerName || rec.operator}</span>
                               </div>
                             </div>
                             {rec.content && (

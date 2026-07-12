@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import type { OrderType, PayStatus, Customer, CustomerTag } from '../data/mockData';
 import { useApp } from '../hooks/useApp';
-import { useOrders, useOrderMutations, useCustomers, useCustomer, useTherapists } from '../api/hooks';
+import { useOrders, useOrderMutations, useCustomers, useCustomer, useTherapists, useSystemUsers } from '../api/hooks';
 import { uploadsApi } from '../api/endpoints';
 import { toast } from 'sonner';
 
@@ -24,9 +24,15 @@ interface ServicePerson {
 }
 
 interface FollowRecord {
+  id?: string;
   date: string;
   content: string;
+  feedback: string;
+  status: '待跟进' | '跟进中' | '已完成' | '延迟';
   operator: string;
+  followerId?: string;
+  followerName?: string;
+  createdAt?: string;
 }
 
 interface OrderAttachment {
@@ -55,6 +61,8 @@ interface OrderFollowRecord {
   feedback: string;
   status: '待跟进' | '跟进中' | '已完成' | '延迟';
   operator: string;
+  followerId?: string;
+  followerName?: string;
   createdAt: string;
 }
 
@@ -85,7 +93,11 @@ interface OrderForm {
   newPhotoFiles: OrderAttachment[];
   followRecords: FollowRecord[];
   newFollowDate: string;
+  newFollowStatus: '待跟进' | '跟进中' | '已完成' | '延迟';
   newFollowContent: string;
+  newFollowFeedback: string;
+  newFollowFollowerId: string;
+  newFollowFollowerName: string;
 }
 
 interface CustomerFollowRecord {
@@ -95,6 +107,8 @@ interface CustomerFollowRecord {
   feedback: string;
   status: string;
   operator: string;
+  followerId?: string;
+  followerName?: string;
   createdAt: string;
 }
 
@@ -799,7 +813,7 @@ function getCustomerFollowTask(customer: any): string {
 
 function getCustomerFollowRecords(customer: any): CustomerFollowRecord[] {
   const records = customer?.profile?.followRecords;
-  return Array.isArray(records) ? records : [];
+  return Array.isArray(records) ? sortFollowRecords(records) : [];
 }
 
 function profileValue(value: unknown, fallback = '—') {
@@ -819,6 +833,31 @@ function nowLocalDateTime() {
 
 function displayDateTime(value: string | undefined) {
   return value ? value.replace('T', ' ') : '-';
+}
+
+function nowRecordTime() {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+function recordTimeValue(value: unknown): number {
+  const text = String(value || '').trim();
+  if (!/\d{1,2}:\d{2}/.test(text)) return 0;
+  const parsed = Date.parse(text.replace(' ', 'T'));
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function hasPreciseRecordTime(value: unknown): boolean {
+  return recordTimeValue(value) > 0;
+}
+
+function sortFollowRecords<T extends { createdAt?: string; date?: string }>(records: T[]): T[] {
+  return [...records].sort((a, b) => {
+    const byCreated = recordTimeValue(b.createdAt) - recordTimeValue(a.createdAt);
+    if (byCreated !== 0) return byCreated;
+    return recordTimeValue(b.date) - recordTimeValue(a.date);
+  });
 }
 
 function openAttachment(att: OrderAttachment) {
@@ -844,11 +883,19 @@ function formFromOrder(order: any): OrderForm {
   const orderId = order?.id || '';
   const orderPeople = order?.servicePeople || {};
   const savedTherapists = orderTherapistMap.get(orderId) || (orderPeople?.sp1 || orderPeople?.sp2 || orderPeople?.sp3 ? orderPeople : null);
-  const savedFollowRecords = getFollowRecords(orderId).map(r => ({
+  const persistedFollowRecords = Array.isArray(orderPeople?.followRecords) ? orderPeople.followRecords : getFollowRecords(orderId);
+  const savedFollowRecords: FollowRecord[] = sortFollowRecords<FollowRecord>(persistedFollowRecords.map((r: any) => ({
+    id: r.id,
     date: r.date,
     content: r.content,
-    operator: r.operator,
-  }));
+    feedback: r.feedback || '',
+    status: r.status || '待跟进',
+    operator: r.operator || r.followerName || '',
+    followerId: r.followerId || '',
+    followerName: r.followerName || r.operator || '',
+    createdAt: hasPreciseRecordTime(r.createdAt) ? r.createdAt : '',
+  })));
+  const latestOpenRecord = savedFollowRecords.find((r: any) => r.status !== '已完成');
   return {
     customerId: order?.internalCustomerId || order?.customerId || order?.resolvedCustomerId || order?.customerCode || '',
     customerName: order?.customerName || '',
@@ -875,8 +922,12 @@ function formFromOrder(order: any): OrderForm {
     newPhotoRemark: '',
     newPhotoFiles: [],
     followRecords: savedFollowRecords,
-    newFollowDate: '',
-    newFollowContent: '',
+    newFollowDate: latestOpenRecord?.date || '',
+    newFollowStatus: latestOpenRecord?.status || '待跟进',
+    newFollowContent: latestOpenRecord?.content || '',
+    newFollowFeedback: latestOpenRecord?.feedback || '',
+    newFollowFollowerId: latestOpenRecord?.followerId || '',
+    newFollowFollowerName: latestOpenRecord?.followerName || latestOpenRecord?.operator || '',
   };
 }
 
@@ -956,7 +1007,7 @@ function CustomerArchiveView({ customer, form }: { customer: any; form: OrderFor
               <div key={rec.id || idx} className="rounded-lg p-3" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs font-semibold" style={{ color: 'var(--brand)' }}>计划跟进：{rec.date || '—'}</span>
-                  <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>操作人：{rec.operator || '—'}</span>
+                  <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>跟进人员：{rec.followerName || rec.operator || '—'}</span>
                 </div>
                 {rec.content && <div className="text-sm text-foreground mb-1">事项：{rec.content}</div>}
                 {rec.feedback && <div className="text-sm text-foreground mb-1">反馈：{rec.feedback}</div>}
@@ -973,6 +1024,14 @@ function CustomerArchiveView({ customer, form }: { customer: any; form: OrderFor
 function OrderModal({ visible, onClose, mode = 'create', order = null, editOrderId = '' }: OrderModalProps) {
   const orderMutations = useOrderMutations();
   const { currentUser } = useApp();
+  const canChooseFollower = currentUser.role === 'superadmin' || currentUser.role === 'admin';
+  const usersQuery = useSystemUsers(canChooseFollower);
+  const followerOptions = canChooseFollower
+    ? (usersQuery.data?.data ?? [])
+      .filter(u => u.status === 'active' && (u.role === 'superadmin' || u.role === 'admin' || u.role === 'service'))
+      .map(u => ({ id: u.id, name: u.name }))
+    : [{ id: currentUser.id, name: currentUser.name }];
+  const defaultFollower = followerOptions.find(u => u.id === currentUser.id) ?? followerOptions[0] ?? { id: currentUser.id, name: currentUser.name };
   const [activeTab, setActiveTab] = useState('customer');
   const [form, setForm] = useState<OrderForm>(initForm());
   const [showPicker, setShowPicker] = useState(false);
@@ -992,7 +1051,10 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
     }
     setActiveTab('customer');
     setShowPicker(false);
-    setForm(order && mode !== 'create' ? formFromOrder(order) : initForm());
+    const nextForm = order && mode !== 'create' ? formFromOrder(order) : initForm();
+    nextForm.newFollowFollowerId = nextForm.newFollowFollowerId || defaultFollower.id;
+    nextForm.newFollowFollowerName = nextForm.newFollowFollowerName || defaultFollower.name;
+    setForm(nextForm);
   }, [visible, mode, editOrderId, order]);
 
   function set<K extends keyof OrderForm>(key: K, val: OrderForm[K]) {
@@ -1012,17 +1074,35 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
   }
 
   function handleAddFollow() {
-    if (!form.newFollowContent) return;
+    if (!form.newFollowContent.trim() && !form.newFollowFeedback.trim()) return;
+    const sortedRecords = sortFollowRecords(form.followRecords);
+    const latestRecord = sortedRecords[0];
+    const shouldUpdateLatest = Boolean(latestRecord && latestRecord.status !== '已完成');
+    const follower = followerOptions.find(u => u.id === form.newFollowFollowerId) ?? defaultFollower;
     const rec: FollowRecord = {
+      id: shouldUpdateLatest ? latestRecord?.id : `fr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       date: form.newFollowDate || new Date().toISOString().slice(0, 10),
-      content: form.newFollowContent,
-      operator: currentUser.name,
+      content: form.newFollowContent.trim(),
+      feedback: form.newFollowFeedback.trim(),
+      status: form.newFollowStatus,
+      operator: follower.name,
+      followerId: follower.id,
+      followerName: follower.name,
+      createdAt: nowRecordTime(),
     };
+    const nextRecords = shouldUpdateLatest
+      ? sortFollowRecords(form.followRecords.map((r, idx) => idx === form.followRecords.indexOf(latestRecord!) ? rec : r))
+      : sortFollowRecords([rec, ...form.followRecords]);
+    const keepDraft = rec.status !== '已完成';
     setForm(prev => ({
       ...prev,
-      followRecords: [...prev.followRecords, rec],
-      newFollowDate: '',
-      newFollowContent: '',
+      followRecords: nextRecords,
+      newFollowDate: keepDraft ? rec.date : '',
+      newFollowStatus: keepDraft ? rec.status : '待跟进',
+      newFollowContent: keepDraft ? rec.content : '',
+      newFollowFeedback: keepDraft ? rec.feedback : '',
+      newFollowFollowerId: keepDraft ? follower.id : defaultFollower.id,
+      newFollowFollowerName: keepDraft ? follower.name : defaultFollower.name,
     }));
   }
 
@@ -1119,17 +1199,20 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
       sp3: form.servicePerson3,
     });
     // Convert follow records to OrderFollowRecord
-    const newRecords: OrderFollowRecord[] = form.followRecords.map((r, i) => ({
-      id: `fr-${oid}-${i}`,
+    const newRecords: OrderFollowRecord[] = sortFollowRecords(form.followRecords).map((r, i) => ({
+      id: r.id || `fr-${oid}-${i}`,
       date: r.date,
       content: r.content,
-      feedback: '',
-      status: '已完成',
+      feedback: r.feedback || '',
+      status: r.status || '待跟进',
       operator: r.operator,
-      createdAt: r.date,
+      followerId: r.followerId,
+      followerName: r.followerName || r.operator,
+      createdAt: hasPreciseRecordTime(r.createdAt) ? r.createdAt : '',
     }));
     if (newRecords.length > 0) {
       orderFollowMap.set(oid, newRecords);
+      orderFollowTaskMap.set(oid, newRecords[0].content);
     }
     if (form.orderType === '套餐') {
       orderContractMap.set(oid, form.contractStatus === '无' ? '未回签' : form.contractStatus);
@@ -1156,6 +1239,7 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
         sp1: form.servicePerson1,
         sp2: form.servicePerson2,
         sp3: form.servicePerson3,
+        followRecords: newRecords,
       },
       appointmentTime: form.appointmentTime,
       serviceNote: form.serviceNote,
@@ -1652,10 +1736,36 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
                   {isEdit ? (
                     <>
                       <div className="flex flex-col gap-3">
-                        <div className="text-sm font-semibold text-foreground">添加跟进记录</div>
-                        <div className="flex gap-3">
-                          <div className="flex flex-col gap-1 w-40">
-                            <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>跟进日期</label>
+                        <div className="text-sm font-semibold text-foreground">跟进信息</div>
+                        <div className="grid grid-cols-3 gap-3">
+                          <div className="flex flex-col gap-1">
+                            <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>跟进人员</label>
+                            <select
+                              className="px-3 py-2 rounded-lg text-sm outline-none"
+                              style={{ background: 'var(--muted)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
+                              value={form.newFollowFollowerId || currentUser.id}
+                              disabled={!canChooseFollower}
+                              onChange={e => {
+                                const selected = followerOptions.find(u => u.id === e.target.value) ?? defaultFollower;
+                                setForm(prev => ({ ...prev, newFollowFollowerId: selected.id, newFollowFollowerName: selected.name }));
+                              }}
+                            >
+                              {followerOptions.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                            </select>
+                          </div>
+                          <div className="flex flex-col gap-1">
+                            <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>跟进状态</label>
+                            <select
+                              className="px-3 py-2 rounded-lg text-sm outline-none"
+                              style={{ background: 'var(--muted)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
+                              value={form.newFollowStatus}
+                              onChange={e => set('newFollowStatus', e.target.value as OrderForm['newFollowStatus'])}
+                            >
+                              {(['跟进中', '待跟进', '已完成', '延迟'] as OrderForm['newFollowStatus'][]).map(s => <option key={s} value={s}>{s}</option>)}
+                            </select>
+                          </div>
+                          <div className="flex flex-col gap-1">
+                            <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>下次跟进时间</label>
                             <input
                               type="date"
                               className="px-3 py-2 rounded-lg text-sm outline-none"
@@ -1664,37 +1774,50 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
                               onChange={e => set('newFollowDate', e.target.value)}
                             />
                           </div>
-                          <div className="flex flex-col gap-1 flex-1">
-                            <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>跟进内容</label>
-                            <input
-                              className="px-3 py-2 rounded-lg text-sm outline-none"
-                              style={{ background: 'var(--muted)', border: '1px solid var(--border)' }}
-                              value={form.newFollowContent}
-                              onChange={e => set('newFollowContent', e.target.value)}
-                              placeholder="请输入跟进内容..."
-                            />
-                          </div>
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>跟进事项（当前待办）</label>
+                          <textarea
+                            className="px-3 py-2 rounded-lg text-sm outline-none"
+                            style={{ background: 'var(--muted)', border: '1px solid var(--border)', minHeight: 56, resize: 'vertical' }}
+                            value={form.newFollowContent}
+                            onChange={e => set('newFollowContent', e.target.value)}
+                            placeholder="记录本次跟进的任务和待办事项..."
+                          />
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>跟进反馈（本次备注）</label>
+                          <textarea
+                            className="px-3 py-2 rounded-lg text-sm outline-none"
+                            style={{ background: 'var(--muted)', border: '1px solid var(--border)', minHeight: 68, resize: 'vertical' }}
+                            value={form.newFollowFeedback}
+                            onChange={e => set('newFollowFeedback', e.target.value)}
+                            placeholder="记录本次跟进情况，如：电话沟通，了解客户意向..."
+                          />
                         </div>
                         <button
                           onClick={handleAddFollow}
-                          disabled={!form.newFollowContent}
+                          disabled={!form.newFollowContent.trim() && !form.newFollowFeedback.trim()}
                           className="self-start flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium text-white hover:opacity-90 disabled:opacity-40"
                           style={{ background: 'var(--brand)' }}
                         >
                           <PlusIcon size={14} />
-                          添加记录
+                          {sortFollowRecords(form.followRecords)[0]?.status !== '已完成' && form.followRecords.length > 0 ? '保存本次' : '新增本次'}
                         </button>
                       </div>
                       {form.followRecords.length > 0 && (
                         <div className="flex flex-col gap-2">
                           <div className="text-sm font-semibold text-foreground">跟进记录（{form.followRecords.length} 条）</div>
-                          {form.followRecords.map((r, i) => (
-                            <div key={i} className="rounded-lg p-3" style={{ background: 'var(--muted)', border: '1px solid var(--border)' }}>
+                          {sortFollowRecords(form.followRecords).map((r, i) => (
+                            <div key={r.id || i} className="rounded-lg p-3" style={{ background: 'var(--muted)', border: '1px solid var(--border)' }}>
                               <div className="flex items-center gap-2 mb-1">
                                 <span className="text-xs font-medium" style={{ color: 'var(--brand)' }}>{r.date}</span>
-                                <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>由 {r.operator} 记录</span>
+                                <span className={`badge ${FOLLOW_STATUS_COLORS[r.status] ?? 'badge-gray'}`}>{r.status}</span>
+                                <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>跟进人员：{r.followerName || r.operator}</span>
                               </div>
-                              <div className="text-sm text-foreground">{r.content}</div>
+                              {r.content && <div className="text-sm text-foreground">事项：{r.content}</div>}
+                              {r.feedback && <div className="text-sm mt-1" style={{ color: 'var(--muted-foreground)' }}>反馈：{r.feedback}</div>}
+                              <div className="text-xs mt-1" style={{ color: 'var(--muted-foreground)' }}>记录时间：{r.createdAt || '—'}</div>
                             </div>
                           ))}
                         </div>
@@ -1706,6 +1829,31 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
                         </div>
                       )}
                     </>
+                  ) : isView ? (
+                    <div className="flex flex-col gap-3">
+                      {form.followRecords.length > 0 ? (
+                        <>
+                          <div className="text-sm font-semibold text-foreground">跟进记录（{form.followRecords.length} 条）</div>
+                          {sortFollowRecords(form.followRecords).map((r, i) => (
+                            <div key={r.id || i} className="rounded-lg p-3" style={{ background: 'var(--muted)', border: '1px solid var(--border)' }}>
+                              <div className="flex items-center gap-2 mb-1">
+                                <span className="text-xs font-medium" style={{ color: 'var(--brand)' }}>{r.date}</span>
+                                <span className={`badge ${FOLLOW_STATUS_COLORS[r.status] ?? 'badge-gray'}`}>{r.status}</span>
+                                <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>跟进人员：{r.followerName || r.operator}</span>
+                              </div>
+                              {r.content && <div className="text-sm text-foreground">事项：{r.content}</div>}
+                              {r.feedback && <div className="text-sm mt-1" style={{ color: 'var(--muted-foreground)' }}>反馈：{r.feedback}</div>}
+                              <div className="text-xs mt-1" style={{ color: 'var(--muted-foreground)' }}>记录时间：{r.createdAt || '—'}</div>
+                            </div>
+                          ))}
+                        </>
+                      ) : (
+                        <div className="text-center py-10" style={{ color: 'var(--muted-foreground)' }}>
+                          <MessageSquareIcon size={32} className="mx-auto mb-2 opacity-30" />
+                          <div className="text-sm">暂无跟进记录</div>
+                        </div>
+                      )}
+                    </div>
                   ) : (
                     <div className="text-center py-10" style={{ color: 'var(--muted-foreground)' }}>
                       <MessageSquareIcon size={36} className="mx-auto mb-3 opacity-25" />
@@ -1789,7 +1937,7 @@ function initForm(): OrderForm {
     newPhotoTime: '',
     newPhotoRemark: '',
     newPhotoFiles: [],
-    followRecords: [], newFollowDate: '', newFollowContent: '',
+    followRecords: [], newFollowDate: '', newFollowStatus: '待跟进', newFollowContent: '', newFollowFeedback: '', newFollowFollowerId: '', newFollowFollowerName: '',
   };
 }
 
@@ -1811,8 +1959,14 @@ function getContractStatus(orderId: string, orderType: OrderType): ContractStatu
 }
 
 /* ─── Helper: get follow records for an order ──────────── */
+function getOrderFollowRecords(order: any): OrderFollowRecord[] {
+  const persisted = order?.servicePeople?.followRecords;
+  if (Array.isArray(persisted)) return sortFollowRecords(persisted);
+  return getFollowRecords(order?.id || '');
+}
+
 function getFollowRecords(orderId: string): OrderFollowRecord[] {
-  return orderFollowMap.get(orderId) ?? [];
+  return sortFollowRecords(orderFollowMap.get(orderId) ?? []);
 }
 
 /* ─── Helper: get follow task for an order ─────────────── */
@@ -1821,13 +1975,13 @@ function getFollowTask(orderId: string): string {
 }
 
 /* ─── Helper: compute follow display info ──────────────── */
-function getFollowDisplay(orderId: string): { status: string; date: string; task: string; isOverdue: boolean } {
-  const records = getFollowRecords(orderId);
-  const task = getFollowTask(orderId);
+function getFollowDisplay(order: any): { status: string; date: string; task: string; isOverdue: boolean } {
+  const records = getOrderFollowRecords(order);
+  const task = getFollowTask(order?.id || '');
   if (records.length === 0) {
     return { status: '待跟进', date: '—', task: task || '—', isOverdue: false };
   }
-  const latest = records[records.length - 1];
+  const latest = records[0];
   const isOverdue = latest.status === '延迟';
   return {
     status: latest.status,
@@ -2063,7 +2217,7 @@ export default function OrdersListPage() {
 
                   const therapistDisplay = getTherapistDisplay(o.id);
                   const contractStatus = getContractStatus(o.id, o.type);
-                  const followInfo = getFollowDisplay(o.id);
+                  const followInfo = getFollowDisplay(o);
                   const displayPayStatus = effectiveOrderPayStatus(o);
 
                   return (

@@ -46,6 +46,9 @@ wsl-*.log
 windows-feature-status.txt
 compose-*.log
 
+# Runtime uploads
+backend/uploads/
+
 # SSH keys
 *.pem
 id_rsa
