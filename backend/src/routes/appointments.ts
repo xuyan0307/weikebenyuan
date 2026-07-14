@@ -79,7 +79,33 @@ router.patch('/:id/status', authenticateToken, auditLog('appointments'), async (
   try {
     const { status } = req.body || {};
     const db = getDb();
-    await db.execute('UPDATE appointments SET status = ? WHERE id = ? OR appointment_no = ?', [status, req.params.id, req.params.id]);
+    const [rows] = await db.execute(
+      'SELECT id, customer_id, status FROM appointments WHERE id = ? OR appointment_no = ? LIMIT 1',
+      [req.params.id, req.params.id]
+    );
+    const appointment = (rows as any[])[0];
+    if (!appointment) {
+      res.status(404).json({ error: '预约不存在' });
+      return;
+    }
+    const becameCompleted = status === '已完成' && appointment.status !== '已完成';
+    await db.execute('UPDATE appointments SET status = ? WHERE id = ?', [status, appointment.id]);
+    if (becameCompleted) {
+      const [orderRows] = await db.query(
+        `SELECT id FROM orders
+         WHERE customer_id = ? AND used_times < total_times
+         ORDER BY created_at DESC
+         LIMIT 1`,
+        [appointment.customer_id]
+      );
+      const orderId = (orderRows as any[])[0]?.id;
+      if (orderId) {
+        await db.execute(
+          'UPDATE orders SET used_times = LEAST(used_times + 1, total_times) WHERE id = ?',
+          [orderId]
+        );
+      }
+    }
     res.json({ message: '预约状态已更新' });
   } catch (err) { next(err); }
 });

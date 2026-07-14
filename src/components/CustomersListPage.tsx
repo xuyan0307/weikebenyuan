@@ -9,6 +9,7 @@ import type { Customer, CustomerTag, FollowStatus, CustomerProfile, Order } from
 import { useApp } from '../hooks/useApp';
 import { useCustomers, useCustomerMutations, useOrders, useSystemUsers } from '../api/hooks';
 import { toast } from 'sonner';
+import { downloadXlsx, readSpreadsheet, rowsToObjects } from '../utils/spreadsheet';
 
 // ─────────────────────────── Tag system ───────────────────────────
 interface TagDef {
@@ -130,8 +131,27 @@ const SOURCE_OPTIONS = ['小红书', '视频号', '美团大众', '抖音', '老
 const AREA_OPTIONS = ['厦门', '泉州', '漳州'];
 const PRODUCT_OPTIONS = ['盆底肌', '骨盆', '腹直肌', '运动康复', '身体调理', '其他'];
 const INIT_TAG_OPTIONS: CustomerTag[] = ['D1', 'D2', 'D3'];
-const SERVICE_ADVISORS = ['张管理员', '李客服'];
-const defaultAdvisor = (name: string) => SERVICE_ADVISORS.includes(name) ? name : SERVICE_ADVISORS[0];
+const FALLBACK_SERVICE_ADVISORS = ['张管理员', '李客服'];
+
+type PersonOption = { id: string; name: string };
+
+function uniquePersonOptions(options: PersonOption[]): PersonOption[] {
+  const seen = new Set<string>();
+  const result: PersonOption[] = [];
+  options.forEach(option => {
+    const name = textOf(option.name).trim();
+    if (!name) return;
+    const key = option.id || name;
+    if (seen.has(key)) return;
+    seen.add(key);
+    result.push({ id: option.id || name, name });
+  });
+  return result;
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return Array.from(new Set(values.map(v => textOf(v).trim()).filter(Boolean)));
+}
 
 // ─────────────────────────── Date filter ───────────────────────────
 type DateRange = 'all' | 'today' | 'week' | 'month';
@@ -157,16 +177,10 @@ function matchDateRange(dateStr: string, range: DateRange): boolean {
 }
 
 // ─────────────────────────── CSV Template ───────────────────────────
-const CSV_HEADERS = '姓名,微信号,联系电话,所在区域,来源渠道,获客时间,意向产品,出生年份,生产时间,第几胎,分娩方式,喂养方式,需求情况,备注';
+const CUSTOMER_IMPORT_HEADERS = ['姓名', '微信号', '联系电话', '所在区域', '来源渠道', '获客时间', '意向产品', '出生年份', '生产时间', '第几胎', '分娩方式', '喂养方式', '需求情况', '备注'];
 
-function downloadCsvTemplate() {
-  const blob = new Blob(['\uFEFF' + CSV_HEADERS + '\n'], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = '客户批量导入模板.csv';
-  a.click();
-  URL.revokeObjectURL(url);
+function downloadCustomerTemplate() {
+  downloadXlsx('客户批量导入模板.xlsx', CUSTOMER_IMPORT_HEADERS, []);
 }
 
 // ─────────────────────────── Helpers ───────────────────────────
@@ -336,12 +350,13 @@ function blankForm(advisor: string, followerId = '', followerName = advisor): Cu
   };
 }
 
-function customerToForm(c: Customer, followerId = '', followerName = ''): CustomerForm {
+function customerToForm(c: Customer, fallbackAdvisor = '', followerId = '', followerName = ''): CustomerForm {
   const profile = getPersistedProfile(c);
   const latestOpenRecord = getFollowRecords(c).find(r => r.status !== '已完成');
   const birthYear = profile.age > 0
     ? String(new Date().getFullYear() - profile.age)
     : '';
+  const advisor = textOf(c.advisor) || fallbackAdvisor;
   return {
     acquiredAt: textOf(c.acquiredAt) || todayStr(), source: textOf(c.source), name: textOf(c.name), wechat: textOf(c.wechat),
     phone: textOf(c.phone), area: textOf(c.area),
@@ -349,12 +364,12 @@ function customerToForm(c: Customer, followerId = '', followerName = ''): Custom
     deliveryDate: normalizeDateInput(profile.deliveryDate), babyCount: String(profile.babyCount || 1),
     deliveryType: profile.deliveryType || '顺产', feedingType: profile.feedingType || '母乳',
     birthYear, situation: textOf(c.situation), tag: (textOf(c.tag) || 'D1') as CustomerTag,
-    advisor: textOf(c.advisor) || defaultAdvisor(''), remark: textOf(c.remark),
+    advisor, remark: textOf(c.remark),
     followStatus: latestOpenRecord?.status ?? computeDisplayStatus(c, c.followStatus),
     followDate: latestOpenRecord?.date ?? textOf(c.followDate),
     followContent: latestOpenRecord?.feedback ?? '',
     followerId: latestOpenRecord?.followerId || followerId || '',
-    followerName: latestOpenRecord?.followerName || followerName || textOf(c.advisor) || defaultAdvisor(''),
+    followerName: latestOpenRecord?.followerName || followerName || advisor,
     followTask: latestOpenRecord?.content ?? getFollowTask(c),
   };
 }
@@ -632,41 +647,57 @@ const STICKY_TD_STYLE = (i: 0 | 1 | 2 | 3, bg: string): React.CSSProperties => (
 // ─────────────────────────── Main component ───────────────────────────
 export default function CustomersListPage() {
   const { currentUser } = useApp();
-  const canChooseFollower = currentUser.role === 'superadmin' || currentUser.role === 'admin';
-  const usersQuery = useSystemUsers(canChooseFollower);
+  const canChooseAdvisor = currentUser.role === 'superadmin' || currentUser.role === 'admin';
+  const canChooseFollower = canChooseAdvisor;
+  const usersQuery = useSystemUsers(canChooseAdvisor || canChooseFollower);
+  const assignableUsers = (usersQuery.data?.data ?? [])
+    .filter(u => u.status === 'active' && (u.role === 'superadmin' || u.role === 'admin' || u.role === 'service'))
+    .map(u => ({ id: u.id, name: u.name }));
+  const currentUserOption = { id: currentUser.id, name: currentUser.name };
+  const advisorOptions = canChooseAdvisor
+    ? uniquePersonOptions([
+      ...assignableUsers,
+      currentUserOption,
+      ...FALLBACK_SERVICE_ADVISORS.map(name => ({ id: name, name })),
+    ])
+    : uniquePersonOptions([currentUserOption]);
+  const advisorNames = advisorOptions.map(u => u.name);
+  const defaultAdvisorName =
+    advisorOptions.find(u => u.id === currentUser.id)?.name
+    || textOf(currentUser.name)
+    || advisorNames[0]
+    || '';
   const followerOptions = canChooseFollower
-    ? (usersQuery.data?.data ?? [])
-      .filter(u => u.status === 'active' && (u.role === 'superadmin' || u.role === 'admin' || u.role === 'service'))
-      .map(u => ({ id: u.id, name: u.name }))
-    : [{ id: currentUser.id, name: currentUser.name }];
+    ? uniquePersonOptions([...assignableUsers, currentUserOption])
+    : uniquePersonOptions([currentUserOption]);
   const defaultFollower = followerOptions.find(u => u.id === currentUser.id) ?? followerOptions[0] ?? { id: currentUser.id, name: currentUser.name };
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
-  const pageSize = 10;
+  const [pageSize, setPageSize] = useState(20);
 
   const [dateRange, setDateRange] = useState<DateRange>('all');
   const [areaFilter, setAreaFilter] = useState<string[]>([...AREA_OPTIONS]);
   const [sourceFilter, setSourceFilter] = useState<string[]>([...SOURCE_OPTIONS]);
   const [statusFilter, setStatusFilter] = useState<string[]>([...FILTER_STATUSES]);
   const [tagFilter, setTagFilter] = useState<CustomerTag[]>([...ALL_TAGS]);
-  const [advisorFilter, setAdvisorFilter] = useState<string[]>([...SERVICE_ADVISORS]);
+  const [advisorFilter, setAdvisorFilter] = useState<string[]>([]);
 
   const [detailId, setDetailId] = useState<string | null>(null);
   const [detailTab, setDetailTab] = useState<'basic' | 'profile' | 'follow' | 'orders'>('basic');
 
-  const customersQuery = useCustomers({ page: 1, pageSize: 1000 });
+  const customersQuery = useCustomers({ page: 1, pageSize: 10000, includeOrdered: 1 });
   const customers: Customer[] = (customersQuery.data?.data ?? []) as any;
   const mutations = useCustomerMutations();
   const ordersQuery = useOrders({ customerId: detailId || '', page: 1, pageSize: 100 });
   // Local follow task map state (for re-rendering)
 
   const [showAdd, setShowAdd] = useState(false);
-  const [addForm, setAddForm] = useState<CustomerForm>(blankForm(defaultAdvisor(currentUser.name), currentUser.id, currentUser.name));
+  const [addForm, setAddForm] = useState<CustomerForm>(blankForm(textOf(currentUser.name), currentUser.id, currentUser.name));
   const addFormRef = useRef(addForm);
   const [addErrors, setAddErrors] = useState<Partial<Record<keyof CustomerForm, string>>>({});
 
   const [editId, setEditId] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState<CustomerForm>(blankForm(defaultAdvisor(currentUser.name), currentUser.id, currentUser.name));
+  const [editForm, setEditForm] = useState<CustomerForm>(blankForm(textOf(currentUser.name), currentUser.id, currentUser.name));
   const editFormRef = useRef(editForm);
   const [editErrors, setEditErrors] = useState<Partial<Record<keyof CustomerForm, string>>>({});
 
@@ -678,6 +709,24 @@ export default function CustomersListPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const canEdit = currentUser.role !== 'finance' && currentUser.role !== 'therapist';
+  const canManageBulk = currentUser.role === 'superadmin' || currentUser.role === 'admin';
+  const advisorFilterOptions = uniqueStrings([
+    ...advisorNames,
+    ...customers.map(c => textOf(c.advisor)),
+  ]);
+
+  useEffect(() => {
+    if (showAdd) return;
+    const nextAdvisor = defaultAdvisorName || textOf(currentUser.name);
+    setAddForm(prev => {
+      if (prev.advisor === nextAdvisor && prev.followerId === defaultFollower.id && prev.followerName === defaultFollower.name) {
+        return prev;
+      }
+      const next = { ...prev, advisor: nextAdvisor, followerId: defaultFollower.id, followerName: defaultFollower.name };
+      addFormRef.current = next;
+      return next;
+    });
+  }, [showAdd, defaultAdvisorName, currentUser.name, defaultFollower.id, defaultFollower.name]);
 
   // ── compute display statuses ──
   const customerDisplayStatus = (c: Customer): NewFollowStatus => computeDisplayStatus(c, c.followStatus);
@@ -701,7 +750,7 @@ export default function CustomersListPage() {
     const displaySt = customerDisplayStatus(c);
     const matchStatus = statusFilter.length === 0 || statusFilter.includes(displaySt) || statusFilter.length === FILTER_STATUSES.length;
     const matchTag = tagFilter.length === 0 || tagFilter.includes(tag) || tagFilter.length === ALL_TAGS.length;
-    const matchAdvisor = advisorFilter.length === 0 || advisorFilter.includes(advisor) || advisorFilter.length === SERVICE_ADVISORS.length;
+    const matchAdvisor = advisorFilter.length === 0 || advisorFilter.includes(advisor) || advisorFilter.length === advisorFilterOptions.length;
     return matchSearch && matchDate && matchArea && matchSource && matchStatus && matchTag && matchAdvisor;
   });
 
@@ -852,41 +901,56 @@ export default function CustomersListPage() {
     setEditForm(next);
   }
 
-  // ── CSV import ──
-  function handleImport() {
+  function handleCustomerExport() {
+    const headers = ['客户ID', '客户姓名', '微信号', '联系电话', '所在区域', '来源渠道', '获客时间', '客户标签', '归属客服', '跟进状态', '下次跟进时间', '当前跟进事项', '最近跟进反馈', '订单数', '年龄', '生产时间', '第几胎', '分娩方式', '喂养方式', '意向产品', '需求情况', '备注', '全部跟进记录'];
+    const rows = customers.map(customer => {
+      const profile = getPersistedProfile(customer);
+      const records = getFollowRecords(customer).map(record => [record.createdAt || record.date, record.status, record.followerName || record.operator, record.content, record.feedback].filter(Boolean).join(' | ')).join('\n');
+      const latest = getFollowRecords(customer)[0];
+      return [
+        customer.id, customer.name, customer.wechat, customer.phone, customer.area, customer.source, customer.acquiredAt,
+        customer.tag, customer.advisor, customerDisplayStatus(customer), customer.followDate, profile.followTask || '', latest?.feedback || '',
+        customer.totalOrders, profile.age || '', profile.deliveryDate || '', profile.babyCount || '', profile.deliveryType || '',
+        profile.feedingType || '', customer.intendedProduct, customer.situation, customer.remark, records,
+      ];
+    });
+    downloadXlsx(`客户完整信息_${todayStr()}.xlsx`, headers, rows);
+    toast.success(`已导出 ${rows.length} 位客户的完整信息`);
+  }
+
+  // ── Spreadsheet import ──
+  async function handleImport() {
     if (!importFile) return;
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const text = (e.target?.result as string) ?? '';
-      const lines = text.replace(/\r/g, '').split('\n').filter(l => l.trim());
-      if (lines.length < 2) { setImportMsg('文件内容为空或格式有误'); return; }
-      const dataLines = lines.slice(1);
+    try {
+      const sheetRows = await readSpreadsheet(importFile);
+      if (!sheetRows[0]?.includes('姓名')) { setImportMsg('未找到“姓名”列，请使用下载的客户导入模板。'); return; }
+      const dataRows = rowsToObjects(sheetRows);
+      if (dataRows.length === 0) { setImportMsg('文件内容为空或格式有误，请使用下载的模板。'); return; }
       const newCustomers: Partial<Customer>[] = [];
-      dataLines.forEach((line, idx) => {
-        const cols = line.split(',');
-        const name = cols[0]?.trim() ?? '';
-        const wechat = cols[1]?.trim() ?? '';
-        const phone = cols[2]?.trim() ?? '';
+      dataRows.forEach(row => {
+        const name = row['姓名'] || '';
+        const wechat = row['微信号'] || '';
+        const phone = row['联系电话'] || '';
         if (!name && !wechat) return;
-        const area = cols[3]?.trim() ?? '';
-        const source = cols[4]?.trim() || '其他';
-        const acquiredAt = cols[5]?.trim() || todayStr();
-        const intendedProduct = cols[6]?.trim() || '';
-        const birthYearRaw = Number(cols[7]?.trim()) || 0;
+        const area = row['所在区域'] || '';
+        const source = row['来源渠道'] || '其他';
+        const acquiredAt = row['获客时间'] || todayStr();
+        const intendedProduct = row['意向产品'] || '';
+        const birthYearRaw = Number(row['出生年份']) || 0;
         const age = birthYearRaw > 1900 ? new Date().getFullYear() - birthYearRaw : 0;
-        const deliveryDate = cols[8]?.trim() ?? '';
-        const babyCount = Number(cols[9]?.trim()) || 1;
-        const rawDelivery = cols[10]?.trim();
+        const deliveryDate = row['生产时间'] || '';
+        const babyCount = Number(row['第几胎']) || 1;
+        const rawDelivery = row['分娩方式'];
         const deliveryType: '顺产' | '剖腹产' = rawDelivery === '剖腹产' ? '剖腹产' : '顺产';
-        const rawFeeding = cols[11]?.trim();
+        const rawFeeding = row['喂养方式'];
         const feedingType: '母乳' | '奶粉' | '混合喂养' =
           rawFeeding === '奶粉' ? '奶粉' : rawFeeding === '混合喂养' ? '混合喂养' : '母乳';
-        const situation = cols[12]?.trim() ?? '';
-        const remark = cols[13]?.trim() ?? '';
+        const situation = row['需求情况'] || '';
+        const remark = row['备注'] || '';
         const nc: Partial<Customer> = {
           name, wechat, phone, area, source, acquiredAt,
           tag: 'D1', followStatus: '待跟进', followDate: '',
-          advisor: defaultAdvisor(currentUser.name), totalOrders: 0, lastFollow: todayStr(),
+          advisor: defaultAdvisorName, totalOrders: 0, lastFollow: todayStr(),
           profile: { age, deliveryDate, deliveryType, babyCount, feedingType, followTask: '', followDisplayStatus: '待跟进', followRecords: [] } as PersistedCustomerProfile,
           situation, intendedProduct, remark,
         };
@@ -894,15 +958,13 @@ export default function CustomersListPage() {
       });
       if (newCustomers.length === 0) { setImportMsg('未解析到有效数据，请检查文件格式'); return; }
       setImportMsg(`正在导入 ${newCustomers.length} 条...`);
-      Promise.all(newCustomers.map(nc => mutations.create(nc).catch(() => null)))
-        .then(() => {
-          setImportMsg(`✅ 成功导入 ${newCustomers.length} 条客户数据`);
-          setImportFile(null);
-          setTimeout(() => { setShowImport(false); setImportMsg(''); }, 1800);
-        })
-        .catch(() => setImportMsg('导入失败，请重试'));
-    };
-    reader.readAsText(importFile, 'UTF-8');
+      const results = await Promise.all(newCustomers.map(nc => mutations.create(nc).then(() => true).catch(() => false)));
+      const success = results.filter(Boolean).length;
+      setImportMsg(success === newCustomers.length ? `成功导入 ${success} 条客户数据` : `成功导入 ${success} 条，失败 ${newCustomers.length - success} 条，请检查重复或必填信息。`);
+      if (success > 0) setImportFile(null);
+    } catch (error: any) {
+      setImportMsg(error?.message || '导入失败，请检查文件格式后重试。');
+    }
   }
 
   // ── shared form render ──
@@ -915,6 +977,10 @@ export default function CustomersListPage() {
     previewId?: string,
   ) {
     const tagOptions = isEdit ? ALL_TAGS : INIT_TAG_OPTIONS;
+    const formAdvisorOptions = uniquePersonOptions([
+      ...advisorOptions,
+      form.advisor ? { id: form.advisor, name: form.advisor } : { id: defaultAdvisorName, name: defaultAdvisorName },
+    ]);
     return (
       <div className="flex flex-col gap-4 p-6 overflow-y-auto" style={{ maxHeight: 560 }}>
         {/* Row 1: 获客时间 / 客户ID / 来源渠道 / 归属客服 */}
@@ -955,8 +1021,10 @@ export default function CustomersListPage() {
           <div className="flex-1">
             <FF label="归属客服">
               <select className={inputCls + ' cursor-pointer'} style={inputStyle}
-                value={form.advisor} onChange={e => patch('advisor', e.target.value)}>
-                {SERVICE_ADVISORS.map(s => <option key={s} value={s}>{s}</option>)}
+                value={form.advisor}
+                disabled={!canChooseAdvisor}
+                onChange={e => patch('advisor', e.target.value)}>
+                {formAdvisorOptions.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
               </select>
             </FF>
           </div>
@@ -1205,17 +1273,24 @@ export default function CustomersListPage() {
             <ChevronDownIcon size={12}
               style={{ transform: showLegend ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }} />
           </button>
+          {canManageBulk && (
+            <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all hover:opacity-90"
+              style={{ background: 'var(--muted)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
+              onClick={handleCustomerExport}>
+              <DownloadIcon size={13} />批量导出
+            </button>
+          )}
           {canEdit && (
             <>
-              <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all hover:opacity-90"
+              {canManageBulk && <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all hover:opacity-90"
                 style={{ background: 'var(--muted)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
                 onClick={() => { setImportFile(null); setImportMsg(''); setShowImport(true); }}>
                 <UploadIcon size={13} />批量导入
-              </button>
+              </button>}
               <button className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium text-white hover:opacity-90 transition-opacity"
                 style={{ background: 'var(--brand)' }}
                 onClick={() => {
-                  const nextForm = blankForm(defaultAdvisor(currentUser.name), defaultFollower.id, defaultFollower.name);
+                  const nextForm = blankForm(defaultAdvisorName, defaultFollower.id, defaultFollower.name);
                   addFormRef.current = nextForm;
                   setAddForm(nextForm);
                   setAddErrors({});
@@ -1297,7 +1372,7 @@ export default function CustomersListPage() {
           {/* 归属客服 */}
           <MultiSelectDropdown
             label="客服"
-            allOptions={SERVICE_ADVISORS}
+            allOptions={advisorFilterOptions}
             selected={advisorFilter}
             onChange={v => { setAdvisorFilter(v); resetPage(); }}
             width={180}
@@ -1462,7 +1537,7 @@ export default function CustomersListPage() {
                           <button className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium hover:opacity-80 transition-opacity"
                             style={{ background: 'rgba(100,100,100,0.1)', color: 'var(--foreground)' }}
                             onClick={() => {
-                              const nextForm = customerToForm(c);
+                              const nextForm = customerToForm(c, defaultAdvisorName);
                               nextForm.followerId = defaultFollower.id;
                               nextForm.followerName = defaultFollower.name;
                               editFormRef.current = nextForm;
@@ -1491,6 +1566,12 @@ export default function CustomersListPage() {
 
         {/* Pagination */}
         <div className="flex items-center justify-between px-4 py-3" style={{ borderTop: '1px solid var(--border)' }}>
+          <label className="flex items-center gap-2 text-sm" style={{ color: 'var(--muted-foreground)' }}>
+            每页
+            <select className="rounded-md px-2 py-1 text-sm bg-card" style={{ border: '1px solid var(--border)', color: 'var(--foreground)' }} value={pageSize} onChange={e => { setPageSize(Number(e.target.value)); setPage(1); }}>
+              {[10, 20, 30, 50].map(size => <option key={size} value={size}>{size} 条</option>)}
+            </select>
+          </label>
           <span className="text-sm" style={{ color: 'var(--muted-foreground)' }}>
             {filtered.length === 0
               ? '共 0 条'
@@ -1834,7 +1915,7 @@ export default function CustomersListPage() {
                     style={{ background: 'var(--brand)' }}
                     onClick={() => {
                       if (!detailCustomer) return;
-                      const nextForm = customerToForm(detailCustomer);
+                      const nextForm = customerToForm(detailCustomer, defaultAdvisorName, defaultFollower.id, defaultFollower.name);
                       editFormRef.current = nextForm;
                       setEditForm(nextForm);
                       setEditErrors({});
@@ -1890,12 +1971,12 @@ export default function CustomersListPage() {
               <button
                 className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all hover:opacity-90 self-start"
                 style={{ background: 'var(--muted)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
-                onClick={downloadCsvTemplate}>
+                onClick={downloadCustomerTemplate}>
                 <DownloadIcon size={14} style={{ color: 'var(--brand)' }} />
-                下载客户导入模板.csv
+                下载客户导入模板.xlsx
               </button>
               <div className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
-                列名：{CSV_HEADERS}
+                列名：{CUSTOMER_IMPORT_HEADERS.join('、')}
               </div>
             </div>
 
@@ -1904,7 +1985,7 @@ export default function CustomersListPage() {
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".csv"
+                accept=".csv,.xlsx"
                 className="hidden"
                 onChange={e => {
                   const f = e.target.files?.[0] ?? null;
@@ -1935,9 +2016,9 @@ export default function CustomersListPage() {
                   <>
                     <UploadIcon size={32} style={{ color: 'var(--muted-foreground)' }} />
                     <div className="flex flex-col items-center gap-1">
-                      <span className="text-sm font-medium text-foreground">点击选择 CSV 文件</span>
+                      <span className="text-sm font-medium text-foreground">点击选择 Excel 或 CSV 文件</span>
                       <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
-                        支持 .csv 格式，文件大小不超过 5MB
+                        支持 .xlsx、.csv 格式，文件大小不超过 5MB
                       </span>
                     </div>
                   </>

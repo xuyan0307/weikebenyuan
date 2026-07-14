@@ -4,12 +4,14 @@ import {
   ChevronLeftIcon, ChevronRightIcon, XIcon, CheckIcon,
   UserIcon, FileTextIcon, UsersIcon, MessageSquareIcon,
   ImageIcon, ChevronDownIcon, TagIcon, ZapIcon,
+  UploadIcon, DownloadIcon,
 } from 'lucide-react';
 import type { OrderType, PayStatus, Customer, CustomerTag } from '../data/mockData';
 import { useApp } from '../hooks/useApp';
 import { useOrders, useOrderMutations, useCustomers, useCustomer, useTherapists, useSystemUsers } from '../api/hooks';
 import { uploadsApi } from '../api/endpoints';
 import { toast } from 'sonner';
+import { downloadXlsx, readSpreadsheet, rowsToObjects } from '../utils/spreadsheet';
 
 /* ─── Types ─────────────────────────────────────────── */
 type NewPayStatus = '已支付' | '待支付' | '已付定金' | '已退款';
@@ -21,6 +23,7 @@ type OrderModalMode = 'create' | 'view' | 'edit';
 interface ServicePerson {
   type: TherapistType;
   assign: TherapistAssign;
+  totalTimes?: string;
 }
 
 interface FollowRecord {
@@ -66,6 +69,19 @@ interface OrderFollowRecord {
   createdAt: string;
 }
 
+interface ExperienceSnapshot {
+  amount: string;
+  payStatus: NewPayStatus;
+  purchaseDate: string;
+  serviceItems: string;
+  serviceNote: string;
+  servicePeople: {
+    sp1: ServicePerson;
+    sp2: ServicePerson;
+    sp3: ServicePerson;
+  };
+}
+
 interface OrderForm {
   customerId: string;
   customerName: string;
@@ -77,6 +93,10 @@ interface OrderForm {
   amount: string;
   payStatus: NewPayStatus;
   purchaseDate: string;
+  totalTimes: string;
+  usedTimes: number;
+  experienceUpgradeStatus: '' | '未升单' | '已升单';
+  experienceSnapshot: ExperienceSnapshot | null;
   contractStatus: ContractStatus;
   servicePerson1: ServicePerson;
   servicePerson2: ServicePerson;
@@ -110,6 +130,16 @@ interface CustomerFollowRecord {
   followerId?: string;
   followerName?: string;
   createdAt: string;
+}
+
+const ORDER_IMPORT_HEADERS = ['客户ID', '客户姓名', '微信号', '联系电话', '所在区域', '客户标签', '归属客服', '订单类型', '服务项目', '订单金额', '付款状态', '总次数', '已使用次数', '是否升级', '合同状态', '是否使用优惠券', '预约服务时间', '服务备注'];
+
+function downloadOrderTemplate() {
+  downloadXlsx('订单批量导入模板.xlsx', ORDER_IMPORT_HEADERS, []);
+}
+
+function importBoolean(value: string): boolean {
+  return ['是', '1', 'true', 'yes', '已签约', '已使用'].includes(value.trim().toLowerCase());
 }
 
 /* ─── Module-level persistent maps ────────────────────── */
@@ -157,7 +187,7 @@ const TAG_CLS: Partial<Record<CustomerTag, string>> = {
 };
 
 const ORDER_TYPE_AMOUNTS: Record<string, number[]> = {
-  '体验卡阶段': [199, 299, 399, 499],
+  '体验卡阶段': [288, 298],
   '套餐阶段': [3800, 5800, 6800, 9800, 12800, 15800],
 };
 
@@ -757,9 +787,11 @@ interface ServicePersonRowProps {
   label: TherapistType;
   value: ServicePerson;
   onChange: (v: ServicePerson) => void;
+  totalTimes?: string;
+  onTotalTimesChange?: (value: string) => void;
 }
 
-function ServicePersonRow({ label, value, onChange }: ServicePersonRowProps) {
+function ServicePersonRow({ label, value, onChange, totalTimes = '1', onTotalTimesChange }: ServicePersonRowProps) {
   const therapistsQ = useTherapists({ page: 1, pageSize: 1000 });
   const THERAPISTS: any[] = therapistsQ.data?.data ?? [];
   const typeTherapists = THERAPISTS.filter(t => t.status === '在职');
@@ -776,6 +808,18 @@ function ServicePersonRow({ label, value, onChange }: ServicePersonRowProps) {
       >
         {assignOptions.map(o => <option key={o} value={o}>{o}</option>)}
       </select>
+      <div className="w-28 flex-shrink-0">
+        {onTotalTimesChange ? (
+          <input
+            type="number"
+            min="1"
+            className="w-full text-sm rounded-lg px-2 py-1.5 outline-none"
+            style={{ background: 'var(--muted)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
+            value={totalTimes}
+            onChange={e => onTotalTimesChange?.(e.target.value)}
+          />
+        ) : <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>—</span>}
+      </div>
     </div>
   );
 }
@@ -884,6 +928,7 @@ function formFromOrder(order: any): OrderForm {
   const orderPeople = order?.servicePeople || {};
   const savedTherapists = orderTherapistMap.get(orderId) || (orderPeople?.sp1 || orderPeople?.sp2 || orderPeople?.sp3 ? orderPeople : null);
   const persistedFollowRecords = Array.isArray(orderPeople?.followRecords) ? orderPeople.followRecords : getFollowRecords(orderId);
+  const experienceSnapshot = orderPeople?.experienceSnapshot || null;
   const savedFollowRecords: FollowRecord[] = sortFollowRecords<FollowRecord>(persistedFollowRecords.map((r: any) => ({
     id: r.id,
     date: r.date,
@@ -907,6 +952,10 @@ function formFromOrder(order: any): OrderForm {
     amount: order?.amount != null ? String(order.amount) : '',
     payStatus: payStatusToForm(effectiveOrderPayStatus(order)),
     purchaseDate: order?.createdAt || new Date().toISOString().slice(0, 10),
+    totalTimes: String(order?.totalTimes || 1),
+    usedTimes: Number(order?.usedTimes || 0),
+    experienceUpgradeStatus: order?.isUpgrade ? '已升单' : (order?.type === '体验卡' && Number(order?.usedTimes || 0) >= Number(order?.totalTimes || 1) ? '未升单' : ''),
+    experienceSnapshot,
     contractStatus: getContractStatus(orderId, order?.type || '体验卡'),
     servicePerson1: savedTherapists?.sp1 || { type: '产康师', assign: '待分配' },
     servicePerson2: savedTherapists?.sp2 || { type: '运动康复师', assign: '待分配' },
@@ -1106,6 +1155,34 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
     }));
   }
 
+  const isExperienceOrder = order?.type === '体验卡' || Boolean(form.experienceSnapshot) || Boolean(order?.isUpgrade);
+  const isCompletedExperience = isExperienceOrder && (
+    Boolean(form.experienceSnapshot) ||
+    (order?.type === '体验卡' && Number(order?.usedTimes || 0) >= Number(order?.totalTimes || 1))
+  );
+  const canChoosePackage = !isExperienceOrder || form.experienceUpgradeStatus === '已升单';
+  const isExperienceFrozen = isCompletedExperience && form.experienceUpgradeStatus === '已升单' && form.orderType === '体验卡';
+
+  function setExperienceUpgradeStatus(status: '' | '未升单' | '已升单') {
+    setForm(prev => {
+      const snapshot = status === '已升单' && !prev.experienceSnapshot
+        ? {
+            amount: prev.amount,
+            payStatus: prev.payStatus,
+            purchaseDate: prev.purchaseDate,
+            serviceItems: prev.serviceItems,
+            serviceNote: prev.serviceNote,
+            servicePeople: {
+              sp1: prev.servicePerson1,
+              sp2: prev.servicePerson2,
+              sp3: prev.servicePerson3,
+            },
+          }
+        : prev.experienceSnapshot;
+      return { ...prev, experienceUpgradeStatus: status, experienceSnapshot: snapshot };
+    });
+  }
+
   async function handleContractFiles(files: FileList | null) {
     const selected = Array.from(files ?? []);
     if (selected.length === 0) return;
@@ -1232,7 +1309,9 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
       payStatus,
       purchaseDate: form.purchaseDate,
       serviceItems: form.serviceItems,
-      totalTimes: form.orderType === '套餐' ? 10 : 1,
+      totalTimes: form.orderType === '套餐' || order?.isUpgrade ? Math.max(1, Number(form.totalTimes) || 1) : 1,
+      usedTimes: form.usedTimes,
+      isUpgrade: form.experienceUpgradeStatus === '已升单',
       contractSigned: form.contractStatus !== '无' && form.contractStatus !== '未回签',
       serviceItemCount: Math.max(1, splitServiceItems(form.serviceItems).length),
       servicePeople: {
@@ -1240,6 +1319,7 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
         sp2: form.servicePerson2,
         sp3: form.servicePerson3,
         followRecords: newRecords,
+        experienceSnapshot: form.experienceSnapshot,
       },
       appointmentTime: form.appointmentTime,
       serviceNote: form.serviceNote,
@@ -1337,6 +1417,19 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
                       <span><span style={{ color: 'var(--muted-foreground)' }}>区域：</span>{form.customerArea}</span>
                       <span><span style={{ color: 'var(--muted-foreground)' }}>客服：</span>{form.customerAdvisor}</span>
                     </div>
+                    {isEdit && (order?.type === '体验卡' || form.orderType === '体验卡') && (
+                      <div className="mt-3 flex items-center gap-3">
+                        <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>客户标签</label>
+                        <select
+                          className="flex-1 px-3 py-2 rounded-lg text-sm outline-none"
+                          style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
+                          value={form.customerTag}
+                          onChange={e => set('customerTag', e.target.value as CustomerTag)}
+                        >
+                          {TAG_DEFS.map(tag => <option key={tag.tag} value={tag.tag}>{tag.label} — {tag.desc}</option>)}
+                        </select>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div
@@ -1384,6 +1477,43 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
               {/* ── 订单维护 ── */}
               <div className={activeTab === 'order' ? '' : 'hidden'}>
                 <div className="flex flex-col gap-4">
+                  {isCompletedExperience && (
+                    <div className="rounded-xl p-3" style={{ background: 'var(--muted)', border: '1px solid var(--border)' }}>
+                      <div className="text-sm font-semibold text-foreground mb-2">体验卡状态</div>
+                      <div className="flex gap-3">
+                        {(['未升单', '已升单'] as const).map(status => (
+                          <button
+                            key={status}
+                            type="button"
+                            disabled={isView}
+                            onClick={() => setExperienceUpgradeStatus(status)}
+                            className="flex-1 py-2 rounded-lg text-sm font-medium border-2 transition-all"
+                            style={{
+                              borderColor: form.experienceUpgradeStatus === status ? 'var(--brand)' : 'var(--border)',
+                              background: form.experienceUpgradeStatus === status ? 'var(--accent)' : 'var(--card)',
+                              color: form.experienceUpgradeStatus === status ? 'var(--brand)' : 'var(--foreground)',
+                            }}
+                          >
+                            {status}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="text-xs mt-2" style={{ color: 'var(--muted-foreground)' }}>
+                        选择已升单后可新建套餐内容；体验卡阶段资料将保留为只读记录。
+                      </div>
+                    </div>
+                  )}
+                  {form.experienceSnapshot && form.orderType === '套餐' && (
+                    <div className="rounded-xl p-3" style={{ background: 'var(--muted)', border: '1px solid var(--border)' }}>
+                      <div className="text-sm font-semibold text-foreground mb-2">体验卡阶段（已固化）</div>
+                      <div className="grid grid-cols-2 gap-2 text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                        <span>金额：¥{form.experienceSnapshot.amount || '—'}</span>
+                        <span>购买时间：{form.experienceSnapshot.purchaseDate || '—'}</span>
+                        <span>付款状态：{payStatusDisplay(form.experienceSnapshot.payStatus)}</span>
+                        <span>服务项目：{form.experienceSnapshot.serviceItems || '—'}</span>
+                      </div>
+                    </div>
+                  )}
                   {/* 订单类型 */}
                   <div className="flex flex-col gap-1">
                     <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>订单类型</label>
@@ -1391,12 +1521,21 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
                       {(['体验卡', '套餐'] as OrderType[]).map(t => (
                         <button
                           key={t}
-                          onClick={() => { set('orderType', t); set('amount', ''); set('contractStatus', t === '体验卡' ? '无' : '未回签'); }}
+                          type="button"
+                          disabled={isView || (t === '套餐' && !canChoosePackage)}
+                          onClick={() => {
+                            if (t === '套餐' && !canChoosePackage) return;
+                            set('orderType', t);
+                            set('amount', '');
+                            set('contractStatus', t === '体验卡' ? '无' : '未回签');
+                          }}
                           className="flex-1 py-3 rounded-xl text-sm font-semibold border-2 transition-all text-center"
                           style={{
                             borderColor: form.orderType === t ? 'var(--brand)' : 'var(--border)',
-                            background: form.orderType === t ? 'var(--accent)' : 'var(--muted)',
-                            color: form.orderType === t ? 'var(--brand)' : 'var(--foreground)',
+                            background: form.orderType === t ? 'var(--accent)' : (t === '套餐' && !canChoosePackage ? 'var(--muted)' : 'var(--card)'),
+                            color: form.orderType === t ? 'var(--brand)' : (t === '套餐' && !canChoosePackage ? 'var(--muted-foreground)' : 'var(--foreground)'),
+                            cursor: t === '套餐' && !canChoosePackage ? 'not-allowed' : 'pointer',
+                            opacity: t === '套餐' && !canChoosePackage ? 0.55 : 1,
                           }}
                         >
                           {t}
@@ -1405,6 +1544,12 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
                     </div>
                   </div>
 
+                  {isExperienceFrozen && (
+                    <div className="rounded-lg px-3 py-2 text-xs" style={{ background: 'var(--muted)', color: 'var(--muted-foreground)', border: '1px solid var(--border)' }}>
+                      已升单后，体验卡阶段的订单资料已固化。请切换至套餐后继续维护套餐内容。
+                    </div>
+                  )}
+                  <fieldset disabled={isExperienceFrozen} style={{ minWidth: 0, opacity: isExperienceFrozen ? 0.64 : 1 }}>
                   {/* 金额 */}
                   <div className="flex flex-col gap-1">
                     <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>对应金额（元）</label>
@@ -1548,11 +1693,13 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
                       </div>
                     )}
                   </div>
+                  </fieldset>
                 </div>
               </div>
 
               {/* ── 服务人员 ── */}
               <div className={activeTab === 'service' ? '' : 'hidden'}>
+                <fieldset disabled={isExperienceFrozen} style={{ minWidth: 0, opacity: isExperienceFrozen ? 0.64 : 1 }}>
                 <div className="flex flex-col gap-4">
                   <div>
                     <div className="text-sm font-semibold text-foreground mb-2">服务人员分配</div>
@@ -1560,12 +1707,37 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
                       <div className="px-4 py-2 text-xs font-medium flex gap-3" style={{ background: 'var(--muted)', color: 'var(--muted-foreground)', borderBottom: '1px solid var(--border)' }}>
                         <span className="w-20">服务类型</span>
                         <span className="flex-1">分配人员</span>
+                        <span className="w-28">服务总次数</span>
                       </div>
                       <div className="px-4">
-                        <ServicePersonRow label="产康师" value={form.servicePerson1} onChange={v => set('servicePerson1', v)} />
-                        <ServicePersonRow label="运动康复师" value={form.servicePerson2} onChange={v => set('servicePerson2', v)} />
-                        <ServicePersonRow label="调理师" value={form.servicePerson3} onChange={v => set('servicePerson3', v)} />
+                        <ServicePersonRow
+                          label="产康师"
+                          value={form.servicePerson1}
+                          onChange={v => set('servicePerson1', v)}
+                          totalTimes={form.totalTimes}
+                          onTotalTimesChange={v => {
+                            set('totalTimes', v);
+                            set('servicePerson1', { ...form.servicePerson1, totalTimes: v });
+                          }}
+                        />
+                        <ServicePersonRow
+                          label="运动康复师"
+                          value={form.servicePerson2}
+                          onChange={v => set('servicePerson2', v)}
+                          totalTimes={form.servicePerson2.totalTimes || form.totalTimes}
+                          onTotalTimesChange={v => set('servicePerson2', { ...form.servicePerson2, totalTimes: v })}
+                        />
+                        <ServicePersonRow
+                          label="调理师"
+                          value={form.servicePerson3}
+                          onChange={v => set('servicePerson3', v)}
+                          totalTimes={form.servicePerson3.totalTimes || form.totalTimes}
+                          onTotalTimesChange={v => set('servicePerson3', { ...form.servicePerson3, totalTimes: v })}
+                        />
                       </div>
+                    </div>
+                    <div className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                      套餐请填写总服务次数；体验卡固定为 1 次。当前已完成：{form.usedTimes} / {form.orderType === '体验卡' ? 1 : Math.max(1, Number(form.totalTimes) || 1)}
                     </div>
                   </div>
                   <div className="flex flex-col gap-1">
@@ -1728,6 +1900,7 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
                     </div>
                   </div>
                 </div>
+                </fieldset>
               </div>
 
               {/* ── 跟进情况 ── */}
@@ -1925,6 +2098,8 @@ function initForm(): OrderForm {
   return {
     customerId: '', customerName: '', customerPhone: '', customerArea: '', customerTag: '', customerAdvisor: '',
     orderType: '', amount: '', payStatus: '待支付', purchaseDate: new Date().toISOString().slice(0, 10),
+    totalTimes: '1', usedTimes: 0,
+    experienceUpgradeStatus: '', experienceSnapshot: null,
     contractStatus: '无',
     servicePerson1: { type: '产康师', assign: '待分配' },
     servicePerson2: { type: '运动康复师', assign: '待分配' },
@@ -1991,16 +2166,27 @@ function getFollowDisplay(order: any): { status: string; date: string; task: str
   };
 }
 
+function serviceProgressText(order: any): string {
+  const used = Math.max(0, Number(order?.usedTimes) || 0);
+  const total = Math.max(1, Number(order?.totalTimes) || 1);
+  return order?.type === '套餐' || order?.isUpgrade ? `${used}/${total}` : (used > 0 ? '已服务' : '未服务');
+}
+
 /* ─── Main Page ──────────────────────────────────────── */
 export default function OrdersListPage() {
   const { currentUser } = useApp();
+  const orderMutations = useOrderMutations();
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [showModal, setShowModal] = useState(false);
   const [modalMode, setModalMode] = useState<OrderModalMode>('create');
   const [editOrderId, setEditOrderId] = useState('');
   const [selectedOrder, setSelectedOrder] = useState<any | null>(null);
-  const pageSize = 10;
+  const [showImport, setShowImport] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importMsg, setImportMsg] = useState('');
+  const importInputRef = useRef<HTMLInputElement>(null);
+  const [pageSize, setPageSize] = useState(20);
 
   // Multi-select filter states
   const [fType, setFType] = useState<string[]>([]);
@@ -2011,6 +2197,7 @@ export default function OrdersListPage() {
   const [fTherapist, setFTherapist] = useState<string[]>([]);
 
   const isReadOnly = currentUser.role === 'finance';
+  const canManageBulk = currentUser.role === 'superadmin' || currentUser.role === 'admin';
 
   // Build option lists from data
   const customersQ = useCustomers({ page: 1, pageSize: 1000, includeOrdered: 1 });
@@ -2086,14 +2273,68 @@ export default function OrdersListPage() {
     return matchSearch && matchType && matchPay && matchArea && matchTag && matchAdvisor && matchTherapist;
   });
 
-  const totalPages = Math.ceil(filtered.length / pageSize);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const paginated = filtered.slice((page - 1) * pageSize, page * pageSize);
 
   useEffect(() => { setPage(1); }, [search, fType, fPay, fArea, fTag, fAdvisor, fTherapist]);
 
+  function handleOrderCustomerExport() {
+    const headers = ['订单编号', '购买时间', '客户ID', '客户姓名', '联系电话', '所在区域', '客户标签', '归属客服', '订单类型', '服务项目', '跟进状态', '跟进时间', '跟进事项', '付款状态', '订单金额', '合同状态', '服务人员', '预约服务时间', '服务备注'];
+    const rows = filtered.map(order => {
+      const follow = getFollowDisplay(order);
+      return [
+        order.id, order.createdAt, order.resolvedCustomerId, order.customerName, order.customerPhone, order.area, order.tag || '', order.advisor,
+        order.type, order.serviceItems || '', follow.status, follow.date, follow.task, payStatusDisplay(effectiveOrderPayStatus(order)), order.amount,
+        getContractStatus(order.id, order.type), getTherapistDisplay(order.id), order.appointmentTime || '', order.serviceNote || '',
+      ];
+    });
+    downloadXlsx(`订单客户信息_${new Date().toISOString().slice(0, 10)}.xlsx`, headers, rows);
+    toast.success(`已导出 ${rows.length} 条订单客户信息`);
+  }
+
+  async function handleOrderImport() {
+    if (!importFile) return;
+    try {
+      const sheetRows = await readSpreadsheet(importFile);
+      if (!sheetRows[0]?.includes('客户姓名')) { setImportMsg('未找到“客户姓名”列，请使用下载的订单导入模板。'); return; }
+      const records = rowsToObjects(sheetRows);
+      if (records.length === 0) { setImportMsg('文件内容为空或格式不正确，请使用下载的模板。'); return; }
+      const orders = records.map(row => ({
+        customerId: row['客户ID'] || '',
+        customerName: row['客户姓名'] || '',
+        customerWechat: row['微信号'] || '',
+        customerPhone: row['联系电话'] || '',
+        customerArea: row['所在区域'] || '',
+        customerTag: row['客户标签'] || 'D1',
+        customerAdvisor: row['归属客服'] || currentUser.name,
+        source: '订单批量导入',
+        type: row['订单类型'] || '体验卡',
+        serviceItems: row['服务项目'] || '',
+        amount: Number(row['订单金额']) || 0,
+        payStatus: row['付款状态'] || '待付款',
+        totalTimes: Math.max(1, Number(row['总次数']) || 1),
+        usedTimes: Math.max(0, Number(row['已使用次数']) || 0),
+        isUpgrade: importBoolean(row['是否升级'] || ''),
+        contractSigned: importBoolean(row['合同状态'] || ''),
+        hasCoupon: importBoolean(row['是否使用优惠券'] || ''),
+        appointmentTime: row['预约服务时间'] || '',
+        serviceNote: row['服务备注'] || '',
+        serviceItemCount: Math.max(1, (row['服务项目'] || '').split(/[、,，]/).filter(Boolean).length),
+      })).filter(order => order.customerId || order.customerName || order.customerPhone);
+      if (orders.length === 0) { setImportMsg('未识别到有效订单，请至少填写客户ID、客户姓名或联系电话。'); return; }
+      setImportMsg(`正在导入 ${orders.length} 条订单...`);
+      const results = await Promise.all(orders.map(order => orderMutations.create(order as any).then(() => true).catch(() => false)));
+      const success = results.filter(Boolean).length;
+      setImportMsg(success === orders.length ? `成功导入 ${success} 条订单` : `成功导入 ${success} 条，失败 ${orders.length - success} 条，请检查客户和必填信息。`);
+      if (success > 0) setImportFile(null);
+    } catch (error: any) {
+      setImportMsg(error?.message || '导入失败，请检查 Excel 或 CSV 格式。');
+    }
+  }
+
   /* ── Column widths for non-frozen cols ── */
   // 区域(92) | 订单类型(80) | 服务项目(160) | 跟进状态(76) | 跟进时间(82) | 跟进事项(120) | 付款状态(76) | 金额(80) | 合同状态(76) | 归属客服(76) | 技师(88) | 操作(96)
-  const NORMAL_COLS = [92, 80, 160, 76, 82, 120, 76, 80, 76, 76, 88, 96];
+  const NORMAL_COLS = [92, 80, 160, 76, 82, 120, 76, 80, 76, 76, 88, 82, 96];
   const totalNormal = NORMAL_COLS.reduce((s, w) => s + w, 0);
   const tableMinW = FREEZE_TOTAL + totalNormal;
 
@@ -2107,11 +2348,43 @@ export default function OrdersListPage() {
         editOrderId={editOrderId}
       />
 
+      <div className={`fixed inset-0 z-50 flex items-center justify-center transition-opacity duration-200 ${showImport ? 'opacity-100 pointer-events-auto' : 'hidden opacity-0 pointer-events-none'}`} style={{ background: 'rgba(0,0,0,0.45)' }}>
+        <div className="bg-card rounded-2xl shadow-custom flex flex-col overflow-hidden" style={{ width: 560, maxHeight: '90vh' }}>
+          <div className="flex items-center gap-3 px-6 py-4" style={{ borderBottom: '1px solid var(--border)' }}>
+            <UploadIcon size={16} style={{ color: 'var(--brand)' }} />
+            <span className="font-bold text-base text-foreground">批量导入订单</span>
+            <div className="flex-1" />
+            <button className="p-1.5 rounded hover:bg-muted" onClick={() => { setShowImport(false); setImportFile(null); setImportMsg(''); }}><XIcon size={16} /></button>
+          </div>
+          <div className="p-6 flex flex-col gap-5">
+            <div className="rounded-lg px-4 py-3 text-sm leading-relaxed" style={{ background: 'rgba(30,136,229,0.08)', color: 'var(--brand)', border: '1px solid rgba(30,136,229,0.2)' }}>
+              下载模板后填写订单及客户资料。若客户ID不存在，系统会按客户姓名或联系电话自动创建客户并关联订单。
+            </div>
+            <div className="flex flex-col gap-2">
+              <span className="text-sm font-medium text-foreground">第一步：下载模板</span>
+              <button className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium self-start" style={{ background: 'var(--muted)', border: '1px solid var(--border)' }} onClick={downloadOrderTemplate}>
+                <DownloadIcon size={14} style={{ color: 'var(--brand)' }} />下载订单导入模板.xlsx
+              </button>
+              <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>客户姓名、联系电话、订单类型和订单金额建议填写完整。</span>
+            </div>
+            <input ref={importInputRef} type="file" accept=".xlsx,.csv" className="hidden" onChange={e => { setImportFile(e.target.files?.[0] || null); setImportMsg(''); if (importInputRef.current) importInputRef.current.value = ''; }} />
+            <button className="flex flex-col items-center justify-center gap-2 rounded-xl transition-all hover:opacity-80" style={{ border: `2px dashed ${importFile ? 'var(--brand)' : 'var(--border)'}`, background: importFile ? 'rgba(30,136,229,0.05)' : 'var(--muted)', padding: '28px 16px' }} onClick={() => importInputRef.current?.click()}>
+              {importFile ? <><FileTextIcon size={30} style={{ color: 'var(--brand)' }} /><span className="text-sm font-semibold">{importFile.name}</span></> : <><UploadIcon size={30} style={{ color: 'var(--muted-foreground)' }} /><span className="text-sm font-medium">点击选择 Excel 或 CSV 文件</span></>}
+            </button>
+            {importMsg && <div className="text-sm" style={{ color: importMsg.includes('成功') ? 'var(--success)' : 'var(--danger)' }}>{importMsg}</div>}
+          </div>
+          <div className="flex justify-end gap-3 px-6 py-4" style={{ borderTop: '1px solid var(--border)' }}>
+            <button className="px-4 py-2 rounded-lg text-sm border hover:bg-muted" style={{ borderColor: 'var(--border)' }} onClick={() => setShowImport(false)}>取消</button>
+            <button className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm text-white font-medium disabled:opacity-50" style={{ background: 'var(--brand)' }} disabled={!importFile} onClick={handleOrderImport}><UploadIcon size={14} />开始导入</button>
+          </div>
+        </div>
+      </div>
+
       <div data-cmp="OrdersListPage" className="flex flex-col gap-4">
 
         {/* ── Top action bar — single row, no wrap ── */}
         <div className="bg-card rounded-xl px-4 py-3 shadow-custom">
-          <div className="flex items-center gap-3" style={{ flexWrap: 'nowrap', overflowX: 'auto' }}>
+          <div className="flex flex-wrap items-center gap-3">
             {/* Search input */}
             <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg flex-shrink-0" style={{ background: 'var(--muted)', minWidth: 220 }}>
               <SearchIcon size={14} style={{ color: 'var(--muted-foreground)' }} />
@@ -2126,6 +2399,7 @@ export default function OrdersListPage() {
               </div>
             </div>
             {/* Filter dropdowns */}
+            <div className="order-2 basis-full flex flex-wrap items-center gap-3 pt-3" style={{ borderTop: '1px solid var(--border)' }}>
             <MultiSelectDropdown label="订单类型" options={TYPE_OPTIONS} selected={fType} onChange={setFType} />
             <div className="w-px h-5 flex-shrink-0" style={{ background: 'var(--border)' }} />
             <MultiSelectDropdown label="付款状态" options={PAY_OPTIONS} selected={fPay} onChange={setFPay} />
@@ -2155,8 +2429,19 @@ export default function OrdersListPage() {
                 </>
               )}
             />
+            </div>
             {/* Count + new button */}
             <span className="text-sm flex-shrink-0 ml-1" style={{ color: 'var(--muted-foreground)', whiteSpace: 'nowrap' }}>共 {filtered.length} 条</span>
+            {canManageBulk && (
+              <>
+                <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium flex-shrink-0" style={{ background: 'var(--muted)', border: '1px solid var(--border)' }} onClick={handleOrderCustomerExport}>
+                  <DownloadIcon size={14} />客户信息导出
+                </button>
+                <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium flex-shrink-0" style={{ background: 'var(--muted)', border: '1px solid var(--border)' }} onClick={() => { setImportFile(null); setImportMsg(''); setShowImport(true); }}>
+                  <UploadIcon size={14} />批量导入
+                </button>
+              </>
+            )}
             {!isReadOnly && (
               <button
                 className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm text-white font-medium hover:opacity-90 flex-shrink-0"
@@ -2200,6 +2485,7 @@ export default function OrdersListPage() {
                   <th style={{ textAlign: 'center' }}>合同状态</th>
                   <th>归属客服</th>
                   <th>技师</th>
+                  <th style={{ textAlign: 'center' }}>服务情况</th>
                   <th style={{ textAlign: 'center' }}>操作</th>
                 </tr>
               </thead>
@@ -2377,6 +2663,12 @@ export default function OrdersListPage() {
                         </span>
                       </td>
 
+                      <td style={{ textAlign: 'center' }}>
+                        <span className="text-xs font-medium" style={{ color: serviceProgressText(o) === '未服务' ? 'var(--muted-foreground)' : 'var(--brand)' }}>
+                          {serviceProgressText(o)}
+                        </span>
+                      </td>
+
                       {/* 操作 */}
                       <td style={{ textAlign: 'center' }}>
                         <div className="flex items-center justify-center gap-1">
@@ -2406,7 +2698,7 @@ export default function OrdersListPage() {
 
                 {paginated.length === 0 && (
                   <tr>
-                    <td colSpan={16} className="text-center py-12" style={{ color: 'var(--muted-foreground)' }}>
+                    <td colSpan={17} className="text-center py-12" style={{ color: 'var(--muted-foreground)' }}>
                       <FileTextIcon size={36} className="mx-auto mb-3 opacity-20" />
                       <div className="text-sm">暂无订单数据</div>
                     </td>
@@ -2417,10 +2709,15 @@ export default function OrdersListPage() {
           </div>
 
           {/* Pagination */}
-          {totalPages > 1 && (
-            <div className="flex items-center justify-between px-5 py-3" style={{ borderTop: '1px solid var(--border)' }}>
+          <div className="flex items-center justify-between px-5 py-3" style={{ borderTop: '1px solid var(--border)' }}>
+              <label className="flex items-center gap-2 text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                每页
+                <select className="rounded-md px-2 py-1 text-xs bg-card" style={{ border: '1px solid var(--border)', color: 'var(--foreground)' }} value={pageSize} onChange={e => { setPageSize(Number(e.target.value)); setPage(1); }}>
+                  {[10, 20, 30, 50].map(size => <option key={size} value={size}>{size} 条</option>)}
+                </select>
+              </label>
               <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
-                第 {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, filtered.length)} 条，共 {filtered.length} 条
+                {filtered.length === 0 ? '共 0 条' : `第 ${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, filtered.length)} 条，共 ${filtered.length} 条`}
               </span>
               <div className="flex items-center gap-1">
                 <button
@@ -2463,8 +2760,7 @@ export default function OrdersListPage() {
                   <ChevronRightIcon size={14} />
                 </button>
               </div>
-            </div>
-          )}
+          </div>
         </div>
       </div>
     </>

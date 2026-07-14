@@ -96,8 +96,10 @@ function slotLabelFromTimeSlot(timeSlot: string): SlotLabel {
   return '晚上';
 }
 
-function getOrderForAppointment(customerName: string, ORDERS: any[]) {
-  return ORDERS.find(o => o.customerName === customerName) ?? null;
+function getOrderForAppointment(appt: Pick<Appointment, 'customerId' | 'customerName'>, orders: any[]) {
+  return orders.find(order => order.customerId === appt.customerId || order.customerCode === appt.customerId)
+    ?? orders.find(order => order.customerName === appt.customerName)
+    ?? null;
 }
 
 // ─── TherapistMultiSelect ─────────────────────────────────────────────────────
@@ -245,6 +247,7 @@ interface AppointmentCardProps {
   remarkDraft?: string;
   onRemarkChange?: (v: string) => void;
   onRemarkSave?: () => void;
+  onComplete?: () => void;
 }
 
 function AppointmentCard({
@@ -262,10 +265,11 @@ function AppointmentCard({
   remarkDraft = '',
   onRemarkChange = () => {},
   onRemarkSave = () => {},
+  onComplete = () => {},
 }: AppointmentCardProps) {
   const ordersQ = useOrders({ page: 1, pageSize: 1000 });
   const ORDERS: any[] = ordersQ.data?.data ?? [];
-  const order = getOrderForAppointment(appt.customerName, ORDERS);
+  const order = getOrderForAppointment(appt, ORDERS);
   const isCancelled = appt.status === '已取消';
   const isExperience = !isCancelled && order?.type === '体验卡' && !order?.isUpgrade;
   const isPackage = !isCancelled && (order?.type === '套餐' || order?.isUpgrade);
@@ -284,6 +288,7 @@ function AppointmentCard({
 
   const displayUsedTimes = usedTimes !== undefined ? usedTimes : (order?.usedTimes ?? 0);
   const area = appt.area;
+  const canComplete = !editMode && !isCancelled && appt.status !== '已完成' && appt.date <= new Date().toISOString().slice(0, 10);
 
   return (
     <div
@@ -325,6 +330,16 @@ function AppointmentCard({
           {appt.service && <span>{appt.service} · </span>}
           第{displayUsedTimes}次/共{order.totalTimes}次
         </div>
+      )}
+      {appt.status === '已完成' && <div className="mt-1 font-medium" style={{ color: '#16A34A' }}>已完成服务</div>}
+      {canComplete && (
+        <button
+          className="mt-1 px-2 py-1 rounded text-xs font-medium transition-colors hover:opacity-85"
+          style={{ background: '#DCFCE7', color: '#15803D', border: '1px solid #86EFAC' }}
+          onClick={e => { e.stopPropagation(); onComplete(); }}
+        >
+          确认已完成
+        </button>
       )}
       {/* Remark display (non-edit mode) */}
       {!editMode && appt.remark && (
@@ -1075,7 +1090,7 @@ export default function AppointmentsCalendarPage() {
     setLocalOrderUsedTimes(prev => {
       const next = { ...prev };
       ORDERS.forEach(o => {
-        if (next[o.id] === undefined) next[o.id] = o.usedTimes;
+        next[o.id] = o.usedTimes;
       });
       return next;
     });
@@ -1152,7 +1167,7 @@ export default function AppointmentsCalendarPage() {
     setDraftSlotStatus(prev => ({ ...prev, [key]: value }));
   }
 
-  // Called by CreateModal onSave — also updates localOrderUsedTimes and localServiceMap
+  // Creating an appointment does not consume a service. It is counted only after completion.
   function handleNewAppt(newAppt: Appointment, orderId: string, customerId: string, service: string) {
     setLocalAppts(prev => [newAppt, ...prev]);
 
@@ -1170,18 +1185,7 @@ export default function AppointmentsCalendarPage() {
       remark: newAppt.remark,
     }).catch(err => toast.error('预约保存失败：' + (err?.message ?? '')));
 
-    // Find order to determine if it's a package
-    const order = ORDERS.find(o => o.id === orderId);
-    if (order && (order.type === '套餐' || order.isUpgrade)) {
-      setLocalOrderUsedTimes(prev => ({
-        ...prev,
-        [orderId]: (prev[orderId] ?? order.usedTimes) + 1,
-      }));
-      // Remember service for this customer
-      if (service) {
-        setLocalServiceMap(prev => ({ ...prev, [customerId]: service }));
-      }
-    }
+    if (service) setLocalServiceMap(prev => ({ ...prev, [customerId]: service }));
 
     setShowCreateModal(false);
     toast.success(`已为「${newAppt.customerName}」创建预约`);
@@ -1192,19 +1196,23 @@ export default function AppointmentsCalendarPage() {
     setLocalAppts(prev => prev.map(a => {
       if (a.id !== apptId) return a;
       if (a.status === '已取消') return a; // no-op
-      // Roll back used times for the matching order
-      const order = getOrderForAppointment(a.customerName, ORDERS);
-      if (order && (order.type === '套餐' || order.isUpgrade)) {
-        setLocalOrderUsedTimes(prev2 => ({
-          ...prev2,
-          [order.id]: Math.max(0, (prev2[order.id] ?? order.usedTimes) - 1),
-        }));
-      }
       return { ...a, status: '已取消' as ApptStatus };
     }));
     apptMutations.patchStatus({ id: apptId, status: '已取消' }).catch(() => {});
     setConfirmCancelId(null);
     toast.success('预约已取消');
+  }
+
+  function handleCompleteAppt(apptId: string) {
+    const appointment = localAppts.find(item => item.id === apptId);
+    if (!appointment || appointment.status === '已完成') return;
+    setLocalAppts(prev => prev.map(item => item.id === apptId ? { ...item, status: '已完成' as ApptStatus } : item));
+    apptMutations.patchStatus({ id: apptId, status: '已完成' })
+      .then(() => toast.success('服务已确认完成，订单服务次数已同步'))
+      .catch(error => {
+        setLocalAppts(prev => prev.map(item => item.id === apptId ? appointment : item));
+        toast.error(error?.message || '服务完成确认失败');
+      });
   }
 
   // Save remark for an appointment (from edit mode)
@@ -1433,7 +1441,7 @@ export default function AppointmentsCalendarPage() {
 
                           {/* Appointment cards (edit or normal mode) */}
                           {cellAppts.map(appt => {
-                            const order = getOrderForAppointment(appt.customerName, ORDERS);
+                            const order = getOrderForAppointment(appt, ORDERS);
                             const usedTimes = order ? (localOrderUsedTimes[order.id] ?? order.usedTimes) : 0;
                             const isConfirming = confirmCancelId === appt.id;
                             const isEditingRmk = editingRemarkId === appt.id;
@@ -1470,6 +1478,7 @@ export default function AppointmentsCalendarPage() {
                                 remarkDraft={remarkDrafts[appt.id] ?? appt.remark ?? ''}
                                 onRemarkChange={v => setRemarkDrafts(prev => ({ ...prev, [appt.id]: v }))}
                                 onRemarkSave={() => handleSaveRemark(appt.id)}
+                                onComplete={() => handleCompleteAppt(appt.id)}
                               />
                             );
                           })}

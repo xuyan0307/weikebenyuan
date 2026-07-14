@@ -68,7 +68,7 @@ export function useAppointments(params: Record<string, any>) {
 }
 export function useAppointmentMutations() {
   const qc = useQueryClient();
-  const invalidate = () => { qc.invalidateQueries({ queryKey: ['appointments'] }); qc.invalidateQueries({ queryKey: ['dashboard'] }); };
+  const invalidate = () => { qc.invalidateQueries({ queryKey: ['appointments'] }); qc.invalidateQueries({ queryKey: ['orders'] }); qc.invalidateQueries({ queryKey: ['dashboard'] }); };
   return {
     create: useMutation({ mutationFn: (b: Partial<Appointment>) => appointmentsApi.create(b), onSuccess: invalidate }).mutateAsync,
     patchStatus: useMutation({ mutationFn: ({ id, status }: { id: string; status: string }) => appointmentsApi.patchStatus(id, status), onSuccess: invalidate }).mutateAsync,
