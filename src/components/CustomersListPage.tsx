@@ -601,7 +601,7 @@ function FF({ label, required = false, children }: { label: string; required?: b
 
 // ─────────────────────────── Freeze-pane sticky styles ───────────────────────────
 // Compact widths for the first four frozen columns
-const COL_W = [82, 64, 140, 54] as const; // 获客时间 | 客户ID | 客户姓名 | 标签
+const COL_W = [82, 64, 96, 54] as const; // 获客时间 | 客户ID | 客户姓名 | 标签
 const COL_LEFT: [number, number, number, number] = [
   0,
   COL_W[0],
@@ -1422,7 +1422,7 @@ export default function CustomersListPage() {
       {/* ══ Data table ══ */}
       <div className="bg-card rounded-xl shadow-custom overflow-hidden">
         <div style={{ maxHeight: 'calc(100vh - 310px)', overflow: 'auto' }}>
-          <table className="data-table w-full" style={{ borderCollapse: 'collapse', minWidth: 1228, tableLayout: 'fixed' }}>
+          <table className="data-table w-full" style={{ borderCollapse: 'collapse', minWidth: 1100, tableLayout: 'fixed' }}>
             <thead>
               <tr>
                 {/* Frozen columns 1-4 (sticky) */}
