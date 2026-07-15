@@ -685,7 +685,7 @@ export default function CustomersListPage() {
   const [detailId, setDetailId] = useState<string | null>(null);
   const [detailTab, setDetailTab] = useState<'basic' | 'profile' | 'follow' | 'orders'>('basic');
 
-  const customersQuery = useCustomers({ page: 1, pageSize: 10000, includeOrdered: 1 });
+  const customersQuery = useCustomers({ page: 1, pageSize: 10000 });
   const customers: Customer[] = (customersQuery.data?.data ?? []) as any;
   const mutations = useCustomerMutations();
   const ordersQuery = useOrders({ customerId: detailId || '', page: 1, pageSize: 100 });
@@ -1422,7 +1422,10 @@ export default function CustomersListPage() {
       {/* ══ Data table ══ */}
       <div className="bg-card rounded-xl shadow-custom overflow-hidden">
         <div style={{ maxHeight: 'calc(100vh - 310px)', overflow: 'auto' }}>
-          <table className="data-table w-full" style={{ borderCollapse: 'collapse', minWidth: 1100, tableLayout: 'fixed' }}>
+          <table className="data-table w-full" style={{ borderCollapse: 'collapse', minWidth: 1496, tableLayout: 'fixed' }}>
+            <colgroup>
+              {[82, 64, 96, 54, 90, 100, 160, 130, 100, 96, 160, 180, 96, 88].map((width, index) => <col key={index} style={{ width }} />)}
+            </colgroup>
             <thead>
               <tr>
                 {/* Frozen columns 1-4 (sticky) */}
@@ -1431,11 +1434,11 @@ export default function CustomersListPage() {
                 <th style={STICKY_TH_STYLE(2)}>客户姓名</th>
                 <th style={STICKY_TH_STYLE(3)}>标签</th>
                 {/* Scrollable columns */}
-                <th style={{ minWidth: 82, textAlign: 'center' }}>跟进状态</th>
-                <th style={{ minWidth: 100, textAlign: 'center' }}>跟进时间</th>
-                <th style={{ minWidth: 160, textAlign: 'center' }}>跟进事项</th>
-                <th style={{ minWidth: 110, textAlign: 'center' }}>微信/电话</th>
-                <th style={{ minWidth: 80, textAlign: 'center' }}>所在区域</th>
+                <th style={{ width: 90, textAlign: 'center' }}>跟进状态</th>
+                <th style={{ width: 100, textAlign: 'center' }}>跟进时间</th>
+                <th style={{ width: 160, textAlign: 'center' }}>跟进事项</th>
+                <th style={{ width: 130, textAlign: 'center' }}>微信/电话</th>
+                <th style={{ width: 100, textAlign: 'center' }}>所在区域</th>
                 <th style={{ width: 96, textAlign: 'center' }}>来源渠道</th>
                 <th style={{ width: 160, textAlign: 'center' }}>客户画像</th>
                 <th style={{ width: 180, textAlign: 'center' }}>需求情况</th>
