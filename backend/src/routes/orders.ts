@@ -123,7 +123,7 @@ function mapRow(r: any) {
     type: r.type,
     amount: Number(r.amount),
     payStatus: r.pay_status,
-    createdAt: r.created_at ? new Date(r.created_at).toISOString().slice(0, 10) : '',
+    createdAt: r.acquired_at ? new Date(r.acquired_at).toISOString().slice(0, 10) : (r.created_at ? new Date(r.created_at).toISOString().slice(0, 10) : ''),
     paidAt: r.paid_at ? new Date(r.paid_at).toISOString() : null,
     usedTimes: r.used_times || 0,
     totalTimes: r.total_times,
@@ -165,7 +165,7 @@ router.get('/', authenticateToken, async (req, res, next) => {
               o.service_item_count, o.service_items, o.service_people, o.appointment_time,
               o.service_note, o.created_at, o.updated_at,
               c.name AS customer_name, c.customer_code, c.phone AS customer_phone,
-              c.area AS customer_area, c.tag AS customer_tag, c.intended_product,
+              c.area AS customer_area, c.tag AS customer_tag, c.acquired_at, c.intended_product,
               u.name AS advisor_name
        FROM (
          SELECT o.id
@@ -219,7 +219,7 @@ router.get('/:id', authenticateToken, async (req, res, next) => {
     const db = getDb();
     const [rows] = await db.execute(
       `SELECT o.*, c.name AS customer_name, c.customer_code, c.phone AS customer_phone,
-              c.area AS customer_area, c.tag AS customer_tag, c.intended_product,
+              c.area AS customer_area, c.tag AS customer_tag, c.acquired_at, c.intended_product,
               u.name AS advisor_name
        FROM orders o
        LEFT JOIN customers c ON c.id = o.customer_id
@@ -302,12 +302,13 @@ router.put('/:id', authenticateToken, auditLog('orders'), async (req: AuthReques
       const advisorId = await resolveAdvisorId(db, b.customerAdvisor || b.advisor);
       await db.execute(
         `UPDATE customers
-         SET name=?, phone=?, area=?, tag=?, advisor_id=?, intended_product=COALESCE(?, intended_product)
+         SET name=?, wechat=COALESCE(?, wechat), phone=?, area=?, source=COALESCE(?, source), acquired_at=COALESCE(?, acquired_at), tag=?, advisor_id=?, intended_product=COALESCE(?, intended_product)
          WHERE id=?`,
         [
-          b.customerName || '',
+          b.customerName || '', b.customerWechat || null,
           b.customerPhone || '',
           b.customerArea || null,
+          b.source || null, b.purchaseDate || null,
           b.customerTag || null,
           advisorId,
           b.serviceItems || null,

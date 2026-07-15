@@ -87,9 +87,7 @@ router.get('/', authenticateToken, async (req, res, next) => {
 
     const where: string[] = [];
     const params: any[] = [];
-    if (!includeOrdered) {
-      where.push('COALESCE(c.total_orders, 0) = 0');
-    }
+    if (!includeOrdered) where.push("c.tag IN ('D1','D2','D3')");
     if (keyword) {
       where.push('(c.name LIKE ? OR c.phone LIKE ? OR c.customer_code LIKE ?)');
       params.push(`%${keyword}%`, `%${keyword}%`, `%${keyword}%`);

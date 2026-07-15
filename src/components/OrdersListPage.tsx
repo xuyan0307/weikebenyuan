@@ -1365,7 +1365,7 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
     const orderBody: any = {
       customerId: form.customerId,
       customerName: form.customerName,
-      customerPhone: form.customerPhone,
+    customerPhone: form.customerPhone,
       customerArea: form.customerArea,
       customerTag: form.customerTag,
       customerAdvisor: form.customerAdvisor,
@@ -2612,7 +2612,7 @@ export default function OrdersListPage() {
               <thead>
                 <tr>
                   {/* Frozen cols */}
-                  <th style={STICKY_TH_STYLE(0)}>购买时间</th>
+                  <th style={STICKY_TH_STYLE(0)}>获客时间</th>
                   <th style={STICKY_TH_STYLE(1)}>客户ID</th>
                   <th style={STICKY_TH_STYLE(2)}>客户姓名</th>
                   <th style={STICKY_TH_STYLE(3)}>标签</th>
@@ -2651,7 +2651,7 @@ export default function OrdersListPage() {
 
                   return (
                     <tr key={o.id}>
-                      {/* Frozen: 购买时间 */}
+                      {/* Frozen: 获客时间 */}
                       <td style={STICKY_TD_STYLE(0, bgColor)}>
                         <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>{o.createdAt}</span>
                       </td>
