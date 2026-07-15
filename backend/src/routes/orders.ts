@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import { randomUUID } from 'crypto';
-import { authenticateToken } from '../middleware/auth';
+import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { auditLog } from '../middleware/auditLog';
+import { createError } from '../middleware/errorHandler';
 import { getDb } from '../config/database';
 import { ossFileUrl } from '../utils/oss';
 
@@ -126,6 +127,7 @@ function mapRow(r: any) {
     paidAt: r.paid_at ? new Date(r.paid_at).toISOString() : null,
     usedTimes: r.used_times || 0,
     totalTimes: r.total_times,
+    manualProgressAt: r.manual_progress_at ? new Date(r.manual_progress_at).toISOString() : null,
     isUpgrade: !!r.is_upgrade,
     contractSigned: !!r.contract_signed,
     hasCoupon: !!r.has_coupon,
@@ -159,7 +161,7 @@ router.get('/', authenticateToken, async (req, res, next) => {
 
     const [rows] = await db.query(
       `SELECT o.id, o.order_no, o.customer_id, o.type, o.amount, o.pay_status, o.paid_at,
-              o.used_times, o.total_times, o.is_upgrade, o.contract_signed, o.has_coupon,
+              o.used_times, o.total_times, o.manual_progress_at, o.is_upgrade, o.contract_signed, o.has_coupon,
               o.service_item_count, o.service_items, o.service_people, o.appointment_time,
               o.service_note, o.created_at, o.updated_at,
               c.name AS customer_name, c.customer_code, c.phone AS customer_phone,
@@ -235,12 +237,12 @@ router.get('/:id', authenticateToken, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-router.put('/:id', authenticateToken, auditLog('orders'), async (req, res, next) => {
+router.put('/:id', authenticateToken, auditLog('orders'), async (req: AuthRequest, res, next) => {
   try {
     const b = req.body || {};
     const db = getDb();
     const [rows] = await db.execute(
-      'SELECT id, customer_id FROM orders WHERE id=? OR order_no=? LIMIT 1',
+      'SELECT id, customer_id, type, used_times, total_times FROM orders WHERE id=? OR order_no=? LIMIT 1',
       [req.params.id, req.params.id]
     );
     const existing = (rows as any[])[0];
@@ -249,22 +251,39 @@ router.put('/:id', authenticateToken, auditLog('orders'), async (req, res, next)
       return;
     }
 
+    const manualProgressEdit = b.manualProgressEdit === true;
+    const canEditProgress = req.userRole === 'superadmin' || req.userRole === 'admin';
+    if (manualProgressEdit && !canEditProgress) {
+      return next(createError('仅超级管理员和管理员可以人工校正服务情况', 403));
+    }
+
     const custId = await resolveOrderCustomerId(db, { ...b, customerId: b.customerId || existing.customer_id });
     const payStatus = normalizePayStatus(b.payStatus);
+    const orderType = b.type || existing.type;
+    const totalTimes = orderType === '体验卡' && !b.isUpgrade
+      ? 1
+      : Math.max(1, Number(b.totalTimes) || 1);
+    const usedTimes = manualProgressEdit
+      ? Math.min(totalTimes, Math.max(0, Number(b.usedTimes) || 0))
+      : Number(existing.used_times) || 0;
     await db.execute(
       `UPDATE orders
        SET customer_id=?, type=?, amount=?, pay_status=?,
            paid_at = CASE WHEN ? = '已付款' THEN COALESCE(paid_at, NOW()) ELSE paid_at END,
-           total_times=?, is_upgrade=?, contract_signed=?, has_coupon=?, service_item_count=?, service_items=?,
+           used_times=?, total_times=?,
+           manual_progress_at = CASE WHEN ? THEN NOW() ELSE manual_progress_at END,
+           is_upgrade=?, contract_signed=?, has_coupon=?, service_item_count=?, service_items=?,
            service_people=?, appointment_time=?, service_note=?, contract_attachments=?, service_photo_records=?
        WHERE id=?`,
       [
         custId || existing.customer_id,
-        b.type || '体验卡',
+        orderType,
         b.amount || 0,
         payStatus,
         payStatus,
-        b.totalTimes || 1,
+        usedTimes,
+        totalTimes,
+        manualProgressEdit ? 1 : 0,
         b.isUpgrade ? 1 : 0,
         b.contractSigned ? 1 : 0,
         b.hasCoupon ? 1 : 0,

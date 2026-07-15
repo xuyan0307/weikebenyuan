@@ -114,6 +114,10 @@ async function runMigrations(db: mysql.Pool) {
     await db.execute("ALTER TABLE orders ADD COLUMN service_photo_records JSON DEFAULT NULL COMMENT '服务照片记录'");
   }
 
+  if (!(await columnExists(db, 'orders', 'manual_progress_at'))) {
+    await db.execute("ALTER TABLE orders ADD COLUMN manual_progress_at datetime DEFAULT NULL COMMENT '服务进度人工校正时间' AFTER total_times");
+  }
+
   if (!(await indexExists(db, 'orders', 'idx_created_at'))) {
     await db.execute("ALTER TABLE orders ADD INDEX idx_created_at (created_at)");
   }

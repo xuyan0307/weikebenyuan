@@ -24,6 +24,7 @@ interface ServicePerson {
   type: TherapistType;
   assign: TherapistAssign;
   totalTimes?: string;
+  usedTimes?: string;
 }
 
 interface FollowRecord {
@@ -789,13 +790,38 @@ interface ServicePersonRowProps {
   onChange: (v: ServicePerson) => void;
   totalTimes?: string;
   onTotalTimesChange?: (value: string) => void;
+  usedTimes?: string;
+  onUsedTimesChange?: (value: string) => void;
+  isExperience?: boolean;
+  canEditProgress?: boolean;
+  assignmentDisabled?: boolean;
 }
 
-function ServicePersonRow({ label, value, onChange, totalTimes = '1', onTotalTimesChange }: ServicePersonRowProps) {
+function isAssignedServicePerson(person?: ServicePerson) {
+  return Boolean(person?.assign && person.assign !== '待分配' && person.assign !== '无');
+}
+
+function experienceOverallUsedTimes(...people: ServicePerson[]) {
+  return people.some(person => isAssignedServicePerson(person) && Number(person.usedTimes) > 0) ? 1 : 0;
+}
+
+function ServicePersonRow({
+  label,
+  value,
+  onChange,
+  totalTimes = '1',
+  onTotalTimesChange,
+  usedTimes = '0',
+  onUsedTimesChange,
+  isExperience = false,
+  canEditProgress = false,
+  assignmentDisabled = false,
+}: ServicePersonRowProps) {
   const therapistsQ = useTherapists({ page: 1, pageSize: 1000 });
   const THERAPISTS: any[] = therapistsQ.data?.data ?? [];
   const typeTherapists = THERAPISTS.filter(t => t.status === '在职');
   const assignOptions = ['待分配', '无', ...typeTherapists.map(t => t.name)];
+  const isUnassigned = !isAssignedServicePerson(value);
 
   return (
     <div className="flex items-center gap-3 py-2" style={{ borderBottom: '1px solid var(--border)' }}>
@@ -804,12 +830,30 @@ function ServicePersonRow({ label, value, onChange, totalTimes = '1', onTotalTim
         className="text-sm rounded-lg px-2 py-1.5 outline-none flex-1"
         style={{ background: 'var(--muted)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
         value={value.assign}
-        onChange={e => onChange({ ...value, assign: e.target.value })}
+        onChange={e => onChange({
+          ...value,
+          assign: e.target.value,
+          ...(e.target.value === '待分配' || e.target.value === '无' ? { usedTimes: '0' } : {}),
+        })}
+        disabled={assignmentDisabled}
       >
         {assignOptions.map(o => <option key={o} value={o}>{o}</option>)}
       </select>
       <div className="w-28 flex-shrink-0">
-        {onTotalTimesChange ? (
+        {isUnassigned ? (
+          <span className="text-sm" style={{ color: 'var(--muted-foreground)' }}>无</span>
+        ) : isExperience ? (
+          <select
+            className="w-full text-sm rounded-lg px-2 py-1.5 outline-none"
+            style={{ background: 'var(--muted)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
+            value={Number(usedTimes) > 0 ? '1' : '0'}
+            disabled={!canEditProgress}
+            onChange={e => onUsedTimesChange?.(e.target.value)}
+          >
+            <option value="0">未服务</option>
+            <option value="1">已服务</option>
+          </select>
+        ) : onTotalTimesChange ? (
           <input
             type="number"
             min="1"
@@ -817,9 +861,26 @@ function ServicePersonRow({ label, value, onChange, totalTimes = '1', onTotalTim
             style={{ background: 'var(--muted)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
             value={totalTimes}
             onChange={e => onTotalTimesChange?.(e.target.value)}
+            disabled={!canEditProgress}
           />
         ) : <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>—</span>}
       </div>
+      {!isExperience && (
+        <div className="w-28 flex-shrink-0">
+          {isUnassigned ? (
+            <span className="text-sm" style={{ color: 'var(--muted-foreground)' }}>无</span>
+          ) : <input
+            type="number"
+            min="0"
+            max={Math.max(1, Number(totalTimes) || 1)}
+            className="w-full text-sm rounded-lg px-2 py-1.5 outline-none"
+            style={{ background: 'var(--muted)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
+            value={usedTimes}
+            onChange={e => onUsedTimesChange?.(e.target.value)}
+            disabled={!canEditProgress}
+          />}
+        </div>
+      )}
     </div>
   );
 }
@@ -1074,6 +1135,7 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
   const orderMutations = useOrderMutations();
   const { currentUser } = useApp();
   const canChooseFollower = currentUser.role === 'superadmin' || currentUser.role === 'admin';
+  const canEditServiceProgress = canChooseFollower && mode !== 'view';
   const usersQuery = useSystemUsers(canChooseFollower);
   const followerOptions = canChooseFollower
     ? (usersQuery.data?.data ?? [])
@@ -1083,6 +1145,7 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
   const defaultFollower = followerOptions.find(u => u.id === currentUser.id) ?? followerOptions[0] ?? { id: currentUser.id, name: currentUser.name };
   const [activeTab, setActiveTab] = useState('customer');
   const [form, setForm] = useState<OrderForm>(initForm());
+  const [isManualProgressDirty, setIsManualProgressDirty] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
   const contractFileRef = useRef<HTMLInputElement>(null);
   const servicePhotoFileRef = useRef<HTMLInputElement>(null);
@@ -1095,6 +1158,7 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
     if (!visible) {
       setActiveTab('customer');
       setForm(initForm());
+      setIsManualProgressDirty(false);
       setShowPicker(false);
       return;
     }
@@ -1104,6 +1168,7 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
     nextForm.newFollowFollowerId = nextForm.newFollowFollowerId || defaultFollower.id;
     nextForm.newFollowFollowerName = nextForm.newFollowFollowerName || defaultFollower.name;
     setForm(nextForm);
+    setIsManualProgressDirty(false);
   }, [visible, mode, editOrderId, order]);
 
   function set<K extends keyof OrderForm>(key: K, val: OrderForm[K]) {
@@ -1311,6 +1376,7 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
       serviceItems: form.serviceItems,
       totalTimes: form.orderType === '套餐' || order?.isUpgrade ? Math.max(1, Number(form.totalTimes) || 1) : 1,
       usedTimes: form.usedTimes,
+      manualProgressEdit: isManualProgressDirty,
       isUpgrade: form.experienceUpgradeStatus === '已升单',
       contractSigned: form.contractStatus !== '无' && form.contractStatus !== '未回签',
       serviceItemCount: Math.max(1, splitServiceItems(form.serviceItems).length),
@@ -1699,7 +1765,7 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
 
               {/* ── 服务人员 ── */}
               <div className={activeTab === 'service' ? '' : 'hidden'}>
-                <fieldset disabled={isExperienceFrozen} style={{ minWidth: 0, opacity: isExperienceFrozen ? 0.64 : 1 }}>
+                <fieldset style={{ minWidth: 0 }}>
                 <div className="flex flex-col gap-4">
                   <div>
                     <div className="text-sm font-semibold text-foreground mb-2">服务人员分配</div>
@@ -1707,37 +1773,104 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
                       <div className="px-4 py-2 text-xs font-medium flex gap-3" style={{ background: 'var(--muted)', color: 'var(--muted-foreground)', borderBottom: '1px solid var(--border)' }}>
                         <span className="w-20">服务类型</span>
                         <span className="flex-1">分配人员</span>
-                        <span className="w-28">服务总次数</span>
+                        <span className="w-28">{form.orderType === '体验卡' ? '服务状态' : '服务总次数'}</span>
+                        {form.orderType !== '体验卡' && <span className="w-28">已服务次数</span>}
                       </div>
                       <div className="px-4">
                         <ServicePersonRow
                           label="产康师"
                           value={form.servicePerson1}
-                          onChange={v => set('servicePerson1', v)}
+                          onChange={v => {
+                            set('servicePerson1', v);
+                            if (form.orderType === '体验卡') {
+                              set('usedTimes', experienceOverallUsedTimes(v, form.servicePerson2, form.servicePerson3));
+                            }
+                          }}
                           totalTimes={form.totalTimes}
+                          usedTimes={form.servicePerson1.usedTimes || '0'}
+                          isExperience={form.orderType === '体验卡'}
+                          canEditProgress={canEditServiceProgress}
+                          assignmentDisabled={isExperienceFrozen}
                           onTotalTimesChange={v => {
+                            if (!canEditServiceProgress) return;
                             set('totalTimes', v);
                             set('servicePerson1', { ...form.servicePerson1, totalTimes: v });
+                            setIsManualProgressDirty(true);
+                          }}
+                          onUsedTimesChange={v => {
+                            if (!canEditServiceProgress) return;
+                            const used = Math.max(0, Math.min(form.orderType === '体验卡' ? 1 : Math.max(1, Number(form.totalTimes) || 1), Number(v) || 0));
+                            set('servicePerson1', { ...form.servicePerson1, usedTimes: String(used) });
+                            set('usedTimes', form.orderType === '体验卡'
+                              ? experienceOverallUsedTimes({ ...form.servicePerson1, usedTimes: String(used) }, form.servicePerson2, form.servicePerson3)
+                              : used);
+                            setIsManualProgressDirty(true);
                           }}
                         />
                         <ServicePersonRow
                           label="运动康复师"
                           value={form.servicePerson2}
-                          onChange={v => set('servicePerson2', v)}
+                          onChange={v => {
+                            set('servicePerson2', v);
+                            if (form.orderType === '体验卡') {
+                              set('usedTimes', experienceOverallUsedTimes(form.servicePerson1, v, form.servicePerson3));
+                            }
+                          }}
                           totalTimes={form.servicePerson2.totalTimes || form.totalTimes}
-                          onTotalTimesChange={v => set('servicePerson2', { ...form.servicePerson2, totalTimes: v })}
+                          usedTimes={form.servicePerson2.usedTimes || '0'}
+                          isExperience={form.orderType === '体验卡'}
+                          canEditProgress={canEditServiceProgress}
+                          assignmentDisabled={isExperienceFrozen}
+                          onTotalTimesChange={v => {
+                            if (!canEditServiceProgress) return;
+                            set('servicePerson2', { ...form.servicePerson2, totalTimes: v });
+                            setIsManualProgressDirty(true);
+                          }}
+                          onUsedTimesChange={v => {
+                            if (!canEditServiceProgress) return;
+                            const used = Math.max(0, Math.min(form.orderType === '体验卡' ? 1 : Math.max(1, Number(form.servicePerson2.totalTimes || form.totalTimes) || 1), Number(v) || 0));
+                            set('servicePerson2', { ...form.servicePerson2, usedTimes: String(used) });
+                            if (form.orderType === '体验卡') {
+                              set('usedTimes', experienceOverallUsedTimes(form.servicePerson1, { ...form.servicePerson2, usedTimes: String(used) }, form.servicePerson3));
+                            }
+                            setIsManualProgressDirty(true);
+                          }}
                         />
                         <ServicePersonRow
                           label="调理师"
                           value={form.servicePerson3}
-                          onChange={v => set('servicePerson3', v)}
+                          onChange={v => {
+                            set('servicePerson3', v);
+                            if (form.orderType === '体验卡') {
+                              set('usedTimes', experienceOverallUsedTimes(form.servicePerson1, form.servicePerson2, v));
+                            }
+                          }}
                           totalTimes={form.servicePerson3.totalTimes || form.totalTimes}
-                          onTotalTimesChange={v => set('servicePerson3', { ...form.servicePerson3, totalTimes: v })}
+                          usedTimes={form.servicePerson3.usedTimes || '0'}
+                          isExperience={form.orderType === '体验卡'}
+                          canEditProgress={canEditServiceProgress}
+                          assignmentDisabled={isExperienceFrozen}
+                          onTotalTimesChange={v => {
+                            if (!canEditServiceProgress) return;
+                            set('servicePerson3', { ...form.servicePerson3, totalTimes: v });
+                            setIsManualProgressDirty(true);
+                          }}
+                          onUsedTimesChange={v => {
+                            if (!canEditServiceProgress) return;
+                            const used = Math.max(0, Math.min(form.orderType === '体验卡' ? 1 : Math.max(1, Number(form.servicePerson3.totalTimes || form.totalTimes) || 1), Number(v) || 0));
+                            set('servicePerson3', { ...form.servicePerson3, usedTimes: String(used) });
+                            if (form.orderType === '体验卡') {
+                              set('usedTimes', experienceOverallUsedTimes(form.servicePerson1, form.servicePerson2, { ...form.servicePerson3, usedTimes: String(used) }));
+                            }
+                            setIsManualProgressDirty(true);
+                          }}
                         />
                       </div>
                     </div>
                     <div className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
-                      套餐请填写总服务次数；体验卡固定为 1 次。当前已完成：{form.usedTimes} / {form.orderType === '体验卡' ? 1 : Math.max(1, Number(form.totalTimes) || 1)}
+                      {form.orderType === '体验卡'
+                        ? `体验卡服务状态：${form.usedTimes > 0 ? '已服务' : '未服务'}。`
+                        : `人工校正后，仅校正时间之后完成的排期会继续累加。当前主服务进度：${form.usedTimes} / ${Math.max(1, Number(form.totalTimes) || 1)}`}
                     </div>
                   </div>
                   <div className="flex flex-col gap-1">
@@ -2169,7 +2302,17 @@ function getFollowDisplay(order: any): { status: string; date: string; task: str
 function serviceProgressText(order: any): string {
   const used = Math.max(0, Number(order?.usedTimes) || 0);
   const total = Math.max(1, Number(order?.totalTimes) || 1);
-  return order?.type === '套餐' || order?.isUpgrade ? `${used}/${total}` : (used > 0 ? '已服务' : '未服务');
+  const people = order?.servicePeople || {};
+  const assignedPeople = ['sp1', 'sp2', 'sp3']
+    .map(key => people[key] as ServicePerson | undefined)
+    .filter(isAssignedServicePerson);
+  if (assignedPeople.length === 0) return '无';
+  if (order?.type === '套餐' || order?.isUpgrade) return `${used}/${total}`;
+  const hasPersonStatus = assignedPeople.some(person => person.usedTimes !== undefined);
+  const experienceUsed = hasPersonStatus
+    ? assignedPeople.some(person => Number(person.usedTimes) > 0)
+    : used > 0;
+  return experienceUsed ? '已服务' : '未服务';
 }
 
 /* ─── Main Page ──────────────────────────────────────── */

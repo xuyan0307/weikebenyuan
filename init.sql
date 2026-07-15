@@ -65,6 +65,7 @@ CREATE TABLE `orders` (
   `paid_at` datetime DEFAULT NULL COMMENT '支付时间',
   `used_times` int DEFAULT 0 COMMENT '已使用次数',
   `total_times` int NOT NULL COMMENT '总次数',
+  `manual_progress_at` datetime DEFAULT NULL COMMENT '服务进度人工校正时间',
   `is_upgrade` tinyint(1) DEFAULT 0 COMMENT '是否升单',
   `contract_signed` tinyint(1) DEFAULT 0 COMMENT '是否签合同',
   `has_coupon` tinyint(1) DEFAULT 0 COMMENT '是否有抵扣券',

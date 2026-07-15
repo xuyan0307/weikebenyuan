@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   ChevronLeftIcon, ChevronRightIcon, PlusIcon, CalendarIcon,
   EditIcon, CheckIcon, XIcon, SearchIcon, MapPinIcon, ChevronDownIcon,
@@ -34,6 +34,38 @@ const SCHEDULE_COLORS: Record<ScheduleState, { bg: string; text: string; border:
 const THERAPIST_COLORS = [
   '#1E88E5', '#43A047', '#F4511E', '#8E24AA', '#00897B', '#E53935',
 ];
+
+const CITY_GROUPS = ['厦门', '泉州', '漳州'];
+
+function getLocalDateKey(date = new Date()): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function getBoundTherapists(therapists: any[], orders: any[], appointments: Appointment[]) {
+  const assignedNames = new Set<string>();
+  const appointmentTherapistIds = new Set(appointments.map(appointment => appointment.therapistId));
+
+  orders.forEach(order => {
+    const people = order.servicePeople ?? {};
+    ['sp1', 'sp2', 'sp3'].forEach(key => {
+      const name = people[key]?.assign;
+      if (name && name !== '待分配') assignedNames.add(name);
+    });
+  });
+
+  return therapists
+    .filter(therapist => therapist.status === '在职')
+    .filter(therapist => appointmentTherapistIds.has(therapist.id) || assignedNames.has(therapist.name))
+    .sort((a, b) => {
+      const aCity = CITY_GROUPS.indexOf(a.city);
+      const bCity = CITY_GROUPS.indexOf(b.city);
+      const cityOrder = (aCity === -1 ? CITY_GROUPS.length : aCity) - (bCity === -1 ? CITY_GROUPS.length : bCity);
+      return cityOrder || a.name.localeCompare(b.name, 'zh-CN');
+    });
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -105,16 +137,15 @@ function getOrderForAppointment(appt: Pick<Appointment, 'customerId' | 'customer
 // ─── TherapistMultiSelect ─────────────────────────────────────────────────────
 
 interface TherapistMultiSelectProps {
+  therapists: any[];
   selectedIds: string[];
   onChange: (ids: string[]) => void;
   disabled?: boolean;
 }
 
-function TherapistMultiSelect({ selectedIds, onChange, disabled = false }: TherapistMultiSelectProps) {
+function TherapistMultiSelect({ therapists, selectedIds, onChange, disabled = false }: TherapistMultiSelectProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const therapistsQ = useTherapists({ page: 1, pageSize: 1000 });
-  const THERAPISTS: any[] = therapistsQ.data?.data ?? [];
 
   useEffect(() => {
     function handler(e: MouseEvent) {
@@ -139,7 +170,7 @@ function TherapistMultiSelect({ selectedIds, onChange, disabled = false }: Thera
   let label = '全部技师';
   if (!allSelected) {
     if (selectedIds.length === 1) {
-      const t = THERAPISTS.find(t => t.id === selectedIds[0]);
+      const t = therapists.find(t => t.id === selectedIds[0]);
       label = t ? `${t.name} · ${t.therapistType}` : '1位技师';
     } else {
       label = `已选 ${selectedIds.length} 位技师`;
@@ -193,34 +224,43 @@ function TherapistMultiSelect({ selectedIds, onChange, disabled = false }: Thera
             <span className="font-medium">全部技师</span>
           </button>
           <div style={{ borderBottom: '1px solid var(--border)', margin: '4px 0' }} />
-          {THERAPISTS.map((t, idx) => {
-            const checked = selectedIds.includes(t.id);
-            const color = THERAPIST_COLORS[idx % THERAPIST_COLORS.length];
+          {CITY_GROUPS.map(city => {
+            const cityTherapists = therapists.filter(therapist => therapist.city === city);
+            if (cityTherapists.length === 0) return null;
             return (
-              <button
-                key={t.id}
-                className="w-full flex items-center gap-2.5 px-3 py-2 text-sm hover:bg-muted transition-colors text-left"
-                style={{ color: 'var(--foreground)' }}
-                onClick={() => toggleOne(t.id)}
-              >
-                <div
-                  className="w-4 h-4 rounded flex items-center justify-center flex-shrink-0"
-                  style={{
-                    border: `1.5px solid ${checked ? 'var(--brand)' : 'var(--border)'}`,
-                    background: checked ? 'var(--brand)' : 'transparent',
-                  }}
-                >
-                  {checked && <CheckIcon size={10} color="#fff" />}
-                </div>
-                <div
-                  className="w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
-                  style={{ background: color, fontSize: 10 }}
-                >
-                  {t.name[0]}
-                </div>
-                <span className="truncate">{t.name}</span>
-                <span className="ml-auto text-xs flex-shrink-0" style={{ color: 'var(--muted-foreground)' }}>{t.therapistType}</span>
-              </button>
+              <div key={city}>
+                <div className="px-3 pt-2 pb-1 text-xs font-semibold" style={{ color: 'var(--muted-foreground)' }}>{city}</div>
+                {cityTherapists.map(t => {
+                  const checked = selectedIds.includes(t.id);
+                  const color = THERAPIST_COLORS[therapists.findIndex(therapist => therapist.id === t.id) % THERAPIST_COLORS.length];
+                  return (
+                    <button
+                      key={t.id}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 text-sm hover:bg-muted transition-colors text-left"
+                      style={{ color: 'var(--foreground)' }}
+                      onClick={() => toggleOne(t.id)}
+                    >
+                      <div
+                        className="w-4 h-4 rounded flex items-center justify-center flex-shrink-0"
+                        style={{
+                          border: `1.5px solid ${checked ? 'var(--brand)' : 'var(--border)'}`,
+                          background: checked ? 'var(--brand)' : 'transparent',
+                        }}
+                      >
+                        {checked && <CheckIcon size={10} color="#fff" />}
+                      </div>
+                      <div
+                        className="w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
+                        style={{ background: color, fontSize: 10 }}
+                      >
+                        {t.name[0]}
+                      </div>
+                      <span className="truncate">{t.name}</span>
+                      <span className="ml-auto text-xs flex-shrink-0" style={{ color: 'var(--muted-foreground)' }}>{t.therapistType}</span>
+                    </button>
+                  );
+                })}
+              </div>
             );
           })}
         </div>
@@ -288,7 +328,7 @@ function AppointmentCard({
 
   const displayUsedTimes = usedTimes !== undefined ? usedTimes : (order?.usedTimes ?? 0);
   const area = appt.area;
-  const canComplete = !editMode && !isCancelled && appt.status !== '已完成' && appt.date <= new Date().toISOString().slice(0, 10);
+  const canComplete = !editMode && !isCancelled && appt.status !== '已完成' && appt.date <= getLocalDateKey();
 
   return (
     <div
@@ -533,7 +573,7 @@ interface CreateModalProps {
   localOrderUsedTimes: Record<string, number>;
   localServiceMap: Record<string, string>;
   onClose: () => void;
-  onSave: (newAppt: Appointment, orderId: string, customerId: string, service: string) => void;
+  onSave: (newAppt: Appointment, orderId: string, customerId: string, service: string) => Promise<void>;
 }
 
 function CreateModal({
@@ -558,6 +598,7 @@ function CreateModal({
   const [startMin, setStartMin] = useState('00');
   const [serviceInput, setServiceInput] = useState('');
   const [remark, setRemark] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const selectedOrder = ORDERS.find(o => o.id === selectedOrderId) ?? null;
   const isPackageOrder = selectedOrder ? (selectedOrder.type === '套餐' || selectedOrder.isUpgrade) : false;
@@ -574,6 +615,7 @@ function CreateModal({
       setStartMin('00');
       setServiceInput('');
       setRemark('');
+      setIsSubmitting(false);
     }
   }, [visible]);
 
@@ -664,8 +706,8 @@ function CreateModal({
     return parts.includes(svc);
   }
 
-  function handleConfirm() {
-    if (!selectedOrder || !selectedDate || !selectedSlot || !therapist) return;
+  async function handleConfirm() {
+    if (isSubmitting || !selectedOrder || !selectedDate || !selectedSlot || !therapist) return;
     const area = selectedCustomer?.area ?? '';
     const service = isPackageOrder ? (serviceInput || therapist.services[0] || '产康套餐服务') : '产康体验';
     const newAppt: Appointment = {
@@ -681,7 +723,12 @@ function CreateModal({
       area,
       remark,
     };
-    onSave(newAppt, selectedOrder.id, selectedOrder.customerId, service);
+    setIsSubmitting(true);
+    try {
+      await onSave(newAppt, selectedOrder.id, selectedOrder.customerId, service);
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   if (!therapist) return null;
@@ -1001,8 +1048,15 @@ function CreateModal({
           ) : (
             <button
               className="px-4 py-2 rounded-lg text-sm font-medium text-white transition-opacity hover:opacity-90"
-              style={{ background: 'var(--brand)', height: 36, opacity: (selectedDate && selectedSlot) ? 1 : 0.5, pointerEvents: (selectedDate && selectedSlot) ? 'auto' : 'none' }}
-              onClick={() => { if (selectedDate && selectedSlot) handleConfirm(); }}
+              disabled={isSubmitting}
+              style={{
+                background: 'var(--brand)',
+                height: 36,
+                opacity: (selectedDate && selectedSlot && !isSubmitting) ? 1 : 0.5,
+                pointerEvents: (selectedDate && selectedSlot && !isSubmitting) ? 'auto' : 'none',
+                cursor: isSubmitting ? 'wait' : 'pointer',
+              }}
+              onClick={() => { if (selectedDate && selectedSlot && !isSubmitting) void handleConfirm(); }}
             >
               确认保存
             </button>
@@ -1070,6 +1124,11 @@ export default function AppointmentsCalendarPage() {
   const [draftSlotStatus, setDraftSlotStatus] = useState<Record<string, ScheduleState>>({});
   const [showCreateModal, setShowCreateModal] = useState(false);
 
+  const calendarTherapists = useMemo(
+    () => getBoundTherapists(THERAPISTS, ORDERS, APPOINTMENTS),
+    [THERAPISTS, ORDERS, APPOINTMENTS]
+  );
+
   // Sync server appointments into local state (overlay for unscheduled edits)
   useEffect(() => {
     setLocalAppts(prev => {
@@ -1109,22 +1168,21 @@ export default function AppointmentsCalendarPage() {
 
   const activeTherapistIds: string[] = isTherapist
     ? ['T001']
-    : (selectedTherapistIds.length === 0 ? [] : selectedTherapistIds);
+    : (selectedTherapistIds.length === 0 ? calendarTherapists.map(therapist => therapist.id) : selectedTherapistIds);
 
   const singleTherapistId: string = isTherapist
     ? 'T001'
     : (selectedTherapistIds.length === 1 ? selectedTherapistIds[0] : '');
   const canInteract = !!singleTherapistId && !editMode;
 
-  const selectedTherapist = singleTherapistId ? THERAPISTS.find(t => t.id === singleTherapistId) : undefined;
+  const selectedTherapist = singleTherapistId ? calendarTherapists.find(t => t.id === singleTherapistId) : undefined;
 
   const therapistColorMap: Record<string, string> = {};
-  THERAPISTS.forEach((t, i) => {
+  calendarTherapists.forEach((t, i) => {
     therapistColorMap[t.id] = THERAPIST_COLORS[i % THERAPIST_COLORS.length];
   });
 
   function getDisplayedAppts(): Appointment[] {
-    if (activeTherapistIds.length === 0) return localAppts;
     return localAppts.filter(a => activeTherapistIds.includes(a.therapistId));
   }
 
@@ -1168,11 +1226,20 @@ export default function AppointmentsCalendarPage() {
   }
 
   // Creating an appointment does not consume a service. It is counted only after completion.
-  function handleNewAppt(newAppt: Appointment, orderId: string, customerId: string, service: string) {
-    setLocalAppts(prev => [newAppt, ...prev]);
+  async function handleNewAppt(newAppt: Appointment, orderId: string, customerId: string, service: string): Promise<void> {
+    const existing = localAppts.some(appointment =>
+      appointment.therapistId === newAppt.therapistId
+      && appointment.date === newAppt.date
+      && appointment.timeSlot === newAppt.timeSlot
+      && appointment.status !== '已取消'
+    );
+    if (existing) {
+      toast.error('该技师此时间段已有预约，请重新选择');
+      return;
+    }
 
-    // Persist to backend
-    apptMutations.create({
+    try {
+      const created = await apptMutations.create({
       customerId: newAppt.customerId,
       customerName: newAppt.customerName,
       therapistId: newAppt.therapistId,
@@ -1183,12 +1250,17 @@ export default function AppointmentsCalendarPage() {
       status: newAppt.status,
       area: newAppt.area,
       remark: newAppt.remark,
-    }).catch(err => toast.error('预约保存失败：' + (err?.message ?? '')));
+      });
+      const persisted = { ...newAppt, id: created.no || created.id, _id: created.id };
+      setLocalAppts(prev => prev.some(appointment => appointment.id === persisted.id) ? prev : [persisted, ...prev]);
 
-    if (service) setLocalServiceMap(prev => ({ ...prev, [customerId]: service }));
+      if (service) setLocalServiceMap(prev => ({ ...prev, [customerId]: service }));
 
-    setShowCreateModal(false);
-    toast.success(`已为「${newAppt.customerName}」创建预约`);
+      setShowCreateModal(false);
+      toast.success(`已为「${newAppt.customerName}」创建预约`);
+    } catch (err: any) {
+      toast.error('预约保存失败：' + (err?.message ?? ''));
+    }
   }
 
   // Cancel an appointment (from edit mode)
@@ -1240,6 +1312,7 @@ export default function AppointmentsCalendarPage() {
       <div className="bg-card rounded-xl px-4 py-3 shadow-custom flex flex-wrap items-center gap-3 flex-shrink-0">
         {!isTherapist && (
           <TherapistMultiSelect
+            therapists={calendarTherapists}
             selectedIds={selectedTherapistIds}
             onChange={ids => {
               setSelectedTherapistIds(ids);
@@ -1353,7 +1426,7 @@ export default function AppointmentsCalendarPage() {
                   时段
                 </th>
                 {weekDates.map((d, i) => {
-                  const today = new Date().toISOString().slice(0, 10);
+                  const today = getLocalDateKey();
                   const isToday = d === today;
                   return (
                     <th

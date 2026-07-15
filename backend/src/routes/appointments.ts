@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto';
 import { authenticateToken } from '../middleware/auth';
 import { auditLog } from '../middleware/auditLog';
 import { getDb } from '../config/database';
+import { createError } from '../middleware/errorHandler';
 
 const router: Router = Router();
 
@@ -21,6 +22,14 @@ function mapRow(r: any) {
     area: r.area || '',
     remark: r.remark || '',
   };
+}
+
+function parseJson(value: unknown, fallback: any) {
+  if (value == null) return fallback;
+  if (typeof value === 'string') {
+    try { return JSON.parse(value) || fallback; } catch { return fallback; }
+  }
+  return value;
 }
 
 router.get('/', authenticateToken, async (req, res, next) => {
@@ -66,6 +75,25 @@ router.post('/', authenticateToken, auditLog('appointments'), async (req, res, n
     const no = b.id || ('A' + Date.now());
     const [custRows] = await db.execute('SELECT id FROM customers WHERE id=? OR customer_code=? LIMIT 1', [b.customerId, b.customerId]);
     const custId = (custRows as any[])[0]?.id || b.customerId;
+    const getSlotPeriod = (timeSlot: unknown) => {
+      const hour = Number.parseInt(String(timeSlot || '').split(':')[0], 10);
+      if (Number.isNaN(hour)) return null;
+      if (hour < 13) return 'morning';
+      if (hour < 18) return 'afternoon';
+      return 'evening';
+    };
+    const requestedPeriod = getSlotPeriod(b.timeSlot);
+    const [sameDayAppointments] = await db.execute(
+      `SELECT time_slot FROM appointments
+       WHERE therapist_id = ? AND date = ? AND status <> '已取消'`,
+      [b.therapistId, b.date]
+    );
+    const hasConflict = (sameDayAppointments as any[]).some(
+      appointment => getSlotPeriod(appointment.time_slot) === requestedPeriod
+    );
+    if (requestedPeriod === null || hasConflict) {
+      return next(createError('该技师此时间段已有预约，请重新选择', 409));
+    }
     await db.execute(
       `INSERT INTO appointments (id, appointment_no, customer_id, therapist_id, date, time_slot, service, status, area, remark)
        VALUES (?,?,?,?,?,?,?,?,?,?)`,
@@ -80,7 +108,7 @@ router.patch('/:id/status', authenticateToken, auditLog('appointments'), async (
     const { status } = req.body || {};
     const db = getDb();
     const [rows] = await db.execute(
-      'SELECT id, customer_id, status FROM appointments WHERE id = ? OR appointment_no = ? LIMIT 1',
+      'SELECT id, customer_id, therapist_id, date, time_slot, status FROM appointments WHERE id = ? OR appointment_no = ? LIMIT 1',
       [req.params.id, req.params.id]
     );
     const appointment = (rows as any[])[0];
@@ -92,17 +120,35 @@ router.patch('/:id/status', authenticateToken, auditLog('appointments'), async (
     await db.execute('UPDATE appointments SET status = ? WHERE id = ?', [status, appointment.id]);
     if (becameCompleted) {
       const [orderRows] = await db.query(
-        `SELECT id FROM orders
+        `SELECT id, used_times, total_times, service_people FROM orders
          WHERE customer_id = ? AND used_times < total_times
+           AND (manual_progress_at IS NULL OR TIMESTAMP(?, ?) > manual_progress_at)
          ORDER BY created_at DESC
          LIMIT 1`,
-        [appointment.customer_id]
+        [appointment.customer_id, appointment.date, appointment.time_slot]
       );
-      const orderId = (orderRows as any[])[0]?.id;
-      if (orderId) {
+      const order = (orderRows as any[])[0];
+      if (order) {
+        const [therapistRows] = await db.execute(
+          'SELECT name FROM therapists WHERE id = ? LIMIT 1',
+          [appointment.therapist_id]
+        );
+        const therapistName = (therapistRows as any[])[0]?.name || '';
+        const servicePeople = parseJson(order.service_people, {}) || {};
+        let servicePeopleChanged = false;
+
+        for (const key of ['sp1', 'sp2', 'sp3']) {
+          const person = servicePeople[key];
+          if (!person || person.assign !== therapistName) continue;
+          const personTotal = Math.max(1, Number(person.totalTimes) || Number(order.total_times) || 1);
+          const personUsed = Math.max(0, Number(person.usedTimes) || 0);
+          servicePeople[key] = { ...person, usedTimes: String(Math.min(personTotal, personUsed + 1)) };
+          servicePeopleChanged = true;
+        }
+
         await db.execute(
-          'UPDATE orders SET used_times = LEAST(used_times + 1, total_times) WHERE id = ?',
-          [orderId]
+          'UPDATE orders SET used_times = LEAST(used_times + 1, total_times), service_people = ? WHERE id = ?',
+          [servicePeopleChanged ? JSON.stringify(servicePeople) : order.service_people, order.id]
         );
       }
     }
