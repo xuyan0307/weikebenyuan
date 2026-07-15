@@ -1436,10 +1436,10 @@ export default function CustomersListPage() {
                 <th style={{ minWidth: 160, textAlign: 'center' }}>跟进事项</th>
                 <th style={{ minWidth: 110, textAlign: 'center' }}>微信/电话</th>
                 <th style={{ minWidth: 80, textAlign: 'center' }}>所在区域</th>
-                <th style={{ minWidth: 82, textAlign: 'center' }}>来源渠道</th>
-                <th style={{ minWidth: 180, textAlign: 'center' }}>客户画像</th>
-                <th style={{ minWidth: 160, textAlign: 'center' }}>需求情况</th>
-                <th style={{ minWidth: 76, textAlign: 'center' }}>归属客服</th>
+                <th style={{ width: 96, textAlign: 'center' }}>来源渠道</th>
+                <th style={{ width: 160, textAlign: 'center' }}>客户画像</th>
+                <th style={{ width: 180, textAlign: 'center' }}>需求情况</th>
+                <th style={{ width: 96, textAlign: 'center' }}>归属客服</th>
                 <th style={{ minWidth: 88, textAlign: 'center' }}>操作</th>
               </tr>
             </thead>
@@ -1519,19 +1519,19 @@ export default function CustomersListPage() {
                       </div>
                     </td>
                     <td className="text-sm text-center">{c.area}</td>
-                    <td className="text-center"><span className="badge badge-info text-xs">{c.source}</span></td>
+                    <td className="text-center"><span className="badge badge-info text-xs" style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={c.source}>{c.source}</span></td>
                     <td className="text-center">
-                      <span className="text-xs" style={{ color: 'var(--muted-foreground)', lineHeight: 1.6 }}>
+                      <span className="text-xs" style={{ color: 'var(--muted-foreground)', lineHeight: 1.6, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={profileSummary(c.profile)}>
                         {profileSummary(c.profile)}
                       </span>
                     </td>
                     <td className="text-center">
                       <span className="text-xs line-clamp-2"
-                        style={{ color: 'var(--muted-foreground)', display: 'block', maxWidth: 155, margin: '0 auto', textAlign: 'left' }}>
+                        style={{ color: 'var(--muted-foreground)', display: 'block', maxWidth: 170, margin: '0 auto', textAlign: 'left', overflow: 'hidden' }} title={c.situation || ''}>
                         {c.situation || '—'}
                       </span>
                     </td>
-                    <td className="text-sm text-center" style={{ color: 'var(--muted-foreground)' }}>{c.advisor}</td>
+                    <td className="text-sm text-center" style={{ color: 'var(--muted-foreground)' }}><span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={c.advisor}>{c.advisor}</span></td>
                     <td className="text-center">
                       <div className="flex items-center justify-center gap-1">
                         <button className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium hover:opacity-80 transition-opacity"
