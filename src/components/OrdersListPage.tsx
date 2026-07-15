@@ -2600,7 +2600,7 @@ export default function OrdersListPage() {
 
         {/* ── Table ── */}
         <div className="bg-card rounded-xl shadow-custom" style={{ overflow: 'hidden' }}>
-          <div style={{ overflowX: 'auto', overflowY: 'visible', position: 'relative' }}>
+          <div style={{ maxHeight: 'calc(100vh - 310px)', overflow: 'auto', position: 'relative' }}>
             <table
               className="data-table"
               style={{ minWidth: tableMinW, tableLayout: 'fixed', borderCollapse: 'separate', borderSpacing: 0 }}
@@ -2665,7 +2665,13 @@ export default function OrdersListPage() {
 
                       {/* Frozen: 客户姓名 */}
                       <td style={STICKY_TD_STYLE(2, bgColor)}>
-                        <span className="font-medium text-sm">{o.customerName}</span>
+                        <span
+                          className="font-medium text-sm"
+                          style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                          title={o.customerName}
+                        >
+                          {o.customerName}
+                        </span>
                       </td>
 
                       {/* Frozen: 标签 */}

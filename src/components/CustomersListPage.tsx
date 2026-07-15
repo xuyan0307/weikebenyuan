@@ -1421,7 +1421,7 @@ export default function CustomersListPage() {
 
       {/* ══ Data table ══ */}
       <div className="bg-card rounded-xl shadow-custom overflow-hidden">
-        <div style={{ overflowX: 'auto', overflowY: 'visible' }}>
+        <div style={{ maxHeight: 'calc(100vh - 310px)', overflow: 'auto' }}>
           <table className="data-table w-full" style={{ borderCollapse: 'collapse', minWidth: 1160 }}>
             <thead>
               <tr>
@@ -1465,7 +1465,13 @@ export default function CustomersListPage() {
                     </td>
                     {/* Frozen col 3: 客户姓名 */}
                     <td style={STICKY_TD_STYLE(2, frozenBg)}>
-                      <span className="font-medium text-sm">{c.name}</span>
+                      <span
+                        className="font-medium text-sm"
+                        style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                        title={c.name}
+                      >
+                        {c.name}
+                      </span>
                     </td>
                     {/* Frozen col 4: 标签 — badge only, no desc */}
                     <td style={STICKY_TD_STYLE(3, frozenBg)}>
