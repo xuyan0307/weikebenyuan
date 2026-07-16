@@ -225,7 +225,7 @@ function mapRow(r: any) {
     payStatus: r.pay_status,
     // Customer acquisition time remains part of the retained customer snapshot.
     createdAt: customer.acquiredAt || (r.created_at ? new Date(r.created_at).toISOString().slice(0, 10) : ''),
-    purchaseDate: formatSnapshotDate(r.purchase_date) || formatSnapshotDate(r.created_at),
+    purchaseDate: r.purchase_date_text || formatSnapshotDate(r.created_at),
     paidAt: r.paid_at ? new Date(r.paid_at).toISOString() : null,
     usedTimes: r.used_times || 0,
     totalTimes: r.total_times,
@@ -262,7 +262,8 @@ router.get('/', authenticateToken, async (req, res, next) => {
     const total = (countRows as any[])[0].cnt;
 
     const [rows] = await db.query(
-      `SELECT o.id, o.order_no, o.customer_id, o.customer_snapshot, o.type, o.amount, o.pay_status, o.paid_at, o.purchase_date,
+      `SELECT o.id, o.order_no, o.customer_id, o.customer_snapshot, o.type, o.amount, o.pay_status, o.paid_at,
+              DATE_FORMAT(o.purchase_date, '%Y-%m-%d') AS purchase_date_text,
               o.used_times, o.total_times, o.manual_progress_at, o.is_upgrade, o.contract_signed, o.has_coupon,
               o.service_item_count, o.service_items, o.service_people, o.appointment_time,
               o.service_note, o.created_at, o.updated_at,
@@ -325,7 +326,8 @@ router.get('/:id', authenticateToken, async (req, res, next) => {
   try {
     const db = getDb();
     const [rows] = await db.execute(
-      `SELECT o.*, c.name AS customer_name, c.customer_code, c.wechat AS customer_wechat, c.phone AS customer_phone,
+      `SELECT o.*, DATE_FORMAT(o.purchase_date, '%Y-%m-%d') AS purchase_date_text,
+              c.name AS customer_name, c.customer_code, c.wechat AS customer_wechat, c.phone AS customer_phone,
               c.area AS customer_area, c.source AS customer_source, c.tag AS customer_tag, c.follow_status AS customer_follow_status,
               c.follow_date AS customer_follow_date, c.advisor_id AS customer_advisor_id, c.profile AS customer_profile,
               c.situation AS customer_situation, c.remark AS customer_remark, c.acquired_at, c.intended_product,
