@@ -708,7 +708,7 @@ function CreateModal({
 
   async function handleConfirm() {
     if (isSubmitting || !selectedOrder || !selectedDate || !selectedSlot || !therapist) return;
-    const area = selectedCustomer?.area ?? '';
+    const area = selectedOrder?.area || selectedCustomer?.area || '';
     const service = isPackageOrder ? (serviceInput || therapist.services[0] || '产康套餐服务') : '产康体验';
     const newAppt: Appointment = {
       id: `A${Date.now()}`,

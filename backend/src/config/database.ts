@@ -118,6 +118,51 @@ async function runMigrations(db: mysql.Pool) {
     await db.execute("ALTER TABLE orders ADD COLUMN manual_progress_at datetime DEFAULT NULL COMMENT '服务进度人工校正时间' AFTER total_times");
   }
 
+  if (!(await columnExists(db, 'orders', 'customer_snapshot'))) {
+    await db.execute("ALTER TABLE orders ADD COLUMN customer_snapshot JSON DEFAULT NULL COMMENT '转入订单池的客户资料快照' AFTER customer_id");
+  }
+
+  // Customer records are moved from the lead pool to an order snapshot. Backfill
+  // every existing order before removing its corresponding lead-pool record.
+  await db.execute(
+    `UPDATE orders o
+     LEFT JOIN customers c ON c.id = o.customer_id
+     LEFT JOIN users u ON u.id = c.advisor_id
+     SET o.customer_snapshot = JSON_OBJECT(
+       'id', c.id,
+       'customerCode', c.customer_code,
+       'name', c.name,
+       'wechat', c.wechat,
+       'phone', c.phone,
+       'area', c.area,
+       'source', c.source,
+       'acquiredAt', DATE_FORMAT(c.acquired_at, '%Y-%m-%d'),
+       'tag', c.tag,
+       'followStatus', c.follow_status,
+       'followDate', DATE_FORMAT(c.follow_date, '%Y-%m-%d'),
+       'advisorId', c.advisor_id,
+       'advisor', u.name,
+       'profile', COALESCE(c.profile, JSON_OBJECT()),
+       'situation', c.situation,
+       'intendedProduct', c.intended_product,
+       'remark', c.remark
+     )
+     WHERE o.customer_snapshot IS NULL AND c.id IS NOT NULL`
+  );
+
+  const [missingSnapshots] = await db.query(
+    `SELECT COUNT(*) AS cnt
+     FROM orders o
+     JOIN customers c ON c.id = o.customer_id
+     WHERE o.customer_snapshot IS NULL`
+  );
+  if (Number((missingSnapshots as any[])[0]?.cnt || 0) === 0) {
+    await db.execute(
+      `DELETE c FROM customers c
+       JOIN (SELECT DISTINCT customer_id FROM orders) ordered ON ordered.customer_id = c.id`
+    );
+  }
+
   if (!(await indexExists(db, 'orders', 'idx_created_at'))) {
     await db.execute("ALTER TABLE orders ADD INDEX idx_created_at (created_at)");
   }

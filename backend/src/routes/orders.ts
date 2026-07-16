@@ -109,17 +109,118 @@ async function resolveOrderCustomerId(db: any, body: any): Promise<string> {
   return customerId;
 }
 
+function formatSnapshotDate(value: any) {
+  return value ? new Date(value).toISOString().slice(0, 10) : '';
+}
+
+async function getCustomerSnapshot(db: any, customerId: string, fallback: any = {}) {
+  if (customerId) {
+    const [rows] = await db.execute(
+      `SELECT c.*, u.name AS advisor_name
+       FROM customers c
+       LEFT JOIN users u ON u.id = c.advisor_id
+       WHERE c.id = ? LIMIT 1`,
+      [customerId]
+    );
+    const customer = (rows as any[])[0];
+    if (customer) {
+      return {
+        id: customer.id,
+        customerCode: customer.customer_code,
+        name: customer.name,
+        wechat: customer.wechat || '',
+        phone: customer.phone || '',
+        area: customer.area || '',
+        source: customer.source || '',
+        acquiredAt: formatSnapshotDate(customer.acquired_at),
+        tag: customer.tag || '',
+        followStatus: customer.follow_status || '',
+        followDate: formatSnapshotDate(customer.follow_date),
+        advisorId: customer.advisor_id || '',
+        advisor: customer.advisor_name || '',
+        profile: parseJson(customer.profile, {}),
+        situation: customer.situation || '',
+        intendedProduct: customer.intended_product || '',
+        remark: customer.remark || '',
+      };
+    }
+  }
+
+  return {
+    id: customerId || fallback.customerId || '',
+    customerCode: fallback.customerCode || '',
+    name: fallback.customerName || '',
+    wechat: fallback.customerWechat || '',
+    phone: fallback.customerPhone || '',
+    area: fallback.customerArea || '',
+    source: fallback.source || '',
+    acquiredAt: fallback.purchaseDate || '',
+    tag: fallback.customerTag || '',
+    followStatus: fallback.followStatus || '待跟进',
+    followDate: fallback.followDate || '',
+    advisorId: '',
+    advisor: fallback.customerAdvisor || fallback.advisor || '',
+    profile: {},
+    situation: fallback.customerSituation || '',
+    intendedProduct: fallback.serviceItems || '',
+    remark: fallback.customerRemark || '',
+  };
+}
+
+async function applyOrderCustomerEdits(db: any, snapshot: any, body: any) {
+  const next = { ...snapshot };
+  const advisor = body.customerAdvisor || body.advisor;
+  if (body.customerName !== undefined) next.name = body.customerName;
+  if (body.customerWechat !== undefined) next.wechat = body.customerWechat;
+  if (body.customerPhone !== undefined) next.phone = body.customerPhone;
+  if (body.customerArea !== undefined) next.area = body.customerArea;
+  if (body.source !== undefined) next.source = body.source;
+  if (body.purchaseDate !== undefined) next.acquiredAt = body.purchaseDate;
+  if (body.customerTag !== undefined) next.tag = body.customerTag;
+  if (advisor !== undefined) {
+    next.advisor = advisor || '';
+    next.advisorId = advisor ? await resolveAdvisorId(db, advisor) : '';
+  }
+  if (body.serviceItems !== undefined) next.intendedProduct = body.serviceItems;
+  return next;
+}
+
+function orderCustomerFromRow(r: any) {
+  const snapshot = parseJson(r.customer_snapshot, {}) || {};
+  return {
+    id: snapshot.id || r.customer_id || '',
+    customerCode: snapshot.customerCode || r.customer_code || '',
+    name: snapshot.name || r.customer_name || '',
+    wechat: snapshot.wechat || r.customer_wechat || '',
+    phone: snapshot.phone || r.customer_phone || '',
+    area: snapshot.area || r.customer_area || '',
+    source: snapshot.source || r.customer_source || '',
+    acquiredAt: snapshot.acquiredAt || formatSnapshotDate(r.acquired_at),
+    tag: snapshot.tag || r.customer_tag || '',
+    followStatus: snapshot.followStatus || r.customer_follow_status || '',
+    followDate: snapshot.followDate || formatSnapshotDate(r.customer_follow_date),
+    advisor: snapshot.advisor || r.advisor_name || '',
+    advisorId: snapshot.advisorId || r.customer_advisor_id || '',
+    profile: snapshot.profile || parseJson(r.customer_profile, {}),
+    situation: snapshot.situation || r.customer_situation || '',
+    intendedProduct: snapshot.intendedProduct || r.intended_product || '',
+    remark: snapshot.remark || r.customer_remark || '',
+  };
+}
+
 function mapRow(r: any) {
+  const customer = orderCustomerFromRow(r);
   return {
     id: r.order_no || r.id,
     _id: r.id,
     customerId: r.customer_id,
-    customerCode: r.customer_code || '',
-    customerName: r.customer_name || '',
-    customerPhone: r.customer_phone || '',
-    area: r.customer_area || '',
-    advisor: r.advisor_name || '',
-    tag: r.customer_tag || '',
+    customerCode: customer.customerCode,
+    customerName: customer.name,
+    customerPhone: customer.phone,
+    area: customer.area,
+    advisor: customer.advisor,
+    tag: customer.tag,
+    customerSnapshot: customer,
     type: r.type,
     amount: Number(r.amount),
     payStatus: r.pay_status,
@@ -160,12 +261,14 @@ router.get('/', authenticateToken, async (req, res, next) => {
     const total = (countRows as any[])[0].cnt;
 
     const [rows] = await db.query(
-      `SELECT o.id, o.order_no, o.customer_id, o.type, o.amount, o.pay_status, o.paid_at,
+      `SELECT o.id, o.order_no, o.customer_id, o.customer_snapshot, o.type, o.amount, o.pay_status, o.paid_at,
               o.used_times, o.total_times, o.manual_progress_at, o.is_upgrade, o.contract_signed, o.has_coupon,
               o.service_item_count, o.service_items, o.service_people, o.appointment_time,
               o.service_note, o.created_at, o.updated_at,
-              c.name AS customer_name, c.customer_code, c.phone AS customer_phone,
-              c.area AS customer_area, c.tag AS customer_tag, c.acquired_at, c.intended_product,
+              c.name AS customer_name, c.customer_code, c.wechat AS customer_wechat, c.phone AS customer_phone,
+              c.area AS customer_area, c.source AS customer_source, c.tag AS customer_tag, c.follow_status AS customer_follow_status,
+              c.follow_date AS customer_follow_date, c.advisor_id AS customer_advisor_id, c.profile AS customer_profile,
+              c.situation AS customer_situation, c.remark AS customer_remark, c.acquired_at, c.intended_product,
               u.name AS advisor_name
        FROM (
          SELECT o.id
@@ -191,6 +294,7 @@ router.post('/', authenticateToken, auditLog('orders'), async (req, res, next) =
     const id = randomUUID();
     const orderNo = b.id || ('O' + Date.now());
     const custId = await resolveOrderCustomerId(db, b);
+    const customerSnapshot = await getCustomerSnapshot(db, custId, b);
     const payStatus = normalizePayStatus(b.payStatus);
     await db.execute(
       `INSERT INTO orders (id, order_no, customer_id, type, amount, pay_status, paid_at, used_times, total_times, is_upgrade, contract_signed, has_coupon, service_item_count, service_items, service_people, appointment_time, service_note, contract_attachments, service_photo_records)
@@ -208,7 +312,9 @@ router.post('/', authenticateToken, auditLog('orders'), async (req, res, next) =
       ]
     );
     if (custId) {
-      await db.execute('UPDATE customers SET total_orders = total_orders + 1 WHERE id = ?', [custId]);
+      // Store the full profile first, then move the record out of the lead pool.
+      await db.execute('UPDATE orders SET customer_snapshot = ? WHERE id = ?', [JSON.stringify(customerSnapshot), id]);
+      await db.execute('DELETE FROM customers WHERE id = ?', [custId]);
     }
     res.status(201).json({ id, orderNo });
   } catch (err) { next(err); }
@@ -218,8 +324,10 @@ router.get('/:id', authenticateToken, async (req, res, next) => {
   try {
     const db = getDb();
     const [rows] = await db.execute(
-      `SELECT o.*, c.name AS customer_name, c.customer_code, c.phone AS customer_phone,
-              c.area AS customer_area, c.tag AS customer_tag, c.acquired_at, c.intended_product,
+      `SELECT o.*, c.name AS customer_name, c.customer_code, c.wechat AS customer_wechat, c.phone AS customer_phone,
+              c.area AS customer_area, c.source AS customer_source, c.tag AS customer_tag, c.follow_status AS customer_follow_status,
+              c.follow_date AS customer_follow_date, c.advisor_id AS customer_advisor_id, c.profile AS customer_profile,
+              c.situation AS customer_situation, c.remark AS customer_remark, c.acquired_at, c.intended_product,
               u.name AS advisor_name
        FROM orders o
        LEFT JOIN customers c ON c.id = o.customer_id
@@ -242,7 +350,7 @@ router.put('/:id', authenticateToken, auditLog('orders'), async (req: AuthReques
     const b = req.body || {};
     const db = getDb();
     const [rows] = await db.execute(
-      'SELECT id, customer_id, type, used_times, total_times FROM orders WHERE id=? OR order_no=? LIMIT 1',
+      'SELECT id, customer_id, customer_snapshot, type, used_times, total_times FROM orders WHERE id=? OR order_no=? LIMIT 1',
       [req.params.id, req.params.id]
     );
     const existing = (rows as any[])[0];
@@ -257,7 +365,15 @@ router.put('/:id', authenticateToken, auditLog('orders'), async (req: AuthReques
       return next(createError('仅超级管理员和管理员可以人工校正服务情况', 403));
     }
 
-    const custId = await resolveOrderCustomerId(db, { ...b, customerId: b.customerId || existing.customer_id });
+    const requestedCustomerId = b.customerId || existing.customer_id;
+    const custId = requestedCustomerId === existing.customer_id
+      ? existing.customer_id
+      : await resolveOrderCustomerId(db, { ...b, customerId: requestedCustomerId });
+    const existingSnapshot = parseJson(existing.customer_snapshot, {}) || {};
+    const selectedSnapshot = custId === existing.customer_id
+      ? existingSnapshot
+      : await getCustomerSnapshot(db, custId, b);
+    const customerSnapshot = await applyOrderCustomerEdits(db, selectedSnapshot, b);
     const payStatus = normalizePayStatus(b.payStatus);
     const orderType = b.type || existing.type;
     const totalTimes = orderType === '体验卡' && !b.isUpgrade
@@ -273,7 +389,7 @@ router.put('/:id', authenticateToken, auditLog('orders'), async (req: AuthReques
            used_times=?, total_times=?,
            manual_progress_at = CASE WHEN ? THEN NOW() ELSE manual_progress_at END,
            is_upgrade=?, contract_signed=?, has_coupon=?, service_item_count=?, service_items=?,
-           service_people=?, appointment_time=?, service_note=?, contract_attachments=?, service_photo_records=?
+           service_people=?, appointment_time=?, service_note=?, contract_attachments=?, service_photo_records=?, customer_snapshot=?
        WHERE id=?`,
       [
         custId || existing.customer_id,
@@ -294,27 +410,13 @@ router.put('/:id', authenticateToken, auditLog('orders'), async (req: AuthReques
         b.serviceNote || null,
         jsonOrNull(b.contractAttachments || []),
         jsonOrNull(b.servicePhotoRecords || []),
+        JSON.stringify(customerSnapshot),
         existing.id,
       ]
     );
 
-    if (custId) {
-      const advisorId = await resolveAdvisorId(db, b.customerAdvisor || b.advisor);
-      await db.execute(
-        `UPDATE customers
-         SET name=?, wechat=COALESCE(?, wechat), phone=?, area=?, source=COALESCE(?, source), acquired_at=COALESCE(?, acquired_at), tag=?, advisor_id=?, intended_product=COALESCE(?, intended_product)
-         WHERE id=?`,
-        [
-          b.customerName || '', b.customerWechat || null,
-          b.customerPhone || '',
-          b.customerArea || null,
-          b.source || null, b.purchaseDate || null,
-          b.customerTag || null,
-          advisorId,
-          b.serviceItems || null,
-          custId,
-        ]
-      );
+    if (custId && custId !== existing.customer_id) {
+      await db.execute('DELETE FROM customers WHERE id = ?', [custId]);
     }
 
     res.json({ message: '订单已更新' });

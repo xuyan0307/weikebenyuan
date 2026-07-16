@@ -33,7 +33,8 @@ router.get('/', authenticateToken, async (req, res, next) => {
 
     const [rows] = await db.query(
       `SELECT o.id, o.order_no, o.customer_id, o.type, o.amount, o.pay_status,
-              o.contract_signed, o.created_at, c.name AS customer_name
+              o.contract_signed, o.created_at,
+              COALESCE(c.name, JSON_UNQUOTE(JSON_EXTRACT(o.customer_snapshot, '$.name'))) AS customer_name
        FROM (
          SELECT o.id
          FROM orders o

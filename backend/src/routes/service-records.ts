@@ -47,9 +47,16 @@ router.get('/', authenticateToken, async (req, res, next) => {
     const total = (countRows as any[])[0].cnt;
 
     const [rows] = await db.query(
-      `SELECT s.*, c.name AS customer_name, c.customer_code, t.name AS therapist_name
+      `SELECT s.*, COALESCE(c.name, JSON_UNQUOTE(JSON_EXTRACT(o.customer_snapshot, '$.name'))) AS customer_name,
+              COALESCE(c.customer_code, JSON_UNQUOTE(JSON_EXTRACT(o.customer_snapshot, '$.customerCode'))) AS customer_code,
+              t.name AS therapist_name
        FROM service_records s
        LEFT JOIN customers c ON c.id = s.customer_id
+       LEFT JOIN orders o ON o.id = (
+         SELECT recent_order.id FROM orders recent_order
+         WHERE recent_order.customer_id = s.customer_id
+         ORDER BY recent_order.created_at DESC LIMIT 1
+       )
        LEFT JOIN therapists t ON t.id = s.therapist_id
        ${whereSql}
        ORDER BY s.service_date DESC LIMIT ? OFFSET ?`,

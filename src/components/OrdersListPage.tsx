@@ -1508,7 +1508,7 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
                   </div>
                 )}
                 {(isView || (isEdit && fullCustomer)) ? (
-                  <CustomerArchiveView customer={fullCustomer} form={form} />
+                  <CustomerArchiveView customer={fullCustomer || order?.customerSnapshot} form={form} />
                 ) : null}
                 {!isView && (
                 <div className="flex flex-col gap-3 mt-4">
