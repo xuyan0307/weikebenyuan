@@ -100,7 +100,7 @@ async function resolveOrderCustomerId(db: any, body: any): Promise<string> {
       body.customerTag || 'D1',
       '待跟进',
       advisorId,
-      JSON.stringify({ age: 0, deliveryDate: '', deliveryType: '顺产', babyCount: 1, feedingType: '母乳', followTask: '', followRecords: [] }),
+      JSON.stringify({ age: 0, deliveryDate: '', deliveryType: '未知', babyCount: 0, feedingType: '未知', followTask: '', followRecords: [] }),
       body.customerSituation || null,
       body.serviceItems || null,
       '订单创建时自动建档',

@@ -188,12 +188,13 @@ function profileSummary(p: CustomerProfile | null | undefined): string {
   const profile = {
     age: 0,
     deliveryDate: '',
-    deliveryType: '',
-    babyCount: 1,
-    feedingType: '',
+    deliveryType: '未知',
+    babyCount: 0,
+    feedingType: '未知',
     ...(p ?? {}),
   };
-  return `${profile.age || '—'}岁 · ${profile.deliveryDate || '—'} · ${profile.deliveryType || '—'} · 第${profile.babyCount || 1}胎 · ${profile.feedingType || '—'}`;
+  const pregnancy = profile.babyCount ? `第${profile.babyCount}胎` : '未知';
+  return `${profile.age || '—'}岁 · ${profile.deliveryDate || '—'} · ${profile.deliveryType || '未知'} · ${pregnancy} · ${profile.feedingType || '未知'}`;
 }
 
 function todayStr(): string {
@@ -229,9 +230,9 @@ function getPersistedProfile(c: Customer): PersistedCustomerProfile {
   return {
     age: 0,
     deliveryDate: '',
-    deliveryType: '顺产',
-    babyCount: 1,
-    feedingType: '母乳',
+    deliveryType: '未知',
+    babyCount: 0,
+    feedingType: '未知',
     ...(c.profile ?? {}),
   } as PersistedCustomerProfile;
 }
@@ -333,7 +334,7 @@ function TaskTooltip({ text, isOverdue = false }: { text: string; isOverdue?: bo
 interface CustomerForm {
   acquiredAt: string; source: string; name: string; wechat: string;
   phone: string; area: string; intendedProducts: string[]; deliveryDate: string;
-  babyCount: string; deliveryType: '顺产' | '剖腹产'; feedingType: '母乳' | '奶粉' | '混合喂养';
+  babyCount: string; deliveryType: '未知' | '顺产' | '剖腹产'; feedingType: '未知' | '母乳' | '奶粉' | '混合喂养';
   birthYear: string; situation: string; tag: CustomerTag; advisor: string; remark: string;
   followStatus: NewFollowStatus; followDate: string; followContent: string;
   followerId: string; followerName: string;
@@ -343,8 +344,8 @@ interface CustomerForm {
 function blankForm(advisor: string, followerId = '', followerName = advisor): CustomerForm {
   return {
     acquiredAt: todayStr(), source: '小红书', name: '', wechat: '', phone: '',
-    area: '', intendedProducts: [], deliveryDate: '', babyCount: '1',
-    deliveryType: '顺产', feedingType: '母乳', birthYear: '', situation: '',
+    area: '', intendedProducts: [], deliveryDate: '', babyCount: '',
+    deliveryType: '未知', feedingType: '未知', birthYear: '', situation: '',
     tag: 'D1', advisor, remark: '',
     followStatus: '待跟进', followDate: '', followContent: '', followerId, followerName, followTask: '',
   };
@@ -361,8 +362,8 @@ function customerToForm(c: Customer, fallbackAdvisor = '', followerId = '', foll
     acquiredAt: textOf(c.acquiredAt) || todayStr(), source: textOf(c.source), name: textOf(c.name), wechat: textOf(c.wechat),
     phone: textOf(c.phone), area: textOf(c.area),
     intendedProducts: textOf(c.intendedProduct).split(',').map(s => s.trim()).filter(Boolean),
-    deliveryDate: normalizeDateInput(profile.deliveryDate), babyCount: String(profile.babyCount || 1),
-    deliveryType: profile.deliveryType || '顺产', feedingType: profile.feedingType || '母乳',
+    deliveryDate: normalizeDateInput(profile.deliveryDate), babyCount: profile.babyCount ? String(profile.babyCount) : '',
+    deliveryType: profile.deliveryType || '未知', feedingType: profile.feedingType || '未知',
     birthYear, situation: textOf(c.situation), tag: (textOf(c.tag) || 'D1') as CustomerTag,
     advisor, remark: textOf(c.remark),
     followStatus: latestOpenRecord?.status ?? computeDisplayStatus(c, c.followStatus),
@@ -788,7 +789,7 @@ export default function CustomersListPage() {
         age: computedAge,
         deliveryDate: draft.deliveryDate,
         deliveryType: draft.deliveryType,
-        babyCount: Number(draft.babyCount) || 1,
+        babyCount: Number(draft.babyCount) || 0,
         feedingType: draft.feedingType,
         followTask: draft.followTask,
         followDisplayStatus: draft.followStatus,
@@ -860,7 +861,7 @@ export default function CustomersListPage() {
         age: computedAge > 0 ? computedAge : 0,
         deliveryDate: draft.deliveryDate,
         deliveryType: draft.deliveryType,
-        babyCount: Number(draft.babyCount) || 1,
+        babyCount: Number(draft.babyCount) || 0,
         feedingType: draft.feedingType,
         followTask: draft.followTask,
         followDisplayStatus: draft.followStatus,
@@ -1159,6 +1160,7 @@ export default function CustomersListPage() {
               <FF label="第几胎">
                 <select className={inputCls + ' cursor-pointer'} style={inputStyle}
                   value={form.babyCount} onChange={e => patch('babyCount', e.target.value)}>
+                  <option value="">未知</option>
                   {['1', '2', '3', '4'].map(n => <option key={n} value={n}>第{n}胎</option>)}
                 </select>
               </FF>
@@ -1167,6 +1169,7 @@ export default function CustomersListPage() {
               <FF label="分娩方式">
                 <select className={inputCls + ' cursor-pointer'} style={inputStyle}
                   value={form.deliveryType} onChange={e => patch('deliveryType', e.target.value as '顺产' | '剖腹产')}>
+                  <option value="未知">未知</option>
                   <option value="顺产">顺产</option>
                   <option value="剖腹产">剖腹产</option>
                 </select>
@@ -1176,6 +1179,7 @@ export default function CustomersListPage() {
               <FF label="喂养方式">
                 <select className={inputCls + ' cursor-pointer'} style={inputStyle}
                   value={form.feedingType} onChange={e => patch('feedingType', e.target.value as '母乳' | '奶粉' | '混合喂养')}>
+                  <option value="未知">未知</option>
                   <option value="母乳">母乳</option>
                   <option value="奶粉">奶粉</option>
                   <option value="混合喂养">混合喂养</option>
