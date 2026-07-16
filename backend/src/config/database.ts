@@ -122,6 +122,12 @@ async function runMigrations(db: mysql.Pool) {
     await db.execute("ALTER TABLE orders ADD COLUMN customer_snapshot JSON DEFAULT NULL COMMENT '转入订单池的客户资料快照' AFTER customer_id");
   }
 
+  if (!(await columnExists(db, 'orders', 'purchase_date'))) {
+    await db.execute("ALTER TABLE orders ADD COLUMN purchase_date date DEFAULT NULL COMMENT '购卡时间' AFTER paid_at");
+  }
+
+  await db.execute('UPDATE orders SET purchase_date = DATE(created_at) WHERE purchase_date IS NULL');
+
   // Customer records are moved from the lead pool to an order snapshot. Backfill
   // every existing order before removing its corresponding lead-pool record.
   await db.execute(
@@ -165,6 +171,10 @@ async function runMigrations(db: mysql.Pool) {
 
   if (!(await indexExists(db, 'orders', 'idx_created_at'))) {
     await db.execute("ALTER TABLE orders ADD INDEX idx_created_at (created_at)");
+  }
+
+  if (!(await indexExists(db, 'orders', 'idx_purchase_date'))) {
+    await db.execute("ALTER TABLE orders ADD INDEX idx_purchase_date (purchase_date)");
   }
 
   if (!(await indexExists(db, 'orders', 'idx_customer_created_at'))) {

@@ -19,6 +19,28 @@ type TherapistType = '产康师' | '运动康复师' | '调理师';
 type TherapistAssign = '待分配' | '无' | string;
 type ContractStatus = '无' | '未回签' | '已回签';
 type OrderModalMode = 'create' | 'view' | 'edit';
+type PurchaseDateRange = 'all' | 'today' | 'week' | 'month';
+
+function purchaseDateLabel(range: PurchaseDateRange): string {
+  return { all: '全部', today: '今日', week: '本周', month: '本月' }[range];
+}
+
+function matchesPurchaseDateRange(value: string, range: PurchaseDateRange): boolean {
+  if (range === 'all') return true;
+  if (!value) return false;
+  const date = new Date(`${value.slice(0, 10)}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return false;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  if (range === 'today') return date.getTime() === today.getTime();
+  if (range === 'week') {
+    const from = new Date(today); from.setDate(today.getDate() - ((today.getDay() + 6) % 7));
+    const to = new Date(from); to.setDate(from.getDate() + 6);
+    return date >= from && date <= to;
+  }
+  const from = new Date(today.getFullYear(), today.getMonth(), 1);
+  const to = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+  return date >= from && date <= to;
+}
 
 interface ServicePerson {
   type: TherapistType;
@@ -1012,7 +1034,7 @@ function formFromOrder(order: any): OrderForm {
     orderType: order?.type || '',
     amount: order?.amount != null ? String(order.amount) : '',
     payStatus: payStatusToForm(effectiveOrderPayStatus(order)),
-    purchaseDate: order?.createdAt || new Date().toISOString().slice(0, 10),
+    purchaseDate: order?.purchaseDate || order?.createdAt || new Date().toISOString().slice(0, 10),
     totalTimes: String(order?.totalTimes || 1),
     usedTimes: Number(order?.usedTimes || 0),
     experienceUpgradeStatus: order?.isUpgrade ? '已升单' : (order?.type === '体验卡' && Number(order?.usedTimes || 0) >= Number(order?.totalTimes || 1) ? '未升单' : ''),
@@ -2330,6 +2352,7 @@ export default function OrdersListPage() {
   const [importMsg, setImportMsg] = useState('');
   const importInputRef = useRef<HTMLInputElement>(null);
   const [pageSize, setPageSize] = useState(20);
+  const [purchaseDateRange, setPurchaseDateRange] = useState<PurchaseDateRange>('all');
 
   // Multi-select filter states
   const [fType, setFType] = useState<string[]>([]);
@@ -2405,6 +2428,7 @@ export default function OrdersListPage() {
 
   const filtered = enrichedOrders.filter(o => {
     const matchSearch = !search || o.customerName.includes(search) || o.id.includes(search);
+    const matchPurchaseDate = matchesPurchaseDateRange(o.purchaseDate || '', purchaseDateRange);
     const matchType = fType.length === 0 || fType.includes(o.type);
     const normalizedPay = o.payStatus === '已支付' ? '已付款' : o.payStatus === '待支付' ? '待付款' : o.payStatus;
     const matchPay = fPay.length === 0 || fPay.includes(normalizedPay);
@@ -2413,20 +2437,24 @@ export default function OrdersListPage() {
     const matchAdvisor = fAdvisor.length === 0 || fAdvisor.includes(o.advisor);
     const therapistDisplay = getTherapistDisplay(o.id);
     const matchTherapist = fTherapist.length === 0 || fTherapist.some(t => therapistDisplay.includes(t));
-    return matchSearch && matchType && matchPay && matchArea && matchTag && matchAdvisor && matchTherapist;
+    return matchSearch && matchPurchaseDate && matchType && matchPay && matchArea && matchTag && matchAdvisor && matchTherapist;
+  }).sort((a, b) => {
+    const bTime = new Date(`${b.purchaseDate || ''}T00:00:00`).getTime();
+    const aTime = new Date(`${a.purchaseDate || ''}T00:00:00`).getTime();
+    return (Number.isFinite(bTime) ? bTime : 0) - (Number.isFinite(aTime) ? aTime : 0);
   });
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const paginated = filtered.slice((page - 1) * pageSize, page * pageSize);
 
-  useEffect(() => { setPage(1); }, [search, fType, fPay, fArea, fTag, fAdvisor, fTherapist]);
+  useEffect(() => { setPage(1); }, [search, purchaseDateRange, fType, fPay, fArea, fTag, fAdvisor, fTherapist]);
 
   function handleOrderCustomerExport() {
     const headers = ['订单编号', '购买时间', '客户ID', '客户姓名', '联系电话', '所在区域', '客户标签', '归属客服', '订单类型', '服务项目', '跟进状态', '跟进时间', '跟进事项', '付款状态', '订单金额', '合同状态', '服务人员', '预约服务时间', '服务备注'];
     const rows = filtered.map(order => {
       const follow = getFollowDisplay(order);
       return [
-        order.id, order.createdAt, order.resolvedCustomerId, order.customerName, order.customerPhone, order.area, order.tag || '', order.advisor,
+        order.id, order.purchaseDate || '', order.resolvedCustomerId, order.customerName, order.customerPhone, order.area, order.tag || '', order.advisor,
         order.type, order.serviceItems || '', follow.status, follow.date, follow.task, payStatusDisplay(effectiveOrderPayStatus(order)), order.amount,
         getContractStatus(order.id, order.type), getTherapistDisplay(order.id), order.appointmentTime || '', order.serviceNote || '',
       ];
@@ -2543,6 +2571,24 @@ export default function OrdersListPage() {
             </div>
             {/* Filter dropdowns */}
             <div className="order-2 basis-full flex flex-wrap items-center gap-3 pt-3" style={{ borderTop: '1px solid var(--border)' }}>
+            <div className="flex items-center gap-1">
+              <span className="text-xs font-medium mr-1" style={{ color: 'var(--muted-foreground)' }}>购卡时间</span>
+              {(['all', 'today', 'week', 'month'] as PurchaseDateRange[]).map(range => (
+                <button
+                  key={range}
+                  onClick={() => setPurchaseDateRange(range)}
+                  className="px-2.5 py-1 rounded-md text-xs font-medium transition-all"
+                  style={{
+                    background: purchaseDateRange === range ? 'var(--brand)' : 'var(--muted)',
+                    color: purchaseDateRange === range ? '#fff' : 'var(--foreground)',
+                    border: `1px solid ${purchaseDateRange === range ? 'var(--brand)' : 'var(--border)'}`,
+                  }}
+                >
+                  {purchaseDateLabel(range)}
+                </button>
+              ))}
+            </div>
+            <div className="w-px h-5 flex-shrink-0" style={{ background: 'var(--border)' }} />
             <MultiSelectDropdown label="订单类型" options={TYPE_OPTIONS} selected={fType} onChange={setFType} />
             <div className="w-px h-5 flex-shrink-0" style={{ background: 'var(--border)' }} />
             <MultiSelectDropdown label="付款状态" options={PAY_OPTIONS} selected={fPay} onChange={setFPay} />
@@ -2612,7 +2658,7 @@ export default function OrdersListPage() {
               <thead>
                 <tr>
                   {/* Frozen cols */}
-                  <th style={STICKY_TH_STYLE(0)}>获客时间</th>
+                  <th style={STICKY_TH_STYLE(0)}>购卡时间</th>
                   <th style={STICKY_TH_STYLE(1)}>客户ID</th>
                   <th style={STICKY_TH_STYLE(2)}>客户姓名</th>
                   <th style={STICKY_TH_STYLE(3)}>标签</th>
@@ -2651,9 +2697,9 @@ export default function OrdersListPage() {
 
                   return (
                     <tr key={o.id}>
-                      {/* Frozen: 获客时间 */}
+                      {/* Frozen: 购卡时间 */}
                       <td style={STICKY_TD_STYLE(0, bgColor)}>
-                        <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>{o.createdAt}</span>
+                        <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>{o.purchaseDate || '—'}</span>
                       </td>
 
                       {/* Frozen: 客户ID */}

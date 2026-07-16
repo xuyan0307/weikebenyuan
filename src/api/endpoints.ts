@@ -75,7 +75,7 @@ export interface Order {
   customerId: string; customerCode?: string; customerName: string; customerPhone?: string;
   area?: string; advisor?: string; tag?: string;
   type: string; amount: number; payStatus: string;
-  createdAt: string; paidAt?: string | null;
+  createdAt: string; purchaseDate?: string; paidAt?: string | null;
   usedTimes: number; totalTimes: number;
   isUpgrade: boolean; contractSigned: boolean; hasCoupon: boolean; serviceItemCount: number;
   serviceItems?: string; servicePeople?: any; appointmentTime?: string; serviceNote?: string;

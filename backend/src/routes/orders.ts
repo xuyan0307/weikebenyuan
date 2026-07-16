@@ -175,7 +175,6 @@ async function applyOrderCustomerEdits(db: any, snapshot: any, body: any) {
   if (body.customerPhone !== undefined) next.phone = body.customerPhone;
   if (body.customerArea !== undefined) next.area = body.customerArea;
   if (body.source !== undefined) next.source = body.source;
-  if (body.purchaseDate !== undefined) next.acquiredAt = body.purchaseDate;
   if (body.customerTag !== undefined) next.tag = body.customerTag;
   if (advisor !== undefined) {
     next.advisor = advisor || '';
@@ -224,8 +223,9 @@ function mapRow(r: any) {
     type: r.type,
     amount: Number(r.amount),
     payStatus: r.pay_status,
-    // Order-list "获客时间" belongs to the retained customer snapshot, not the order creation timestamp.
+    // Customer acquisition time remains part of the retained customer snapshot.
     createdAt: customer.acquiredAt || (r.created_at ? new Date(r.created_at).toISOString().slice(0, 10) : ''),
+    purchaseDate: formatSnapshotDate(r.purchase_date) || formatSnapshotDate(r.created_at),
     paidAt: r.paid_at ? new Date(r.paid_at).toISOString() : null,
     usedTimes: r.used_times || 0,
     totalTimes: r.total_times,
@@ -262,7 +262,7 @@ router.get('/', authenticateToken, async (req, res, next) => {
     const total = (countRows as any[])[0].cnt;
 
     const [rows] = await db.query(
-      `SELECT o.id, o.order_no, o.customer_id, o.customer_snapshot, o.type, o.amount, o.pay_status, o.paid_at,
+      `SELECT o.id, o.order_no, o.customer_id, o.customer_snapshot, o.type, o.amount, o.pay_status, o.paid_at, o.purchase_date,
               o.used_times, o.total_times, o.manual_progress_at, o.is_upgrade, o.contract_signed, o.has_coupon,
               o.service_item_count, o.service_items, o.service_people, o.appointment_time,
               o.service_note, o.created_at, o.updated_at,
@@ -275,13 +275,13 @@ router.get('/', authenticateToken, async (req, res, next) => {
          SELECT o.id
          FROM orders o
          ${whereSql}
-         ORDER BY o.created_at DESC
+         ORDER BY o.purchase_date DESC, o.created_at DESC
          LIMIT ? OFFSET ?
        ) page_orders
        JOIN orders o ON o.id = page_orders.id
        LEFT JOIN customers c ON c.id = o.customer_id
        LEFT JOIN users u ON u.id = c.advisor_id
-       ORDER BY o.created_at DESC`,
+       ORDER BY o.purchase_date DESC, o.created_at DESC`,
       [...params, pageSize, offset]
     );
     res.json({ total, page, pageSize, data: (rows as any[]).map(mapRow) });
@@ -298,11 +298,11 @@ router.post('/', authenticateToken, auditLog('orders'), async (req, res, next) =
     const customerSnapshot = await getCustomerSnapshot(db, custId, b);
     const payStatus = normalizePayStatus(b.payStatus);
     await db.execute(
-      `INSERT INTO orders (id, order_no, customer_id, type, amount, pay_status, paid_at, used_times, total_times, is_upgrade, contract_signed, has_coupon, service_item_count, service_items, service_people, appointment_time, service_note, contract_attachments, service_photo_records)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      `INSERT INTO orders (id, order_no, customer_id, type, amount, pay_status, paid_at, purchase_date, used_times, total_times, is_upgrade, contract_signed, has_coupon, service_item_count, service_items, service_people, appointment_time, service_note, contract_attachments, service_photo_records)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [
         id, orderNo, custId, b.type || '体验卡', b.amount || 0, payStatus,
-        payStatus === '已付款' ? new Date() : null, b.usedTimes || 0, b.totalTimes || 1,
+        payStatus === '已付款' ? new Date() : null, b.purchaseDate || new Date(), b.usedTimes || 0, b.totalTimes || 1,
         b.isUpgrade ? 1 : 0, b.contractSigned ? 1 : 0, b.hasCoupon ? 1 : 0, b.serviceItemCount || 1,
         b.serviceItems || null,
         jsonOrNull(b.servicePeople),
@@ -351,7 +351,7 @@ router.put('/:id', authenticateToken, auditLog('orders'), async (req: AuthReques
     const b = req.body || {};
     const db = getDb();
     const [rows] = await db.execute(
-      'SELECT id, customer_id, customer_snapshot, type, used_times, total_times FROM orders WHERE id=? OR order_no=? LIMIT 1',
+      'SELECT id, customer_id, customer_snapshot, type, used_times, total_times, purchase_date FROM orders WHERE id=? OR order_no=? LIMIT 1',
       [req.params.id, req.params.id]
     );
     const existing = (rows as any[])[0];
@@ -385,7 +385,7 @@ router.put('/:id', authenticateToken, auditLog('orders'), async (req: AuthReques
       : Number(existing.used_times) || 0;
     await db.execute(
       `UPDATE orders
-       SET customer_id=?, type=?, amount=?, pay_status=?,
+       SET customer_id=?, type=?, amount=?, pay_status=?, purchase_date=?,
            paid_at = CASE WHEN ? = '已付款' THEN COALESCE(paid_at, NOW()) ELSE paid_at END,
            used_times=?, total_times=?,
            manual_progress_at = CASE WHEN ? THEN NOW() ELSE manual_progress_at END,
@@ -397,6 +397,7 @@ router.put('/:id', authenticateToken, auditLog('orders'), async (req: AuthReques
         orderType,
         b.amount || 0,
         payStatus,
+        b.purchaseDate !== undefined ? (b.purchaseDate || null) : existing.purchase_date,
         payStatus,
         usedTimes,
         totalTimes,

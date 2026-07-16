@@ -157,7 +157,7 @@ function uniqueStrings(values: string[]): string[] {
 type DateRange = 'all' | 'today' | 'week' | 'month';
 
 function getDateRangeLabel(r: DateRange): string {
-  return { all: '全部', today: '今日', week: '近一周', month: '近一个月' }[r];
+  return { all: '全部', today: '今日', week: '本周', month: '本月' }[r];
 }
 
 function matchDateRange(dateStr: string, range: DateRange): boolean {
@@ -166,12 +166,14 @@ function matchDateRange(dateStr: string, range: DateRange): boolean {
   const d = new Date(dateStr); d.setHours(0, 0, 0, 0);
   if (range === 'today') return d.getTime() === today.getTime();
   if (range === 'week') {
-    const from = new Date(today); from.setDate(today.getDate() - 6);
-    return d >= from && d <= today;
+    const from = new Date(today); from.setDate(today.getDate() - ((today.getDay() + 6) % 7));
+    const to = new Date(from); to.setDate(from.getDate() + 6);
+    return d >= from && d <= to;
   }
   if (range === 'month') {
-    const from = new Date(today); from.setDate(today.getDate() - 29);
-    return d >= from && d <= today;
+    const from = new Date(today.getFullYear(), today.getMonth(), 1);
+    const to = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+    return d >= from && d <= to;
   }
   return true;
 }
