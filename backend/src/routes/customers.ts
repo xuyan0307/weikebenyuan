@@ -110,7 +110,7 @@ router.get('/', authenticateToken, async (req, res, next) => {
               u.name AS advisor_name
        FROM customers c LEFT JOIN users u ON u.id = c.advisor_id
        ${whereSql}
-       ORDER BY c.created_at DESC LIMIT ? OFFSET ?`,
+       ORDER BY c.acquired_at DESC, c.created_at DESC LIMIT ? OFFSET ?`,
       [...params, pageSize, offset]
     );
     res.json({ total, page, pageSize, data: (rows as any[]).map(mapRow) });
