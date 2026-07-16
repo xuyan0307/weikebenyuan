@@ -224,7 +224,8 @@ function mapRow(r: any) {
     type: r.type,
     amount: Number(r.amount),
     payStatus: r.pay_status,
-    createdAt: r.acquired_at ? new Date(r.acquired_at).toISOString().slice(0, 10) : (r.created_at ? new Date(r.created_at).toISOString().slice(0, 10) : ''),
+    // Order-list "获客时间" belongs to the retained customer snapshot, not the order creation timestamp.
+    createdAt: customer.acquiredAt || (r.created_at ? new Date(r.created_at).toISOString().slice(0, 10) : ''),
     paidAt: r.paid_at ? new Date(r.paid_at).toISOString() : null,
     usedTimes: r.used_times || 0,
     totalTimes: r.total_times,
