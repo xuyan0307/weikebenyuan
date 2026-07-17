@@ -5,27 +5,12 @@ import { auditLog } from '../middleware/auditLog';
 import { getDb } from '../config/database';
 import { createError } from '../middleware/errorHandler';
 import { formatDateOnly } from '../utils/serialization';
+import { generateCustomerCode } from '../services/customerCodeService';
 
 const router: Router = Router();
 
 function nullableDate(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value : null;
-}
-
-async function generateCustomerCode(db: any, requested?: unknown): Promise<string> {
-  const preferred = typeof requested === 'string' ? requested.trim() : '';
-  if (preferred) {
-    const [rows] = await db.execute('SELECT id FROM customers WHERE customer_code = ? LIMIT 1', [preferred]);
-    if ((rows as any[]).length === 0) return preferred;
-  }
-
-  const [rows] = await db.query(
-    `SELECT MAX(CAST(customer_code AS UNSIGNED)) AS max_code
-     FROM customers
-     WHERE customer_code REGEXP '^[0-9]+$'`
-  );
-  const nextNumber = Math.max(100000, Number((rows as any[])[0]?.max_code || 100000)) + 1;
-  return String(nextNumber);
 }
 
 async function resolveAdvisorId(db: any, body: any): Promise<string | null> {
