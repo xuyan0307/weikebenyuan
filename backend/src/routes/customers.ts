@@ -1,11 +1,19 @@
 import { Router } from 'express';
 import { randomUUID } from 'crypto';
+import type { Pool, RowDataPacket } from 'mysql2/promise';
 import { authenticateToken, authorizeRoles } from '../middleware/auth';
 import { auditLog } from '../middleware/auditLog';
 import { getDb } from '../config/database';
 import { createError } from '../middleware/errorHandler';
-import { formatDateOnly } from '../utils/serialization';
 import { generateCustomerCode } from '../services/customerCodeService';
+import {
+  CustomerDateRange,
+  CustomerListFilters,
+  exportCustomers,
+  getCustomerFilterOptions,
+  listCustomers,
+  mapCustomerRow,
+} from '../services/customerQueryService';
 
 const router: Router = Router();
 
@@ -13,8 +21,38 @@ function nullableDate(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value : null;
 }
 
-async function resolveAdvisorId(db: any, body: any): Promise<string | null> {
-  if (body.advisorId) return body.advisorId;
+function stringQuery(value: unknown): string {
+  if (Array.isArray(value)) return stringQuery(value[0]);
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function csvQuery(value: unknown): string[] {
+  return stringQuery(value).split(',').map(item => item.trim()).filter(Boolean);
+}
+
+function customerFiltersFromQuery(query: Record<string, unknown>): CustomerListFilters {
+  const requestedDateRange = stringQuery(query.dateRange);
+  const dateRange: CustomerDateRange = ['today', 'week', 'month'].includes(requestedDateRange)
+    ? requestedDateRange as CustomerDateRange
+    : 'all';
+  const tags = csvQuery(query.tags);
+  const statuses = csvQuery(query.statuses);
+  const legacyTag = stringQuery(query.tag);
+  const legacyStatus = stringQuery(query.followStatus);
+  return {
+    keyword: stringQuery(query.keyword),
+    dateRange,
+    areas: csvQuery(query.areas),
+    sources: csvQuery(query.sources),
+    statuses: statuses.length > 0 ? statuses : legacyStatus ? [legacyStatus] : [],
+    tags: tags.length > 0 ? tags : legacyTag ? [legacyTag] : [],
+    advisors: csvQuery(query.advisors),
+    includeOrdered: query.includeOrdered === '1' || query.includeOrdered === 'true',
+  };
+}
+
+async function resolveAdvisorId(db: Pool, body: Record<string, unknown>): Promise<string | null> {
+  if (typeof body.advisorId === 'string' && body.advisorId) return body.advisorId;
   const advisorName = typeof body.advisor === 'string' ? body.advisor.trim() : '';
   if (!advisorName) return null;
 
@@ -22,31 +60,7 @@ async function resolveAdvisorId(db: any, body: any): Promise<string | null> {
     'SELECT id FROM users WHERE name = ? AND status = ? LIMIT 1',
     [advisorName, 'active']
   );
-  return (rows as any[])[0]?.id || null;
-}
-
-function mapRow(r: any) {
-  return {
-    id: r.customer_code || r.id,
-    _id: r.id,
-    name: r.name,
-    wechat: r.wechat || '',
-    phone: r.phone || '',
-    area: r.area || '',
-    source: r.source || '',
-    acquiredAt: r.acquired_at_date || formatDateOnly(r.acquired_at),
-    tag: r.tag || '',
-    followStatus: r.follow_status || '待跟进',
-    followDate: r.follow_date_date || formatDateOnly(r.follow_date),
-    advisor: r.advisor_name || '',
-    advisorId: r.advisor_id || '',
-    totalOrders: r.total_orders || 0,
-    lastFollow: r.last_follow_date || formatDateOnly(r.last_follow),
-    profile: typeof r.profile === 'string' ? JSON.parse(r.profile || '{}') : (r.profile || null),
-    situation: r.situation || '',
-    intendedProduct: r.intended_product || '',
-    remark: r.remark || '',
-  };
+  return (rows as RowDataPacket[])[0]?.id || null;
 }
 
 router.get('/', authenticateToken, async (req, res, next) => {
@@ -54,43 +68,32 @@ router.get('/', authenticateToken, async (req, res, next) => {
     const db = getDb();
     const page = Math.max(1, parseInt(req.query.page as string) || 1);
     const pageSize = Math.max(1, parseInt(req.query.pageSize as string) || 10);
-    const keyword = (req.query.keyword as string) || '';
-    const tag = (req.query.tag as string) || '';
-    const followStatus = (req.query.followStatus as string) || '';
-    const includeOrdered = req.query.includeOrdered === '1' || req.query.includeOrdered === 'true';
-    const offset = (page - 1) * pageSize;
-
-    const where: string[] = [];
-    const params: any[] = [];
-    if (!includeOrdered) where.push("c.tag IN ('D1','D2','D3') AND COALESCE(c.total_orders, 0) = 0");
-    if (keyword) {
-      where.push('(c.name LIKE ? OR c.phone LIKE ? OR c.customer_code LIKE ?)');
-      params.push(`%${keyword}%`, `%${keyword}%`, `%${keyword}%`);
-    }
-    if (tag) { where.push('c.tag = ?'); params.push(tag); }
-    if (followStatus) { where.push('c.follow_status = ?'); params.push(followStatus); }
-    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
-
-    const [countRows] = await db.query(
-      `SELECT COUNT(*) AS cnt FROM customers c ${whereSql}`,
-      params
-    );
-    const total = (countRows as any[])[0].cnt;
-
-    const [rows] = await db.query(
-      `SELECT c.*,
-              DATE_FORMAT(c.acquired_at, '%Y-%m-%d') AS acquired_at_date,
-              DATE_FORMAT(c.follow_date, '%Y-%m-%d') AS follow_date_date,
-              DATE_FORMAT(c.last_follow, '%Y-%m-%d') AS last_follow_date,
-              u.name AS advisor_name
-       FROM customers c LEFT JOIN users u ON u.id = c.advisor_id
-       ${whereSql}
-       ORDER BY c.acquired_at DESC, c.created_at DESC LIMIT ? OFFSET ?`,
-      [...params, pageSize, offset]
-    );
-    res.json({ total, page, pageSize, data: (rows as any[]).map(mapRow) });
+    const result = await listCustomers(db, {
+      ...customerFiltersFromQuery(req.query),
+      page,
+      pageSize,
+    });
+    res.json(result);
   } catch (err) { next(err); }
 });
+
+router.get('/filter-options', authenticateToken, async (_req, res, next) => {
+  try {
+    res.json(await getCustomerFilterOptions(getDb()));
+  } catch (err) { next(err); }
+});
+
+router.get(
+  '/export',
+  authenticateToken,
+  authorizeRoles('superadmin', 'admin'),
+  async (req, res, next) => {
+    try {
+      const data = await exportCustomers(getDb(), customerFiltersFromQuery(req.query));
+      res.json({ data });
+    } catch (err) { next(err); }
+  }
+);
 
 router.get('/:id', authenticateToken, async (req, res, next) => {
   try {
@@ -105,9 +108,9 @@ router.get('/:id', authenticateToken, async (req, res, next) => {
        WHERE c.id = ? OR c.customer_code = ? LIMIT 1`,
       [req.params.id, req.params.id]
     );
-    const row = (rows as any[])[0];
+    const row = (rows as RowDataPacket[])[0];
     if (!row) return next(createError('客户不存在', 404));
-    res.json(mapRow(row));
+    res.json(mapCustomerRow(row));
   } catch (err) { next(err); }
 });
 

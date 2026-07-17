@@ -7,7 +7,8 @@ import {
 } from 'lucide-react';
 import type { Customer, CustomerTag, FollowStatus, CustomerProfile, Order } from '../data/mockData';
 import { useApp } from '../hooks/useApp';
-import { useCustomers, useCustomerMutations, useOrders, useSystemUsers } from '../api/hooks';
+import { useCustomers, useCustomerFilterOptions, useCustomerMutations, useOrders, useSystemUsers } from '../api/hooks';
+import { customersApi } from '../api/endpoints';
 import { toast } from 'sonner';
 import { downloadXlsx, readSpreadsheet, rowsToObjects } from '../utils/spreadsheet';
 
@@ -153,29 +154,25 @@ function uniqueStrings(values: string[]): string[] {
   return Array.from(new Set(values.map(v => textOf(v).trim()).filter(Boolean)));
 }
 
+function selectedQueryValue(selected: string[], allOptions: readonly string[]): string {
+  if (selected.length === 0 || selected.length === allOptions.length) return '';
+  return selected.join(',');
+}
+
+function useDebouncedValue<T>(value: T, delayMs: number): T {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setDebouncedValue(value), delayMs);
+    return () => window.clearTimeout(timeout);
+  }, [value, delayMs]);
+  return debouncedValue;
+}
+
 // ─────────────────────────── Date filter ───────────────────────────
 type DateRange = 'all' | 'today' | 'week' | 'month';
 
 function getDateRangeLabel(r: DateRange): string {
   return { all: '全部', today: '今日', week: '本周', month: '本月' }[r];
-}
-
-function matchDateRange(dateStr: string, range: DateRange): boolean {
-  if (range === 'all') return true;
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  const d = new Date(dateStr); d.setHours(0, 0, 0, 0);
-  if (range === 'today') return d.getTime() === today.getTime();
-  if (range === 'week') {
-    const from = new Date(today); from.setDate(today.getDate() - ((today.getDay() + 6) % 7));
-    const to = new Date(from); to.setDate(from.getDate() + 6);
-    return d >= from && d <= to;
-  }
-  if (range === 'month') {
-    const from = new Date(today.getFullYear(), today.getMonth(), 1);
-    const to = new Date(today.getFullYear(), today.getMonth() + 1, 0);
-    return d >= from && d <= to;
-  }
-  return true;
 }
 
 // ─────────────────────────── CSV Template ───────────────────────────
@@ -653,6 +650,7 @@ export default function CustomersListPage() {
   const canChooseAdvisor = currentUser.role === 'superadmin' || currentUser.role === 'admin';
   const canChooseFollower = canChooseAdvisor;
   const usersQuery = useSystemUsers(canChooseAdvisor || canChooseFollower);
+  const customerFilterOptionsQuery = useCustomerFilterOptions();
   const assignableUsers = (usersQuery.data?.data ?? [])
     .filter(u => u.status === 'active' && (u.role === 'superadmin' || u.role === 'admin' || u.role === 'service'))
     .map(u => ({ id: u.id, name: u.name }));
@@ -675,6 +673,7 @@ export default function CustomersListPage() {
     : uniquePersonOptions([currentUserOption]);
   const defaultFollower = followerOptions.find(u => u.id === currentUser.id) ?? followerOptions[0] ?? { id: currentUser.id, name: currentUser.name };
   const [search, setSearch] = useState('');
+  const debouncedSearch = useDebouncedValue(search, 300);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
 
@@ -685,11 +684,27 @@ export default function CustomersListPage() {
   const [tagFilter, setTagFilter] = useState<CustomerTag[]>([...ALL_TAGS]);
   const [advisorFilter, setAdvisorFilter] = useState<string[]>([]);
 
+  const advisorFilterOptions = uniqueStrings([
+    ...advisorNames,
+    ...(customerFilterOptionsQuery.data?.advisors ?? []),
+  ]);
+
+  const customerFilterParams = {
+    keyword: debouncedSearch.trim(),
+    dateRange,
+    areas: selectedQueryValue(areaFilter, AREA_OPTIONS),
+    sources: selectedQueryValue(sourceFilter, SOURCE_OPTIONS),
+    statuses: selectedQueryValue(statusFilter, FILTER_STATUSES),
+    tags: selectedQueryValue(tagFilter, ALL_TAGS),
+    advisors: selectedQueryValue(advisorFilter, advisorFilterOptions),
+  };
+
   const [detailId, setDetailId] = useState<string | null>(null);
   const [detailTab, setDetailTab] = useState<'basic' | 'profile' | 'follow' | 'orders'>('basic');
 
-  const customersQuery = useCustomers({ page: 1, pageSize: 10000 });
-  const customers: Customer[] = (customersQuery.data?.data ?? []) as any;
+  const customersQuery = useCustomers({ ...customerFilterParams, page, pageSize });
+  const customers = (customersQuery.data?.data ?? []) as unknown as Customer[];
+  const totalCustomers = customersQuery.data?.total ?? 0;
   const mutations = useCustomerMutations();
   const ordersQuery = useOrders({ customerId: detailId || '', page: 1, pageSize: 100 });
   // Local follow task map state (for re-rendering)
@@ -713,11 +728,6 @@ export default function CustomersListPage() {
 
   const canEdit = currentUser.role !== 'finance' && currentUser.role !== 'therapist';
   const canManageBulk = currentUser.role === 'superadmin' || currentUser.role === 'admin';
-  const advisorFilterOptions = uniqueStrings([
-    ...advisorNames,
-    ...customers.map(c => textOf(c.advisor)),
-  ]);
-
   useEffect(() => {
     if (showAdd) return;
     const nextAdvisor = defaultAdvisorName || textOf(currentUser.name);
@@ -735,35 +745,19 @@ export default function CustomersListPage() {
   const customerDisplayStatus = (c: Customer): NewFollowStatus => computeDisplayStatus(c, c.followStatus);
 
   // ── filter ──
-  const filtered = customers.filter(c => {
-    const q = search.trim();
-    const name = textOf(c.name);
-    const phone = textOf(c.phone);
-    const id = textOf(c.id);
-    const wechat = textOf(c.wechat);
-    const acquiredAt = textOf(c.acquiredAt);
-    const area = textOf(c.area);
-    const source = textOf(c.source);
-    const advisor = textOf(c.advisor);
-    const tag = textOf(c.tag) as CustomerTag;
-    const matchSearch = !q || name.includes(q) || phone.includes(q) || id.includes(q) || wechat.includes(q);
-    const matchDate = matchDateRange(acquiredAt, dateRange);
-    const matchArea = areaFilter.length === 0 || areaFilter.some(a => area.includes(a)) || areaFilter.length === AREA_OPTIONS.length;
-    const matchSource = sourceFilter.length === 0 || sourceFilter.includes(source) || sourceFilter.length === SOURCE_OPTIONS.length;
-    const displaySt = customerDisplayStatus(c);
-    const matchStatus = statusFilter.length === 0 || statusFilter.includes(displaySt) || statusFilter.length === FILTER_STATUSES.length;
-    const matchTag = tagFilter.length === 0 || tagFilter.includes(tag) || tagFilter.length === ALL_TAGS.length;
-    const matchAdvisor = advisorFilter.length === 0 || advisorFilter.includes(advisor) || advisorFilter.length === advisorFilterOptions.length;
-    return matchSearch && matchDate && matchArea && matchSource && matchStatus && matchTag && matchAdvisor;
-  });
-
-  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
-  const paginated = filtered.slice((page - 1) * pageSize, page * pageSize);
+  const totalPages = Math.max(1, Math.ceil(totalCustomers / pageSize));
+  const paginated = customers;
 
   const detailCustomer = customers.find(c => c.id === detailId);
   const editCustomer   = customers.find(c => c.id === editId);
 
   function resetPage() { setPage(1); }
+
+  useEffect(() => {
+    if (page <= totalPages) return;
+    const timeout = window.setTimeout(() => setPage(totalPages), 0);
+    return () => window.clearTimeout(timeout);
+  }, [page, totalPages]);
 
   // ── validate ──
   function validate(f: CustomerForm): Partial<Record<keyof CustomerForm, string>> {
@@ -904,9 +898,17 @@ export default function CustomersListPage() {
     setEditForm(next);
   }
 
-  function handleCustomerExport() {
+  async function handleCustomerExport() {
+    let exportCustomers: Customer[];
+    try {
+      const response = await customersApi.exportList(customerFilterParams);
+      exportCustomers = response.data as unknown as Customer[];
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '导出失败');
+      return;
+    }
     const headers = ['客户ID', '客户姓名', '微信号', '联系电话', '所在区域', '来源渠道', '获客时间', '客户标签', '归属客服', '跟进状态', '下次跟进时间', '当前跟进事项', '最近跟进反馈', '订单数', '年龄', '生产时间', '第几胎', '分娩方式', '喂养方式', '意向产品', '需求情况', '备注', '全部跟进记录'];
-    const rows = customers.map(customer => {
+    const rows = exportCustomers.map(customer => {
       const profile = getPersistedProfile(customer);
       const records = getFollowRecords(customer).map(record => [record.createdAt || record.date, record.status, record.followerName || record.operator, record.content, record.feedback].filter(Boolean).join(' | ')).join('\n');
       const latest = getFollowRecords(customer)[0];
@@ -1281,7 +1283,7 @@ export default function CustomersListPage() {
           <div className="flex-1" />
           <div className="flex items-center gap-1.5 text-sm" style={{ color: 'var(--muted-foreground)' }}>
             <FilterIcon size={13} />
-            共 <strong className="text-foreground">{filtered.length}</strong> 位客户
+            共 <strong className="text-foreground">{totalCustomers}</strong> 位客户
           </div>
           <button
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all"
@@ -1299,7 +1301,7 @@ export default function CustomersListPage() {
           {canManageBulk && (
             <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all hover:opacity-90"
               style={{ background: 'var(--muted)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
-              onClick={handleCustomerExport}>
+              onClick={() => { void handleCustomerExport(); }}>
               <DownloadIcon size={13} />批量导出
             </button>
           )}
@@ -1605,9 +1607,9 @@ export default function CustomersListPage() {
             </select>
           </label>
           <span className="text-sm" style={{ color: 'var(--muted-foreground)' }}>
-            {filtered.length === 0
+            {totalCustomers === 0
               ? '共 0 条'
-              : `第 ${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, filtered.length)} 条，共 ${filtered.length} 条`}
+              : `第 ${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, totalCustomers)} 条，共 ${totalCustomers} 条`}
           </span>
           <div className="flex items-center gap-1">
             <button className="p-1.5 rounded hover:bg-muted transition-colors disabled:opacity-40"

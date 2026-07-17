@@ -4,10 +4,11 @@ import {
   serviceRecordsApi, financeApi, contractsApi, dashboardApi, operationLogsApi,
   usersApi,
 } from './endpoints';
-import type { Customer, Order, Appointment, Therapist } from './endpoints';
+import type { Customer, CustomerListParams, Order, Appointment, Therapist } from './endpoints';
 
 export const qk = {
-  customers: (params: any) => ['customers', params] as const,
+  customers: (params: CustomerListParams) => ['customers', params] as const,
+  customerFilterOptions: () => ['customers', 'filter-options'] as const,
   customer: (id: string) => ['customer', id] as const,
   orders: (params: any) => ['orders', params] as const,
   appointments: (params: any) => ['appointments', params] as const,
@@ -26,8 +27,15 @@ export const qk = {
 };
 
 // ====== Customers ======
-export function useCustomers(params: Record<string, any>) {
+export function useCustomers(params: CustomerListParams) {
   return useQuery({ queryKey: qk.customers(params), queryFn: () => customersApi.list(params) });
+}
+export function useCustomerFilterOptions() {
+  return useQuery({
+    queryKey: qk.customerFilterOptions(),
+    queryFn: () => customersApi.filterOptions(),
+    staleTime: 5 * 60 * 1000,
+  });
 }
 export function useCustomer(id: string | null) {
   return useQuery({ queryKey: qk.customer(id || ''), queryFn: () => customersApi.get(id!), enabled: !!id });

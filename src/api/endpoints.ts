@@ -32,8 +32,23 @@ export interface Customer {
   totalOrders: number; lastFollow: string;
   profile: any; situation: string; intendedProduct: string; remark: string;
 }
+export interface CustomerListParams {
+  page?: number;
+  pageSize?: number;
+  keyword?: string;
+  dateRange?: 'all' | 'today' | 'week' | 'month';
+  areas?: string;
+  sources?: string;
+  statuses?: string;
+  tags?: string;
+  advisors?: string;
+  includeOrdered?: number | boolean;
+}
 export const customersApi = {
-  list: (params: Record<string, any>) => api.get<Paged<Customer>>('/customers', params),
+  list: (params: CustomerListParams) => api.get<Paged<Customer>>('/customers', params),
+  filterOptions: () => api.get<{ advisors: string[] }>('/customers/filter-options'),
+  exportList: (params: Omit<CustomerListParams, 'page' | 'pageSize'>) =>
+    api.get<{ data: Customer[] }>('/customers/export', params),
   get: (id: string) => api.get<Customer>(`/customers/${id}`),
   create: (body: Partial<Customer>) => api.post<{ id: string; code: string }>('/customers', body),
   update: (id: string, body: Partial<Customer>) => api.put<{ message: string }>(`/customers/${id}`, body),
