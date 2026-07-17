@@ -4,7 +4,7 @@ import {
   ChevronLeftIcon, ChevronRightIcon, XIcon, CheckIcon,
   UserIcon, FileTextIcon, UsersIcon, MessageSquareIcon,
   ImageIcon, ChevronDownIcon, TagIcon, ZapIcon,
-  UploadIcon, DownloadIcon,
+  UploadIcon, DownloadIcon, Trash2Icon,
 } from 'lucide-react';
 import type { OrderType, PayStatus, Customer, CustomerTag } from '../data/mockData';
 import { useApp } from '../hooks/useApp';
@@ -1157,6 +1157,7 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
   const orderMutations = useOrderMutations();
   const { currentUser } = useApp();
   const canChooseFollower = currentUser.role === 'superadmin' || currentUser.role === 'admin';
+  const canDeleteOrder = canChooseFollower && mode === 'edit';
   const canEditServiceProgress = canChooseFollower && mode !== 'view';
   const usersQuery = useSystemUsers(canChooseFollower);
   const followerOptions = canChooseFollower
@@ -1424,6 +1425,18 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
       onClose();
     } catch (e: any) {
       toast.error(e?.message || '保存失败');
+    }
+  }
+
+  async function handleDelete() {
+    if (!canDeleteOrder || !editOrderId) return;
+    if (!window.confirm('确认删除该订单吗？删除后无法恢复。')) return;
+    try {
+      await orderMutations.remove(editOrderId);
+      toast.success('订单已删除');
+      onClose();
+    } catch (e: any) {
+      toast.error(e?.message || '删除失败');
     }
   }
 
@@ -2207,6 +2220,13 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
                 ))}
               </div>
               <div className="flex items-center gap-3">
+                {canDeleteOrder && (
+                  <button
+                    className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm border hover:bg-muted"
+                    style={{ color: 'var(--danger)', borderColor: 'rgba(220,38,38,0.35)' }}
+                    onClick={handleDelete}
+                  ><Trash2Icon size={14} />删除订单</button>
+                )}
                 {activeTab !== 'customer' && (
                   <button
                     className="px-4 py-1.5 rounded-lg text-sm border hover:bg-muted"

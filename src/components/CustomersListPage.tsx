@@ -3,7 +3,7 @@ import {
   SearchIcon, PlusIcon, FilterIcon, PhoneIcon, EyeIcon, EditIcon,
   ChevronLeftIcon, ChevronRightIcon, XIcon, SaveIcon, UserIcon, CalendarIcon,
   TagIcon, ChevronDownIcon, UploadIcon, DownloadIcon, FileTextIcon, CheckIcon,
-  ClockIcon, ShoppingBagIcon, PackageIcon,
+  ClockIcon, ShoppingBagIcon, PackageIcon, Trash2Icon,
 } from 'lucide-react';
 import type { Customer, CustomerTag, FollowStatus, CustomerProfile, Order } from '../data/mockData';
 import { useApp } from '../hooks/useApp';
@@ -921,6 +921,19 @@ export default function CustomersListPage() {
     toast.success(`已导出 ${rows.length} 位客户的完整信息`);
   }
 
+  async function handleDeleteCustomer() {
+    if (!editId || !canManageBulk) return;
+    if (!window.confirm('确认删除该客户吗？删除后无法恢复。')) return;
+    try {
+      await mutations.remove(editId);
+      toast.success('客户已删除');
+      setEditId(null);
+      setEditErrors({});
+    } catch (e: any) {
+      toast.error(e?.message || '删除失败');
+    }
+  }
+
   // ── Spreadsheet import ──
   async function handleImport() {
     if (!importFile) return;
@@ -1205,8 +1218,8 @@ export default function CustomersListPage() {
   }
 
   // ── modal wrapper ──
-  function ModalWrap({ show, title, onClose, onConfirm, confirmLabel = '保存', children, width = 880 }: {
-    show: boolean; title: string; onClose: () => void; onConfirm: () => void;
+  function ModalWrap({ show, title, onClose, onConfirm, onDelete, confirmLabel = '保存', children, width = 880 }: {
+    show: boolean; title: string; onClose: () => void; onConfirm: () => void; onDelete?: () => void;
     confirmLabel?: string; children: React.ReactNode; width?: number;
   }) {
     if (!show) return null;
@@ -1225,6 +1238,10 @@ export default function CustomersListPage() {
           {children}
           <div className="flex justify-end gap-2 px-6 py-4 flex-shrink-0"
             style={{ borderTop: '1px solid var(--border)' }}>
+            {onDelete && <button className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium hover:bg-muted transition-colors"
+              style={{ color: 'var(--danger)', border: '1px solid rgba(220,38,38,0.35)' }} onClick={onDelete}>
+              <Trash2Icon size={13} />删除客户
+            </button>}
             <button className="px-4 py-2 rounded-lg text-sm font-medium hover:bg-muted transition-colors"
               style={{ color: 'var(--muted-foreground)', border: '1px solid var(--border)' }}
               onClick={onClose}>取消</button>
@@ -1954,7 +1971,7 @@ export default function CustomersListPage() {
 
       {/* ══ Edit Modal ══ */}
       <ModalWrap show={!!editId} title={`编辑客户 — ${editCustomer?.name ?? ''}`}
-        onClose={() => setEditId(null)} onConfirm={handleEdit}>
+        onClose={() => setEditId(null)} onConfirm={handleEdit} onDelete={canManageBulk ? handleDeleteCustomer : undefined}>
         {renderForm(editFormRef.current, patchEdit, patchEditProducts, editErrors, true, editId ?? undefined)}
       </ModalWrap>
 

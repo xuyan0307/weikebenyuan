@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { randomUUID } from 'crypto';
-import { authenticateToken, AuthRequest } from '../middleware/auth';
+import { authenticateToken, AuthRequest, authorizeRoles } from '../middleware/auth';
 import { auditLog } from '../middleware/auditLog';
 import { createError } from '../middleware/errorHandler';
 import { getDb } from '../config/database';
@@ -450,7 +450,7 @@ router.patch('/:id/contract', authenticateToken, auditLog('orders'), async (req,
   } catch (err) { next(err); }
 });
 
-router.delete('/:id', authenticateToken, auditLog('orders'), async (req, res, next) => {
+router.delete('/:id', authenticateToken, authorizeRoles('superadmin', 'admin'), auditLog('orders'), async (req, res, next) => {
   try {
     const db = getDb();
     const [rows] = await db.execute('SELECT customer_id FROM orders WHERE id=? OR order_no=? LIMIT 1', [req.params.id, req.params.id]);

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { randomUUID } from 'crypto';
-import { authenticateToken } from '../middleware/auth';
+import { authenticateToken, authorizeRoles } from '../middleware/auth';
 import { auditLog } from '../middleware/auditLog';
 import { getDb } from '../config/database';
 import { createError } from '../middleware/errorHandler';
@@ -193,7 +193,7 @@ router.patch('/:id/follow', authenticateToken, auditLog('customers'), async (req
   } catch (err) { next(err); }
 });
 
-router.delete('/:id', authenticateToken, auditLog('customers'), async (req, res, next) => {
+router.delete('/:id', authenticateToken, authorizeRoles('superadmin', 'admin'), auditLog('customers'), async (req, res, next) => {
   try {
     const db = getDb();
     await db.execute('DELETE FROM customers WHERE id=? OR customer_code=?', [req.params.id, req.params.id]);
