@@ -11,7 +11,8 @@
     "dev": "vite",
     "dev:api": "npm --prefix backend run dev",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "check": "npm run build:all && node --test backend/tests/serialization.test.cjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

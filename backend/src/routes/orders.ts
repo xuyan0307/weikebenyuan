@@ -5,20 +5,9 @@ import { auditLog } from '../middleware/auditLog';
 import { createError } from '../middleware/errorHandler';
 import { getDb } from '../config/database';
 import { ossFileUrl } from '../utils/oss';
+import { formatDateOnly, jsonOrNull, parseJson } from '../utils/serialization';
 
 const router: Router = Router();
-
-function parseJson(v: any, fallback: any) {
-  if (v == null) return fallback;
-  if (typeof v === 'string') {
-    try { return JSON.parse(v || 'null') || fallback; } catch { return fallback; }
-  }
-  return v;
-}
-
-function jsonOrNull(value: unknown) {
-  return value == null ? null : JSON.stringify(value);
-}
 
 function withSignedAttachmentUrls<T>(value: T): T {
   if (Array.isArray(value)) {
@@ -110,7 +99,7 @@ async function resolveOrderCustomerId(db: any, body: any): Promise<string> {
 }
 
 function formatSnapshotDate(value: any) {
-  return value ? new Date(value).toISOString().slice(0, 10) : '';
+  return formatDateOnly(value);
 }
 
 async function getCustomerSnapshot(db: any, customerId: string, fallback: any = {}) {
@@ -138,7 +127,7 @@ async function getCustomerSnapshot(db: any, customerId: string, fallback: any = 
         followDate: formatSnapshotDate(customer.follow_date),
         advisorId: customer.advisor_id || '',
         advisor: customer.advisor_name || '',
-        profile: parseJson(customer.profile, {}),
+        profile: parseJson<Record<string, unknown>>(customer.profile, {}),
         situation: customer.situation || '',
         intendedProduct: customer.intended_product || '',
         remark: customer.remark || '',
@@ -185,7 +174,7 @@ async function applyOrderCustomerEdits(db: any, snapshot: any, body: any) {
 }
 
 function orderCustomerFromRow(r: any) {
-  const snapshot = parseJson(r.customer_snapshot, {}) || {};
+  const snapshot = parseJson<Record<string, any>>(r.customer_snapshot, {});
   return {
     id: snapshot.id || r.customer_id || '',
     customerCode: snapshot.customerCode || r.customer_code || '',
@@ -200,7 +189,7 @@ function orderCustomerFromRow(r: any) {
     followDate: snapshot.followDate || formatSnapshotDate(r.customer_follow_date),
     advisor: snapshot.advisor || r.advisor_name || '',
     advisorId: snapshot.advisorId || r.customer_advisor_id || '',
-    profile: snapshot.profile || parseJson(r.customer_profile, {}),
+    profile: snapshot.profile || parseJson<Record<string, unknown>>(r.customer_profile, {}),
     situation: snapshot.situation || r.customer_situation || '',
     intendedProduct: snapshot.intendedProduct || r.intended_product || '',
     remark: snapshot.remark || r.customer_remark || '',
@@ -372,7 +361,7 @@ router.put('/:id', authenticateToken, auditLog('orders'), async (req: AuthReques
     const custId = requestedCustomerId === existing.customer_id
       ? existing.customer_id
       : await resolveOrderCustomerId(db, { ...b, customerId: requestedCustomerId });
-    const existingSnapshot = parseJson(existing.customer_snapshot, {}) || {};
+    const existingSnapshot = parseJson<Record<string, any>>(existing.customer_snapshot, {});
     const selectedSnapshot = custId === existing.customer_id
       ? existingSnapshot
       : await getCustomerSnapshot(db, custId, b);

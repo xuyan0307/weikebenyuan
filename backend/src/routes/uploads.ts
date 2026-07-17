@@ -5,6 +5,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { authenticateToken } from '../middleware/auth';
 import { createOssClient, hasOssConfig, ossFileUrl } from '../utils/oss';
+import { createError } from '../middleware/errorHandler';
 
 const router: Router = Router();
 const uploadDir = process.env.UPLOAD_DIR || path.resolve(process.cwd(), 'uploads');
@@ -100,6 +101,9 @@ router.post('/', authenticateToken, upload.array('files', 10), async (req, res, 
     const allowLocalFallback = process.env.ALLOW_LOCAL_UPLOAD_FALLBACK !== 'false';
 
     if (!hasOssConfig()) {
+      if (!allowLocalFallback) {
+        throw createError('文件存储服务暂不可用，请联系管理员检查 OSS 配置', 503);
+      }
       console.warn('OSS is not configured. Uploaded files will be stored locally.');
       for (const file of files) {
         data.push(await saveLocalFile(file, scope, today, uploadedAt));

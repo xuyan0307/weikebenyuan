@@ -4,22 +4,12 @@ import { authenticateToken, authorizeRoles } from '../middleware/auth';
 import { auditLog } from '../middleware/auditLog';
 import { getDb } from '../config/database';
 import { createError } from '../middleware/errorHandler';
+import { formatDateOnly } from '../utils/serialization';
 
 const router: Router = Router();
 
 function nullableDate(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value : null;
-}
-
-function formatDateOnly(value: unknown): string {
-  if (!value) return '';
-  if (typeof value === 'string') return value.slice(0, 10);
-  const d = new Date(value as any);
-  if (Number.isNaN(d.getTime())) return '';
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
 }
 
 async function generateCustomerCode(db: any, requested?: unknown): Promise<string> {

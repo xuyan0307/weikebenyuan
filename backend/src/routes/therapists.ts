@@ -4,14 +4,9 @@ import { authenticateToken } from '../middleware/auth';
 import { auditLog } from '../middleware/auditLog';
 import { getDb } from '../config/database';
 import { createError } from '../middleware/errorHandler';
+import { parseJson } from '../utils/serialization';
 
 const router: Router = Router();
-
-function parseJson(v: any, fallback: any) {
-  if (v == null) return fallback;
-  if (typeof v === 'string') { try { return JSON.parse(v || 'null') || fallback; } catch { return fallback; } }
-  return v;
-}
 
 function mapRow(r: any) {
   return {

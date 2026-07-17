@@ -4,6 +4,7 @@ import { authenticateToken } from '../middleware/auth';
 import { auditLog } from '../middleware/auditLog';
 import { getDb } from '../config/database';
 import { createError } from '../middleware/errorHandler';
+import { parseJson } from '../utils/serialization';
 
 const router: Router = Router();
 
@@ -22,14 +23,6 @@ function mapRow(r: any) {
     area: r.area || '',
     remark: r.remark || '',
   };
-}
-
-function parseJson(value: unknown, fallback: any) {
-  if (value == null) return fallback;
-  if (typeof value === 'string') {
-    try { return JSON.parse(value) || fallback; } catch { return fallback; }
-  }
-  return value;
 }
 
 router.get('/', authenticateToken, async (req, res, next) => {
@@ -141,7 +134,7 @@ router.patch('/:id/status', authenticateToken, auditLog('appointments'), async (
           [appointment.therapist_id]
         );
         const therapistName = (therapistRows as any[])[0]?.name || '';
-        const servicePeople = parseJson(order.service_people, {}) || {};
+        const servicePeople = parseJson<Record<string, any>>(order.service_people, {});
         let servicePeopleChanged = false;
 
         for (const key of ['sp1', 'sp2', 'sp3']) {

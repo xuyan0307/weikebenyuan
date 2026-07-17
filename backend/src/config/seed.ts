@@ -20,7 +20,7 @@ const SEED_USERS: SeedUser[] = [
 
 export async function seedIfEmpty(pool: Pool): Promise<void> {
   const [rows] = await pool.query('SELECT COUNT(*) AS cnt FROM users');
-  const count = (rows as any)[0].cnt;
+  const count = (rows as Array<{ cnt: number }>)[0]?.cnt || 0;
   if (Number(count) > 0) return;
 
   console.log('🌱 Seeding initial users...');

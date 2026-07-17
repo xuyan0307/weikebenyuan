@@ -4,7 +4,7 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import dotenv from 'dotenv';
 import { createServer } from 'http';
-import { initDatabase } from './config/database';
+import { closeDatabase, initDatabase, isDatabaseReady } from './config/database';
 import { authRouter } from './routes/auth';
 import { customersRouter } from './routes/customers';
 import { ordersRouter } from './routes/orders';
@@ -42,6 +42,18 @@ app.get('/api/health', (_req: Request, res: Response) => {
   res.status(200).json({ status: 'healthy', timestamp: new Date().toISOString() });
 });
 
+async function readinessHandler(_req: Request, res: Response) {
+  const databaseReady = await isDatabaseReady();
+  res.status(databaseReady ? 200 : 503).json({
+    status: databaseReady ? 'ready' : 'unavailable',
+    database: databaseReady ? 'connected' : 'disconnected',
+    timestamp: new Date().toISOString(),
+  });
+}
+
+app.get('/ready', readinessHandler);
+app.get('/api/ready', readinessHandler);
+
 // API路由
 app.use('/api/auth', authRouter);
 app.use('/api/customers', customersRouter);
@@ -78,13 +90,20 @@ async function startServer() {
     });
 
     // 优雅关闭
-    process.on('SIGTERM', () => {
-      console.log('SIGTERM received, shutting down gracefully...');
-      server.close(() => {
+    let shuttingDown = false;
+    const shutdown = (signal: string) => {
+      if (shuttingDown) return;
+      shuttingDown = true;
+      console.log(`${signal} received, shutting down gracefully...`);
+      server.close(async () => {
+        await closeDatabase();
         console.log('Server closed');
         process.exit(0);
       });
-    });
+    };
+
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
+    process.on('SIGINT', () => shutdown('SIGINT'));
   } catch (error) {
     console.error('Failed to start server:', error);
     process.exit(1);
