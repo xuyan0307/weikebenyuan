@@ -1,20 +1,32 @@
 import { AppProvider, useApp } from '../hooks/useApp';
 import Sidebar from '../components/Sidebar';
 import TopBar from '../components/TopBar';
-import DashboardPage from '../components/DashboardPage';
-import CustomersListPage from '../components/CustomersListPage';
-import CustomerPoolPage from '../components/CustomerPoolPage';
-import OrdersListPage from '../components/OrdersListPage';
-import ContractListPage from '../components/ContractListPage';
-import AppointmentsCalendarPage from '../components/AppointmentsCalendarPage';
-import AppointmentsListPage from '../components/AppointmentsListPage';
-import ServiceRecordsPage from '../components/ServiceRecordsPage';
-import ServiceProgressPage from '../components/ServiceProgressPage';
-import TherapistListPage from '../components/TherapistListPage';
-import FinanceSalaryPage from '../components/FinanceSalaryPage';
-import FinanceIncomePage from '../components/FinanceIncomePage';
-import SystemSettingsPage from '../components/SystemSettingsPage';
-import React from 'react';
+import React, { lazy, Suspense } from 'react';
+
+const DashboardPage = lazy(() => import('../components/DashboardPage'));
+const CustomersListPage = lazy(() => import('../components/CustomersListPage'));
+const CustomerPoolPage = lazy(() => import('../components/CustomerPoolPage'));
+const OrdersListPage = lazy(() => import('../components/OrdersListPage'));
+const ContractListPage = lazy(() => import('../components/ContractListPage'));
+const AppointmentsCalendarPage = lazy(() => import('../components/AppointmentsCalendarPage'));
+const AppointmentsListPage = lazy(() => import('../components/AppointmentsListPage'));
+const ServiceRecordsPage = lazy(() => import('../components/ServiceRecordsPage'));
+const ServiceProgressPage = lazy(() => import('../components/ServiceProgressPage'));
+const TherapistListPage = lazy(() => import('../components/TherapistListPage'));
+const FinanceSalaryPage = lazy(() => import('../components/FinanceSalaryPage'));
+const FinanceIncomePage = lazy(() => import('../components/FinanceIncomePage'));
+const SystemSettingsPage = lazy(() => import('../components/SystemSettingsPage'));
+
+function PageLoading() {
+  return (
+    <div className="flex min-h-[240px] items-center justify-center" aria-label="页面加载中">
+      <div
+        className="h-7 w-7 animate-spin rounded-full"
+        style={{ border: '3px solid var(--border)', borderTopColor: 'var(--brand)' }}
+      />
+    </div>
+  );
+}
 
 const PAGE_TITLES: Record<string, string> = {
   'dashboard': '数据概览',
@@ -134,7 +146,9 @@ function AppShell() {
         {/* Page content */}
         <main className="flex-1 overflow-y-auto px-6 py-5">
           <PageErrorBoundary pageKey={activePage} key={activePage}>
-            {renderActivePage()}
+            <Suspense fallback={<PageLoading />}>
+              {renderActivePage()}
+            </Suspense>
           </PageErrorBoundary>
         </main>
       </div>

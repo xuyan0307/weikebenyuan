@@ -5,24 +5,27 @@ import {
   usersApi,
 } from './endpoints';
 import type { Customer, CustomerListParams, Order, Appointment, Therapist } from './endpoints';
+import type { QueryParams } from './client';
+
+type SystemUserMutationBody = Parameters<typeof usersApi.create>[0];
 
 export const qk = {
   customers: (params: CustomerListParams) => ['customers', params] as const,
   customerFilterOptions: () => ['customers', 'filter-options'] as const,
   customer: (id: string) => ['customer', id] as const,
-  orders: (params: any) => ['orders', params] as const,
-  appointments: (params: any) => ['appointments', params] as const,
-  therapists: (params: any) => ['therapists', params] as const,
+  orders: (params: QueryParams) => ['orders', params] as const,
+  appointments: (params: QueryParams) => ['appointments', params] as const,
+  therapists: (params: QueryParams) => ['therapists', params] as const,
   therapist: (id: string) => ['therapist', id] as const,
-  serviceRecords: (params: any) => ['service-records', params] as const,
+  serviceRecords: (params: QueryParams) => ['service-records', params] as const,
   salary: (month: string) => ['salary', month] as const,
   income: () => ['income'] as const,
-  contracts: (params: any) => ['contracts', params] as const,
+  contracts: (params: QueryParams) => ['contracts', params] as const,
   dashboardStats: () => ['dashboard', 'stats'] as const,
   dashboardRecent: () => ['dashboard', 'recent'] as const,
   dashboardTodos: () => ['dashboard', 'todos'] as const,
   dashboardChart: () => ['dashboard', 'chart'] as const,
-  operationLogs: (params: any) => ['operation-logs', params] as const,
+  operationLogs: (params: QueryParams) => ['operation-logs', params] as const,
   users: () => ['users'] as const,
 };
 
@@ -55,7 +58,7 @@ export function useCustomerMutations() {
 }
 
 // ====== Orders ======
-export function useOrders(params: Record<string, any>) {
+export function useOrders(params: QueryParams) {
   return useQuery({ queryKey: qk.orders(params), queryFn: () => ordersApi.list(params) });
 }
 export function useOrderMutations() {
@@ -71,7 +74,7 @@ export function useOrderMutations() {
 }
 
 // ====== Appointments ======
-export function useAppointments(params: Record<string, any>) {
+export function useAppointments(params: QueryParams) {
   return useQuery({ queryKey: qk.appointments(params), queryFn: () => appointmentsApi.list(params) });
 }
 export function useAppointmentMutations() {
@@ -85,7 +88,7 @@ export function useAppointmentMutations() {
 }
 
 // ====== Therapists ======
-export function useTherapists(params: Record<string, any>) {
+export function useTherapists(params: QueryParams) {
   return useQuery({ queryKey: qk.therapists(params), queryFn: () => therapistsApi.list(params) });
 }
 export function useTherapist(id: string | null) {
@@ -103,7 +106,7 @@ export function useTherapistMutations() {
 }
 
 // ====== Service Records ======
-export function useServiceRecords(params: Record<string, any>) {
+export function useServiceRecords(params: QueryParams) {
   return useQuery({ queryKey: qk.serviceRecords(params), queryFn: () => serviceRecordsApi.list(params) });
 }
 
@@ -122,7 +125,7 @@ export function useFinanceMutations() {
 }
 
 // ====== Contracts ======
-export function useContracts(params: Record<string, any>) {
+export function useContracts(params: QueryParams) {
   return useQuery({ queryKey: qk.contracts(params), queryFn: () => contractsApi.list(params) });
 }
 export function useContractMutations() {
@@ -148,7 +151,7 @@ export function useDashboardChart() {
 }
 
 // ====== Operation Logs ======
-export function useOperationLogs(params: Record<string, any>) {
+export function useOperationLogs(params: QueryParams) {
   return useQuery({ queryKey: qk.operationLogs(params), queryFn: () => operationLogsApi.list(params) });
 }
 
@@ -160,8 +163,8 @@ export function useSystemUserMutations() {
   const qc = useQueryClient();
   const invalidate = () => qc.invalidateQueries({ queryKey: ['users'] });
   return {
-    create: useMutation({ mutationFn: (body: any) => usersApi.create(body), onSuccess: invalidate }).mutateAsync,
-    update: useMutation({ mutationFn: ({ id, body }: { id: string; body: any }) => usersApi.update(id, body), onSuccess: invalidate }).mutateAsync,
+    create: useMutation({ mutationFn: (body: SystemUserMutationBody) => usersApi.create(body), onSuccess: invalidate }).mutateAsync,
+    update: useMutation({ mutationFn: ({ id, body }: { id: string; body: SystemUserMutationBody }) => usersApi.update(id, body), onSuccess: invalidate }).mutateAsync,
     remove: useMutation({ mutationFn: (id: string) => usersApi.remove(id), onSuccess: invalidate }).mutateAsync,
   };
 }

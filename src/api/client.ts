@@ -3,6 +3,10 @@ const DEMO_MODE = import.meta.env.VITE_DEMO_MODE === 'true';
 
 export const BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 
+export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+export type QueryValue = string | number | boolean | null | undefined;
+export type QueryParams = Record<string, QueryValue>;
+
 export function getToken(): string | null {
   try { return localStorage.getItem(TOKEN_KEY); } catch { return null; }
 }
@@ -11,19 +15,27 @@ export function setToken(token: string | null) {
   try {
     if (token) localStorage.setItem(TOKEN_KEY, token);
     else localStorage.removeItem(TOKEN_KEY);
-  } catch {}
+  } catch {
+    // Storage can be unavailable in privacy-restricted browser contexts.
+  }
 }
 
 export interface ApiError {
   status: number;
   message: string;
-  data?: any;
+  data?: unknown;
 }
 
-async function request<T>(method: string, path: string, body?: any, params?: Record<string, any>): Promise<T> {
+function getErrorMessage(data: unknown, fallback: string): string {
+  if (typeof data !== 'object' || data === null || !('error' in data)) return fallback;
+  const error = (data as { error?: unknown }).error;
+  return typeof error === 'string' && error ? error : fallback;
+}
+
+async function request<T>(method: HttpMethod, path: string, body?: unknown, params?: QueryParams): Promise<T> {
   if (DEMO_MODE) {
     const { handleDemoRequest } = await import('./demo');
-    return handleDemoRequest<T>(method as any, path, body, params);
+    return handleDemoRequest<T>(method, path, body, params);
   }
 
   const token = getToken();
@@ -46,7 +58,7 @@ async function request<T>(method: string, path: string, body?: any, params?: Rec
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
 
-  let data: any = null;
+  let data: unknown = null;
   const ct = resp.headers.get('content-type') || '';
   if (ct.includes('application/json')) {
     data = await resp.json().catch(() => null);
@@ -55,7 +67,7 @@ async function request<T>(method: string, path: string, body?: any, params?: Rec
   }
 
   if (!resp.ok) {
-    const message = (data && data.error) || `请求失败 (${resp.status})`;
+    const message = getErrorMessage(data, `请求失败 (${resp.status})`);
     if (resp.status === 401) {
       setToken(null);
       if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
@@ -68,7 +80,7 @@ async function request<T>(method: string, path: string, body?: any, params?: Rec
   return data as T;
 }
 
-async function download(path: string, params?: Record<string, any>): Promise<Blob> {
+async function download(path: string, params?: QueryParams): Promise<Blob> {
   if (DEMO_MODE) {
     const { handleDemoDownload } = await import('./demo');
     return handleDemoDownload();
@@ -109,7 +121,7 @@ async function upload<T>(path: string, formData: FormData): Promise<T> {
     body: formData,
   });
 
-  let data: any = null;
+  let data: unknown = null;
   const ct = resp.headers.get('content-type') || '';
   if (ct.includes('application/json')) {
     data = await resp.json().catch(() => null);
@@ -118,7 +130,7 @@ async function upload<T>(path: string, formData: FormData): Promise<T> {
   }
 
   if (!resp.ok) {
-    const message = (data && data.error) || `请求失败 (${resp.status})`;
+    const message = getErrorMessage(data, `请求失败 (${resp.status})`);
     if (resp.status === 401) {
       setToken(null);
       if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
@@ -132,10 +144,10 @@ async function upload<T>(path: string, formData: FormData): Promise<T> {
 }
 
 export const api = {
-  get: <T>(path: string, params?: Record<string, any>) => request<T>('GET', path, undefined, params),
-  post: <T>(path: string, body?: any) => request<T>('POST', path, body),
-  put: <T>(path: string, body?: any) => request<T>('PUT', path, body),
-  patch: <T>(path: string, body?: any) => request<T>('PATCH', path, body),
+  get: <T>(path: string, params?: QueryParams) => request<T>('GET', path, undefined, params),
+  post: <T>(path: string, body?: unknown) => request<T>('POST', path, body),
+  put: <T>(path: string, body?: unknown) => request<T>('PUT', path, body),
+  patch: <T>(path: string, body?: unknown) => request<T>('PATCH', path, body),
   delete: <T>(path: string) => request<T>('DELETE', path),
   upload,
   download,

@@ -12,6 +12,7 @@
     "dev:api": "npm --prefix backend run dev",
     "lint": "eslint .",
     "preview": "vite preview",
+    "regression:api": "node scripts/api-regression.mjs",
     "check": "npm run build:all && node --test backend/tests/serialization.test.cjs backend/tests/orderService.test.cjs backend/tests/customerQueryService.test.cjs"
   },
   "dependencies": {

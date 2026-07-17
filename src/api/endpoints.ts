@@ -1,4 +1,4 @@
-import { api, Paged } from './client';
+import { api, Paged, QueryParams } from './client';
 
 // ====== Auth ======
 export interface UserInfo {
@@ -30,9 +30,9 @@ export interface Customer {
   acquiredAt: string; tag: string; followStatus: string; followDate: string;
   advisor: string; advisorId?: string;
   totalOrders: number; lastFollow: string;
-  profile: any; situation: string; intendedProduct: string; remark: string;
+  profile: unknown; situation: string; intendedProduct: string; remark: string;
 }
-export interface CustomerListParams {
+export interface CustomerListParams extends QueryParams {
   page?: number;
   pageSize?: number;
   keyword?: string;
@@ -93,11 +93,11 @@ export interface Order {
   createdAt: string; purchaseDate?: string; paidAt?: string | null;
   usedTimes: number; totalTimes: number;
   isUpgrade: boolean; contractSigned: boolean; hasCoupon: boolean; serviceItemCount: number;
-  serviceItems?: string; servicePeople?: any; appointmentTime?: string; serviceNote?: string;
-  contractAttachments?: any[]; servicePhotoRecords?: any[];
+  serviceItems?: string; servicePeople?: unknown; appointmentTime?: string; serviceNote?: string;
+  contractAttachments?: unknown[]; servicePhotoRecords?: unknown[];
 }
 export const ordersApi = {
-  list: (params: Record<string, any>) => api.get<Paged<Order>>('/orders', params),
+  list: (params: QueryParams) => api.get<Paged<Order>>('/orders', params),
   create: (body: Partial<Order>) => api.post<{ id: string; orderNo: string }>('/orders', body),
   update: (id: string, body: Partial<Order>) => api.put<{ message: string }>(`/orders/${id}`, body),
   patchStatus: (id: string, status: string) =>
@@ -116,7 +116,7 @@ export interface Appointment {
   status: string; area: string; remark: string;
 }
 export const appointmentsApi = {
-  list: (params: Record<string, any>) => api.get<Paged<Appointment>>('/appointments', params),
+  list: (params: QueryParams) => api.get<Paged<Appointment>>('/appointments', params),
   create: (body: Partial<Appointment>) => api.post<{ id: string; no: string }>('/appointments', body),
   patchStatus: (id: string, status: string) =>
     api.patch<{ message: string }>(`/appointments/${id}/status`, { status }),
@@ -129,10 +129,10 @@ export interface Therapist {
   phone: string; area: string; city: string; detailAddress: string;
   services: string[]; serviceMethod: string; characteristics: string; transport: string;
   status: string; orders: number; rating: number; upgradeRate: number; starLevel: number;
-  healthCert: any; firstAidCert: any; laborCert: any; associationCert: any; remark?: string;
+  healthCert: unknown; firstAidCert: unknown; laborCert: unknown; associationCert: unknown; remark?: string;
 }
 export const therapistsApi = {
-  list: (params: Record<string, any>) => api.get<Paged<Therapist>>('/therapists', params),
+  list: (params: QueryParams) => api.get<Paged<Therapist>>('/therapists', params),
   get: (id: string) => api.get<Therapist>(`/therapists/${id}`),
   create: (body: Partial<Therapist>) => api.post<{ id: string }>('/therapists', body),
   update: (id: string, body: Partial<Therapist>) => api.put<{ message: string }>(`/therapists/${id}`, body),
@@ -146,10 +146,10 @@ export interface ServiceRecord {
   id: string; appointmentId: string; customerId: string; customerName: string;
   therapistId: string; therapistName: string;
   serviceDate: string; serviceItems: string; duration: number;
-  feedback: string; photos: any[];
+  feedback: string; photos: unknown[];
 }
 export const serviceRecordsApi = {
-  list: (params: Record<string, any>) => api.get<Paged<ServiceRecord>>('/service-records', params),
+  list: (params: QueryParams) => api.get<Paged<ServiceRecord>>('/service-records', params),
   create: (body: Partial<ServiceRecord>) => api.post<{ id: string }>('/service-records', body),
 };
 
@@ -159,10 +159,22 @@ export interface SalaryRecord {
   serviceCount: number; laborFee: number; commission: number; total: number;
   status: string; settledAt?: string | null;
 }
+export interface MonthlyIncome {
+  month: string;
+  revenue: number | string;
+  refund: number | string;
+  order_count: number;
+}
+export interface IncomeSummary {
+  total_customers: number;
+  total_orders: number;
+  total_revenue: number | string;
+  done_appointments: number;
+}
 export const financeApi = {
   salary: (month: string) => api.get<{ month: string; data: SalaryRecord[] }>('/finance/salary', { month }),
   settle: (id: string) => api.post<{ message: string }>(`/finance/salary/${id}/settle`),
-  income: () => api.get<{ monthly: any[]; summary: any }>('/finance/income'),
+  income: () => api.get<{ monthly: MonthlyIncome[]; summary: IncomeSummary }>('/finance/income'),
   exportSalary: (month: string) => api.download('/finance/salary/export', { month }),
   exportIncome: () => api.download('/finance/income/export'),
 };
@@ -174,17 +186,52 @@ export interface Contract {
   contractSigned: boolean; createdAt: string;
 }
 export const contractsApi = {
-  list: (params: Record<string, any>) => api.get<Paged<Contract>>('/contracts', params),
+  list: (params: QueryParams) => api.get<Paged<Contract>>('/contracts', params),
   sign: (id: string, signed: boolean) =>
     api.patch<{ message: string }>(`/contracts/${id}/sign`, { signed }),
 };
 
 // ====== Dashboard ======
+export interface DashboardStats {
+  total_customers: number;
+  pending_follow: number;
+  following: number;
+  dealt: number;
+  total_orders: number;
+  pending_pay: number;
+  paid_orders: number;
+  pending_contract: number;
+  pending_appt: number;
+  today_appt: number;
+  active_therapists: number;
+  service_records: number;
+  total_revenue: number;
+}
+export interface DashboardRecent {
+  customers: unknown[];
+  orders: unknown[];
+  appointments: unknown[];
+}
+export interface DashboardTodo {
+  id: number;
+  type: string;
+  label: string;
+  count: number;
+  color: string;
+  urgency: string;
+}
+export interface DashboardChartPoint {
+  month: string;
+  revenue: number;
+  new_customers: number;
+  experience_cards: number;
+  upgrades: number;
+}
 export const dashboardApi = {
-  stats: () => api.get<any>('/dashboard/stats'),
-  recent: () => api.get<any>('/dashboard/recent'),
-  todos: () => api.get<any[]>('/dashboard/todos'),
-  chart: () => api.get<any[]>('/dashboard/chart'),
+  stats: () => api.get<DashboardStats>('/dashboard/stats'),
+  recent: () => api.get<DashboardRecent>('/dashboard/recent'),
+  todos: () => api.get<DashboardTodo[]>('/dashboard/todos'),
+  chart: () => api.get<DashboardChartPoint[]>('/dashboard/chart'),
 };
 
 // ====== Operation Logs ======
@@ -193,5 +240,5 @@ export interface OperationLog {
   module: string; description: string; ip_address: string; created_at: string;
 }
 export const operationLogsApi = {
-  list: (params: Record<string, any>) => api.get<Paged<OperationLog>>('/operation-logs', params),
+  list: (params: QueryParams) => api.get<Paged<OperationLog>>('/operation-logs', params),
 };
