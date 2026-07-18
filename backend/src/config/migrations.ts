@@ -161,6 +161,21 @@ const migrations: Migration[] = [
       }
     },
   },
+  {
+    id: '008_appointment_progress_guard',
+    description: 'Prevent completed appointments from applying service progress more than once',
+    up: async db => {
+      await addColumn(
+        db,
+        'appointments',
+        'progress_applied_at',
+        "datetime DEFAULT NULL COMMENT '服务进度已同步时间' AFTER status"
+      );
+      await db.execute(
+        "UPDATE appointments SET progress_applied_at = COALESCE(updated_at, created_at) WHERE status = '已完成' AND progress_applied_at IS NULL"
+      );
+    },
+  },
 ];
 
 export async function runMigrations(db: mysql.Pool) {

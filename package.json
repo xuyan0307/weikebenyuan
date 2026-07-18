@@ -13,7 +13,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "regression:api": "node scripts/api-regression.mjs",
-    "check": "npm run build:all && node --test backend/tests/serialization.test.cjs backend/tests/orderService.test.cjs backend/tests/customerQueryService.test.cjs"
+    "check": "npm run build:all && node --test backend/tests/serialization.test.cjs backend/tests/orderService.test.cjs backend/tests/customerQueryService.test.cjs backend/tests/appointmentService.test.cjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

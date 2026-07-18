@@ -96,6 +96,7 @@ CREATE TABLE `appointments` (
   `time_slot` varchar(20) NOT NULL COMMENT '时间段',
   `service` text COMMENT '服务项目',
   `status` enum('已确认','待确认','已取消','已完成') DEFAULT '待确认' COMMENT '状态',
+  `progress_applied_at` datetime DEFAULT NULL COMMENT '服务进度已同步时间',
   `area` varchar(100) DEFAULT NULL COMMENT '服务区域',
   `remark` text COMMENT '备注',
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
