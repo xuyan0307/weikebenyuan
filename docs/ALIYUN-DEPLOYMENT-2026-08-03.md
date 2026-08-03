@@ -4,10 +4,10 @@
 
 - 生产域名：`https://weikebenyuan.com`
 - Git 分支：`agent/platform-architecture-release`
-- 当前生产提交：`e52a3365b397`
+- 当前生产提交：`a6533a8035ea`
 - 空库部署基线：`ad16803fca09`
 - GitHub PR：`https://github.com/xuyan0307/weikebenyuan/pull/1`
-- ECS 当前版本目录：`/opt/releases/e52a3365b397`
+- ECS 当前版本目录：`/opt/releases/a6533a8035ea`
 - ECS 当前版本软链接：`/opt/weikebenyuan-current`
 - 发布前备份：`/opt/backups/weikebenyuan/20260803-105540`
 
@@ -105,3 +105,11 @@
 - 针对性自动化测试 3/3 通过；云端后端 TypeScript 构建及前端 3347 个模块的生产构建通过。
 - 正式域名资源已确认包含搜索字段标识、延迟检测和账号标准化比较逻辑；当前发布目录为 `/opt/releases/e52a3365b397`。
 - 前端、后端健康检查均通过，RDS 保持 21 条迁移，业务数据未重置。
+
+### 2026-08-03：全局备案信息
+
+- 登录页和系统内主内容区底部统一显示 `闽ICP备2025084332号-2`，点击后在新窗口打开工信部备案查询网站。
+- 系统内短页面的备案信息保持在内容区底部，长页面随内容滚动，不遮挡表格、筛选和操作按钮。
+- 针对性备案渲染测试通过，云端后端 TypeScript 构建及前端 3348 个模块生产构建通过。
+- 正式域名备案资源返回 200，已确认包含备案号和工信部链接；当前发布目录为 `/opt/releases/a6533a8035ea`。
+- 前端、后端和 RDS 健康检查均通过，业务数据未重置。
