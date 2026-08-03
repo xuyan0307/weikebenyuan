@@ -509,6 +509,28 @@ const migrations: Migration[] = [
       );
     },
   },
+  {
+    id: '022_therapist_commission_rate',
+    description: 'Persist editable therapist commission rate and backfill it from grade',
+    up: async db => {
+      await addColumn(
+        db,
+        'therapists',
+        'commission_rate',
+        'decimal(5,2) NOT NULL DEFAULT 0 AFTER star_level'
+      );
+      await db.execute(
+        `UPDATE therapists
+         SET commission_rate = CASE
+           WHEN upgrade_rate >= 75 THEN 15
+           WHEN upgrade_rate >= 60 THEN 12
+           WHEN upgrade_rate >= 50 THEN 8
+           WHEN upgrade_rate >= 40 THEN 6
+           ELSE 0
+         END`
+      );
+    },
+  },
 ];
 
 export async function runMigrations(db: mysql.Pool) {

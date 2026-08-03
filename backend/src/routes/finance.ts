@@ -161,7 +161,7 @@ router.get('/salary', authenticateToken, async (req, res, next) => {
       ]);
     }
     const [therapistRows] = await db.query(
-      `SELECT id, name, therapist_type, upgrade_rate FROM therapists WHERE status <> '离职' ORDER BY name`
+      `SELECT id, name, therapist_type, upgrade_rate, commission_rate FROM therapists WHERE status <> '离职' ORDER BY name`
     );
     const [customerRows] = await db.query(
       `SELECT id, customer_code, name FROM customers ORDER BY customer_code`

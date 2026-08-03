@@ -270,6 +270,7 @@ export interface Therapist {
   rating: number;              // 服务评分 1-5
   upgradeRate: number;         // 升单率 0-100（%）
   starLevel: 1 | 2 | 3 | 4 | 5; // 技师星级
+  commissionRate?: number;     // 提成比例 0-100（%），可由管理员手动覆盖档位默认值
   healthCert: CertWithExpiry;     // 健康证
   firstAidCert: MultiCert;        // 急救证
   laborCert: MultiCert;           // 人社局证书

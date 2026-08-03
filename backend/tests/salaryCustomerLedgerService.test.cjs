@@ -111,6 +111,19 @@ test('uses every therapist profile tier and keeps commission across month views'
   }
 });
 
+test('uses the editable therapist commission rate as the global salary source', () => {
+  const ledger = buildSalaryCustomerLedger({
+    month: '2026-08',
+    therapists: [{ id: 't1', name: '徐老师', upgrade_rate: 50, commission_rate: 9.5 }],
+    customers: [{ id: 'c1', customer_code: '100001', name: '提成纠偏客户' }],
+    orders: [{ customer_id: 'c1', type: '套餐', amount: 6000, pay_status: '已付款', purchase_date: '2026-08-01', created_date: '2026-08-01', used_times: 0, total_times: 5, is_upgrade: 1, service_item_count: 2, service_items: '一、二', service_people: { sp1: { assign: '徐老师' } } }],
+    appointments: [], entries: [], adjustments: [],
+  });
+  assert.equal(ledger.therapists[0].tierKey, 'B');
+  assert.equal(ledger.therapists[0].commissionRate, 9.5);
+  assert.equal(ledger.therapists[0].customers[0].commission, 570);
+});
+
 test('keeps the experience-card status embedded in an upgraded package snapshot', () => {
   const result = buildSalaryCustomerLedger({
     month: '2026-08',

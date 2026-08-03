@@ -128,6 +128,7 @@ CREATE TABLE `therapists` (
   `rating` decimal(2,1) DEFAULT 5.0 COMMENT '服务评分',
   `upgrade_rate` int DEFAULT 0 COMMENT '升单率(%)',
   `star_level` int DEFAULT 1 COMMENT '星级',
+  `commission_rate` decimal(5,2) NOT NULL DEFAULT 0 COMMENT '提成比例（%）',
   `health_cert` json DEFAULT NULL COMMENT '健康证',
   `first_aid_cert` json DEFAULT NULL COMMENT '急救证',
   `labor_cert` json DEFAULT NULL COMMENT '人社局证书',

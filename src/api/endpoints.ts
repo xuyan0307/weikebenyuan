@@ -162,7 +162,7 @@ export interface Therapist {
   id: string; name: string; therapistType: string; birthYear?: string;
   phone: string; area: string; city: string; detailAddress: string;
   services: string[]; serviceMethod: string; characteristics: string; transport: string;
-  status: string; orders: number; rating: number; upgradeRate: number; starLevel: number;
+  status: string; orders: number; rating: number; upgradeRate: number; starLevel: number; commissionRate: number;
   healthCert: unknown; firstAidCert: unknown; laborCert: unknown; associationCert: unknown; remark?: string;
 }
 export const therapistsApi = {

@@ -13,6 +13,7 @@ interface TherapistRow {
   name: string;
   therapist_type?: string | null;
   upgrade_rate?: number | string | null;
+  commission_rate?: number | string | null;
 }
 interface CustomerRow { id: string; customer_code: string; name: string }
 interface OrderRow {
@@ -348,10 +349,14 @@ export function buildSalaryCustomerLedger(input: SalaryCustomerLedgerInput) {
     // 技师档案目前以 upgrade_rate 持久化定档区间，修改后所有工资查询即时读取新值。
     const profileUpgradeRate = money(therapist.upgrade_rate);
     const tier = salaryTierByUpgradeRate(profileUpgradeRate);
+    const storedCommissionRate = therapist.commission_rate === null || therapist.commission_rate === undefined
+      ? tier.commissionRate
+      : money(therapist.commission_rate);
+    const commissionRate = Math.min(100, Math.max(0, storedCommissionRate));
     const calculatedCustomers = customers.map(customer => {
       // 提成是客户套餐应付工资的一部分，不因当前查看月份而清零。
       // 月份筛选只影响当月完成凭证与周结算，不改变套餐本身的提成金额。
-      const commission = money(customer.packageAmount * tier.commissionRate / 100);
+      const commission = money(customer.packageAmount * commissionRate / 100);
       const totalFee = money(
         customer.couponFee + customer.laborFee + commission + customer.otherFee
       );
@@ -371,7 +376,7 @@ export function buildSalaryCustomerLedger(input: SalaryCustomerLedgerInput) {
       profileUpgradeRate,
       tier: tier.label,
       tierKey: tier.key,
-      commissionRate: tier.commissionRate,
+      commissionRate,
       customers: calculatedCustomers,
     }];
   });
