@@ -383,19 +383,22 @@ export interface DashboardTodo {
   urgency: string;
 }
 export interface DashboardChartPoint {
-  month: string;
+  period: string;
+  label: string;
   revenue: number;
   new_customers: number;
   experience_cards: number;
   upgrades: number;
+  second_upgrades: number;
 }
+export type DashboardChartGranularity = 'day' | 'week' | 'month';
 export const dashboardApi = {
   stats: (period: DashboardPeriod = 'month', startDate = '', endDate = '') =>
     api.get<DashboardStats>('/dashboard/stats', { period, startDate, endDate }),
   recent: () => api.get<DashboardRecent>('/dashboard/recent'),
   todos: () => api.get<DashboardTodo[]>('/dashboard/todos'),
-  chart: (startDate = '', endDate = '') =>
-    api.get<DashboardChartPoint[]>('/dashboard/chart', { startDate, endDate }),
+  chart: (startDate = '', endDate = '', granularity: DashboardChartGranularity = 'month') =>
+    api.get<DashboardChartPoint[]>('/dashboard/chart', { startDate, endDate, granularity }),
 };
 
 // ====== Operation Logs ======

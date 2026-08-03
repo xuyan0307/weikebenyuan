@@ -2,14 +2,14 @@ import { useState } from 'react';
 import {
   TrendingUpIcon, UsersIcon, CreditCardIcon,
   ArrowUpRightIcon, AlertCircleIcon, CalendarCheckIcon, ClipboardIcon,
-  ArrowRightIcon,
+  ArrowRightIcon, FileTextIcon,
 } from 'lucide-react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from 'recharts';
 import { useApp } from '../hooks/useApp';
 import { useDashboardStats, useDashboardTodos, useDashboardChart } from '../api/hooks';
-import type { DashboardPeriod } from '../api/endpoints';
+import type { DashboardChartGranularity, DashboardPeriod } from '../api/endpoints';
 import { DateRangeFilter } from './ui/date-range-filter';
 import { GLOBAL_DATE_RANGE_QUICK_OPTIONS, quickDateRange, type DateRangeValue } from '../utils/dateRange';
 import { useGlobalDateRange } from '../utils/useGlobalDateRange';
@@ -37,18 +37,20 @@ export default function DashboardPage() {
   const [timeFilter, setTimeFilter] = useState<DashboardPeriod>('month');
   const [dateRange, setDateRange] = useGlobalDateRange('month');
   const [chartMetric, setChartMetric] = useState('revenue');
+  const [chartGranularity, setChartGranularity] = useState<DashboardChartGranularity>('day');
 
   const statsQ = useDashboardStats(timeFilter, dateRange.start, dateRange.end);
   const todosQ = useDashboardTodos();
-  const chartQ = useDashboardChart(dateRange.start, dateRange.end);
+  const chartQ = useDashboardChart(dateRange.start, dateRange.end, chartGranularity);
 
   const s: any = statsQ.data || {};
   const chartData = (chartQ.data ?? []).map((r: any) => ({
-    month: r.month ? r.month.slice(5) + '月' : '',
+    label: String(r.label || r.period || ''),
     revenue: Number(r.revenue) || 0,
     newCustomers: Number(r.new_customers) || 0,
     experienceCards: Number(r.experience_cards) || 0,
     upgrades: Number(r.upgrades) || 0,
+    secondUpgrades: Number(r.second_upgrades) || 0,
   }));
   const todos = todosQ.data ?? [];
 
@@ -90,8 +92,8 @@ export default function DashboardPage() {
     {
       key: 'secondUpgrades',
       label: '二次升单',
-      value: `¥ ${(Number(s.second_upgrade_revenue) || 0).toLocaleString()}`,
-      details: [`套餐2客户 ${secondUpgradeCustomers} 人`, `二次升单率 ${secondUpgradeRate.toFixed(1)}%`],
+      value: String(secondUpgradeCustomers),
+      details: [`套餐2金额 ¥ ${(Number(s.second_upgrade_revenue) || 0).toLocaleString()}`, `二次升单率 ${secondUpgradeRate.toFixed(1)}%`],
       color: '#FFC107',
       icon: TrendingUpIcon,
     },
@@ -172,12 +174,34 @@ export default function DashboardPage() {
         <div className="flex-1 bg-card rounded-xl p-5 shadow-custom" style={{ minWidth: 0 }}>
           <div className="flex items-center justify-between mb-4">
             <span className="font-semibold text-foreground">数据趋势</span>
-            <div className="flex gap-1">
+            <div className="flex items-center gap-3">
+              <div className="flex gap-1 rounded-md p-0.5" style={{ background: 'var(--muted)' }}>
+                {([
+                  { key: 'day', label: '按天' },
+                  { key: 'week', label: '按周' },
+                  { key: 'month', label: '按月' },
+                ] as Array<{ key: DashboardChartGranularity; label: string }>).map(item => (
+                  <button
+                    key={item.key}
+                    type="button"
+                    className="rounded px-2 py-1 text-xs font-medium"
+                    style={{
+                      background: chartGranularity === item.key ? '#fff' : 'transparent',
+                      color: chartGranularity === item.key ? 'var(--brand)' : 'var(--muted-foreground)',
+                    }}
+                    onClick={() => setChartGranularity(item.key)}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+              <div className="flex gap-1">
               {[
                 { key: 'revenue', label: '销售额' },
                 { key: 'newCustomers', label: '新客' },
                 { key: 'experienceCards', label: '体验卡' },
                 { key: 'upgrades', label: '升单' },
+                { key: 'secondUpgrades', label: '二次升单' },
               ].map(m => (
                 <button
                   key={m.key}
@@ -191,12 +215,13 @@ export default function DashboardPage() {
                   {m.label}
                 </button>
               ))}
+              </div>
             </div>
           </div>
           <ResponsiveContainer width="100%" height={220}>
             <LineChart data={chartData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-              <XAxis dataKey="month" tick={{ fontSize: 12, fill: 'var(--muted-foreground)' }} axisLine={false} tickLine={false} />
+              <XAxis dataKey="label" tick={{ fontSize: 12, fill: 'var(--muted-foreground)' }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fontSize: 12, fill: 'var(--muted-foreground)' }} axisLine={false} tickLine={false} />
               <Tooltip
                 contentStyle={{ background: '#fff', border: '1px solid var(--border)', borderRadius: 8, fontSize: 13 }}

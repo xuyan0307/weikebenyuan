@@ -24,7 +24,7 @@ export const qk = {
   dashboardStats: (period: string, startDate = '', endDate = '') => ['dashboard', 'stats', period, startDate, endDate] as const,
   dashboardRecent: () => ['dashboard', 'recent'] as const,
   dashboardTodos: () => ['dashboard', 'todos'] as const,
-  dashboardChart: (startDate = '', endDate = '') => ['dashboard', 'chart', startDate, endDate] as const,
+  dashboardChart: (startDate = '', endDate = '', granularity = 'month') => ['dashboard', 'chart', startDate, endDate, granularity] as const,
   operationLogs: (params: QueryParams) => ['operation-logs', params] as const,
   users: () => ['users'] as const,
   setting: (key: string) => ['settings', key] as const,
@@ -222,10 +222,10 @@ export function useDashboardRecent() {
 export function useDashboardTodos(enabled = true) {
   return useQuery({ queryKey: qk.dashboardTodos(), queryFn: () => dashboardApi.todos(), refetchInterval: 30_000, enabled });
 }
-export function useDashboardChart(startDate = '', endDate = '') {
+export function useDashboardChart(startDate = '', endDate = '', granularity: 'day' | 'week' | 'month' = 'month') {
   return useQuery({
-    queryKey: qk.dashboardChart(startDate, endDate),
-    queryFn: () => dashboardApi.chart(startDate, endDate),
+    queryKey: qk.dashboardChart(startDate, endDate, granularity),
+    queryFn: () => dashboardApi.chart(startDate, endDate, granularity),
     refetchInterval: 30_000,
   });
 }
