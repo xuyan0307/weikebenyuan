@@ -1,0 +1,17 @@
+.date-range-picker .rdp-months {
+  display: flex;
+  flex-flow: row nowrap;
+  gap: 20px;
+}
+
+.date-range-picker .rdp-month {
+  width: 292px;
+}
+
+.date-range-picker .rdp-month_grid {
+  width: 100%;
+}
+
+.date-range-picker .rdp-day_button {
+  margin: auto;
+}

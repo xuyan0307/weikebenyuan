@@ -5,15 +5,15 @@
   "type": "module",
   "scripts": {
     "build": "vite build",
-    "build:all": "npm run build && npm --prefix backend run build",
-    "build:api": "npm --prefix backend run build",
+    "build:all": "pnpm run build && pnpm --dir backend run build",
+    "build:api": "pnpm --dir backend run build",
     "build:dev": "vite build --mode development",
     "dev": "vite",
-    "dev:api": "npm --prefix backend run dev",
+    "dev:api": "pnpm --dir backend run dev",
     "lint": "eslint .",
     "preview": "vite preview",
     "regression:api": "node scripts/api-regression.mjs",
-    "check": "npm run build:all && node --test backend/tests/serialization.test.cjs backend/tests/orderService.test.cjs backend/tests/customerQueryService.test.cjs backend/tests/appointmentService.test.cjs"
+    "check": "pnpm run build:all && node --test backend/tests/serialization.test.cjs backend/tests/orderService.test.cjs backend/tests/customerQueryService.test.cjs backend/tests/followTimeFilter.test.mjs backend/tests/orderContractFilter.test.mjs backend/tests/multiSelectFilter.test.mjs backend/tests/appointmentEdit.test.mjs backend/tests/appointmentBookingWeeks.test.mjs backend/tests/appointmentServiceSync.test.mjs backend/tests/appointmentSlotAvailability.test.mjs backend/tests/appointmentService.test.cjs backend/tests/appointmentNotificationService.test.cjs backend/tests/wecomCallbackService.test.cjs backend/tests/dashboardMetrics.test.cjs backend/tests/dashboardDataScope.test.cjs backend/tests/dashboardTodoService.test.cjs backend/tests/dashboardTodoNavigation.test.mjs backend/tests/salarySettlementService.test.cjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

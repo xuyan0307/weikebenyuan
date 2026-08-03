@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   UserPlusIcon, EditIcon, Trash2Icon, ShieldIcon, ShieldCheckIcon,
   BellIcon, WifiIcon, PhoneIcon, CheckIcon, XIcon, PlusIcon,
@@ -6,7 +6,7 @@ import {
   ChevronDownIcon, AlertCircleIcon, BadgeCheckIcon
 } from 'lucide-react';
 import { useApp } from '../hooks/useApp';
-import { useSystemUserMutations, useSystemUsers } from '../api/hooks';
+import { usePlatformSetting, usePlatformSettingMutation, useSystemUserMutations, useSystemUsers } from '../api/hooks';
 import type { SystemUserDto } from '../api/endpoints';
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -23,6 +23,7 @@ interface SystemUser {
   role: SystemRole;
   phone: string;
   wechat: string;
+  wecomUserId: string;
   status: 'active' | 'disabled';
   createdAt: string;
   avatar: string;
@@ -143,50 +144,14 @@ const EVENT_LABELS: Record<string, string> = {
 };
 
 
-// ──────────────────────────────────────────────────────────────────────────────
-// 初始数据
-// ──────────────────────────────────────────────────────────────────────────────
-
-const INIT_USERS: SystemUser[] = [
-  {
-    id: 'u1', name: '陈思思', username: 'admin_chen', password: '123456',
-    role: 'superadmin', phone: '18800001111', wechat: 'chen_sisi_admin',
-    status: 'active', createdAt: '2024-01-01', avatar: '陈',
-    permissions: [...ALL_PERMS],
-  },
-  {
-    id: 'u2', name: '张雅君', username: 'admin_zhang', password: '123456',
-    role: 'admin', phone: '18800002222', wechat: 'zhang_yajun',
-    status: 'active', createdAt: '2024-02-15', avatar: '张',
-    permissions: [...ALL_PERMS],
-  },
-  {
-    id: 'u3', name: '王美玲', username: 'sales_wang', password: '123456',
-    role: 'service', phone: '18800003333', wechat: 'wang_meiling',
-    status: 'active', createdAt: '2024-03-10', avatar: '王',
-    permissions: [...ROLE_DEFAULT_PERMS.service],
-  },
-  {
-    id: 'u4', name: '林佳怡', username: 'sales_lin', password: '123456',
-    role: 'service', phone: '18800004444', wechat: 'lin_jiayi',
-    status: 'disabled', createdAt: '2024-04-20', avatar: '林',
-    permissions: [...ROLE_DEFAULT_PERMS.service],
-  },
-  {
-    id: 'u5', name: '黄晓燕', username: 'admin_huang', password: '123456',
-    role: 'admin', phone: '18800005555', wechat: 'huang_xiaoyan',
-    status: 'active', createdAt: '2024-05-01', avatar: '黄',
-    permissions: [...ALL_PERMS],
-  },
-];
-
-const INIT_NOTIFY: NotifyConfig[] = INIT_USERS.map(u => ({
+function defaultNotifyConfig(u: SystemUser): NotifyConfig {
+  return {
   userId: u.id,
   enablePush: u.status === 'active',
   phone: u.phone,
   wechat: u.wechat,
-  bindPhone: true,
-  bindWechat: u.role !== 'service',
+  bindPhone: Boolean(u.phone),
+  bindWechat: Boolean(u.wecomUserId),
   events: {
     newOrder: true,
     newAppointment: true,
@@ -196,7 +161,8 @@ const INIT_NOTIFY: NotifyConfig[] = INIT_USERS.map(u => ({
     contractSign: true,
     systemAlert: u.role === 'superadmin',
   },
-}));
+  };
+}
 
 // ──────────────────────────────────────────────────────────────────────────────
 // 空表单
@@ -204,7 +170,7 @@ const INIT_NOTIFY: NotifyConfig[] = INIT_USERS.map(u => ({
 
 const emptyForm = (): Omit<SystemUser, 'id' | 'createdAt' | 'avatar'> => ({
   name: '', username: '', password: '',
-  role: 'service', phone: '', wechat: '',
+  role: 'service', phone: '', wechat: '', wecomUserId: '',
   status: 'active',
   permissions: [...ROLE_DEFAULT_PERMS.service],
 });
@@ -223,6 +189,7 @@ function dtoToSystemUser(u: SystemUserDto): SystemUser {
     role,
     phone: u.phone || '',
     wechat: u.wechat || '',
+    wecomUserId: u.wecomUserId || '',
     status: u.status === 'active' ? 'active' : 'disabled',
     createdAt: u.createdAt || '',
     avatar: u.avatar || u.name?.slice(0, 1) || 'U',
@@ -237,6 +204,7 @@ function formToPayload(form: Omit<SystemUser, 'id' | 'createdAt' | 'avatar'>) {
     role: form.role,
     phone: form.phone.trim(),
     wechat: form.wechat.trim(),
+    wecomUserId: form.wecomUserId.trim(),
     status: form.status,
     permissions: form.permissions,
   };
@@ -280,7 +248,16 @@ export default function SystemSettingsPage() {
   const users = (usersResp?.data || []).map(dtoToSystemUser);
 
   const [activeTab, setActiveTab] = useState<'accounts' | 'notify'>('accounts');
-  const [notifyConfigs, setNotifyConfigs] = useState<NotifyConfig[]>(INIT_NOTIFY);
+  const [notifyConfigs, setNotifyConfigs] = useState<NotifyConfig[]>([]);
+  const notifySetting = usePlatformSetting<NotifyConfig[]>('notification-configs');
+  const saveNotifySetting = usePlatformSettingMutation<NotifyConfig[]>('notification-configs');
+
+  const usersNotifyKey = users.map(user => `${user.id}:${user.phone}:${user.wechat}:${user.wecomUserId}:${user.status}`).join('|');
+  useEffect(() => {
+    if (!notifySetting.isSuccess) return;
+    const stored = Array.isArray(notifySetting.data) ? notifySetting.data : [];
+    setNotifyConfigs(users.map(user => stored.find(item => item.userId === user.id) || defaultNotifyConfig(user)));
+  }, [notifySetting.isSuccess, notifySetting.data, usersNotifyKey]);
 
   // 弹窗状态
   const [showModal, setShowModal] = useState(false);
@@ -307,7 +284,7 @@ export default function SystemSettingsPage() {
 
   function openEdit(u: SystemUser) {
     setEditingId(u.id);
-    setForm({ name: u.name, username: u.username, password: '', role: u.role, phone: u.phone, wechat: u.wechat, status: u.status, permissions: [...u.permissions] });
+    setForm({ name: u.name, username: u.username, password: '', role: u.role, phone: u.phone, wechat: u.wechat, wecomUserId: u.wecomUserId, status: u.status, permissions: [...u.permissions] });
     setShowPassword(false);
     setShowModal(true);
   }
@@ -325,14 +302,18 @@ export default function SystemSettingsPage() {
         const payload = formToPayload(form);
         if (!payload.password) payload.password = '123456';
         const res = await userMutations.create(payload);
-        setNotifyConfigs(prev => [...prev, {
-          userId: res.id,
-          enablePush: true,
-          phone: form.phone,
-          wechat: form.wechat,
-          bindPhone: false, bindWechat: false,
-          events: { newOrder: true, newAppointment: true, cancelAppointment: false, salarySettle: false, customerFollow: true, contractSign: false, systemAlert: false },
-        }]);
+        setNotifyConfigs(prev => {
+          const next = [...prev, {
+            userId: res.id,
+            enablePush: true,
+            phone: form.phone,
+            wechat: form.wechat,
+            bindPhone: false, bindWechat: false,
+            events: { newOrder: true, newAppointment: true, cancelAppointment: false, salarySettle: false, customerFollow: true, contractSign: false, systemAlert: false },
+          }];
+          void saveNotifySetting(next);
+          return next;
+        });
       }
       setShowModal(false);
     } catch (err: any) {
@@ -343,7 +324,11 @@ export default function SystemSettingsPage() {
   async function deleteUser(id: string) {
     try {
       await userMutations.remove(id);
-      setNotifyConfigs(prev => prev.filter(c => c.userId !== id));
+      setNotifyConfigs(prev => {
+        const next = prev.filter(c => c.userId !== id);
+        void saveNotifySetting(next);
+        return next;
+      });
       setDeleteConfirmId(null);
     } catch (err: any) {
       alert(err?.message || '删除账号失败');
@@ -390,15 +375,23 @@ export default function SystemSettingsPage() {
   // ── 通知设置 ──────────────────────────────────────────────────────────────
 
   function updateNotify(userId: string, patch: Partial<NotifyConfig>) {
-    setNotifyConfigs(prev => prev.map(c => c.userId === userId ? { ...c, ...patch } : c));
+    setNotifyConfigs(prev => {
+      const next = prev.map(c => c.userId === userId ? { ...c, ...patch } : c);
+      void saveNotifySetting(next);
+      return next;
+    });
   }
 
   function updateNotifyEvent(userId: string, eventKey: string, val: boolean) {
-    setNotifyConfigs(prev => prev.map(c =>
-      c.userId === userId
-        ? { ...c, events: { ...c.events, [eventKey]: val } }
-        : c
-    ));
+    setNotifyConfigs(prev => {
+      const next = prev.map(c =>
+        c.userId === userId
+          ? { ...c, events: { ...c.events, [eventKey]: val } }
+          : c
+      );
+      void saveNotifySetting(next);
+      return next;
+    });
   }
 
   // ── 过滤 ─────────────────────────────────────────────────────────────────
@@ -502,7 +495,7 @@ export default function SystemSettingsPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-brand/5 border-b border-border">
-                {['姓名', '账号', '角色', '手机号', '微信号', '状态', '创建时间', '操作'].map(h => (
+                {['姓名', '账号', '角色', '手机号', '微信号', '企业微信 UserID', '状态', '创建时间', '操作'].map(h => (
                   <th key={h} className="px-4 py-3 text-xs font-semibold text-muted-foreground text-left">{h}</th>
                 ))}
               </tr>
@@ -510,7 +503,7 @@ export default function SystemSettingsPage() {
             <tbody>
               {filteredUsers.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-4 py-8 text-center text-muted-foreground text-sm">暂无账号数据</td>
+                  <td colSpan={9} className="px-4 py-8 text-center text-muted-foreground text-sm">暂无账号数据</td>
                 </tr>
               )}
               {filteredUsers.map(u => (
@@ -529,6 +522,7 @@ export default function SystemSettingsPage() {
                   <td className="px-4 py-3"><RoleBadge role={u.role} /></td>
                   <td className="px-4 py-3 text-muted-foreground">{u.phone}</td>
                   <td className="px-4 py-3 text-muted-foreground">{u.wechat || '—'}</td>
+                  <td className="px-4 py-3 text-muted-foreground">{u.wecomUserId || '—'}</td>
                   <td className="px-4 py-3">
                     <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${
                       u.status === 'active' ? 'bg-success/10 text-success' : 'bg-muted text-muted-foreground'
@@ -804,6 +798,18 @@ export default function SystemSettingsPage() {
                   className="border border-border rounded-lg px-3 py-2 text-sm bg-background text-foreground outline-none focus:ring-2 focus:ring-brand/30"
                 />
               </div>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-semibold text-muted-foreground">企业微信 UserID</label>
+              <input
+                value={form.wecomUserId}
+                onChange={e => setForm(prev => ({ ...prev, wecomUserId: e.target.value }))}
+                placeholder="企业微信通讯录中的账号（UserID）"
+                className="border border-border rounded-lg px-3 py-2 text-sm bg-background text-foreground outline-none focus:ring-2 focus:ring-brand/30"
+              />
+              <p className="text-xs text-muted-foreground">
+                用于把预约提醒精确推送给该客服，需与企业微信通讯录 UserID 完全一致。
+              </p>
             </div>
             {/* 状态 */}
             <div className="flex items-center justify-between py-2 border-t border-border">

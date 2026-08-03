@@ -42,6 +42,7 @@ function mapUser(r: any) {
     phone: r.phone || '',
     email: r.email || '',
     wechat: r.wechat || '',
+    wecomUserId: r.wecom_userid || '',
     avatar: r.avatar || r.name?.slice(0, 1) || 'U',
     status: r.status === 'active' ? 'active' : 'disabled',
     permissions: parsePermissions(r.permissions),
@@ -53,7 +54,7 @@ router.get('/', authenticateToken, authorizeRoles('superadmin', 'admin'), async 
   try {
     const db = getDb();
     const [rows] = await db.query(
-      `SELECT id, username, name, role, phone, email, wechat, avatar, status, permissions, created_at
+      `SELECT id, username, name, role, phone, email, wechat, wecom_userid, avatar, status, permissions, created_at
        FROM users ORDER BY created_at DESC`
     );
     res.json({ data: (rows as any[]).map(mapUser) });
@@ -68,8 +69,8 @@ router.post('/', authenticateToken, authorizeRoles('superadmin', 'admin'), audit
     const password = b.password || '123456';
     const db = getDb();
     await db.execute(
-      `INSERT INTO users (id, username, password_hash, name, role, phone, email, wechat, avatar, status, permissions)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO users (id, username, password_hash, name, role, phone, email, wechat, wecom_userid, avatar, status, permissions)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         b.username,
@@ -79,6 +80,7 @@ router.post('/', authenticateToken, authorizeRoles('superadmin', 'admin'), audit
         b.phone || null,
         b.email || null,
         b.wechat || null,
+        b.wecomUserId || null,
         b.avatar || b.name.slice(0, 1),
         normalizeStatus(b.status),
         normalizePermissions(b.permissions),
@@ -103,11 +105,12 @@ router.put('/:id', authenticateToken, authorizeRoles('superadmin', 'admin'), aud
       b.phone || null,
       b.email || null,
       b.wechat || null,
+      b.wecomUserId || null,
       b.avatar || b.name.slice(0, 1),
       normalizeStatus(b.status),
       normalizePermissions(b.permissions),
     ];
-    let sql = `UPDATE users SET username=?, name=?, role=?, phone=?, email=?, wechat=?, avatar=?, status=?, permissions=?`;
+    let sql = `UPDATE users SET username=?, name=?, role=?, phone=?, email=?, wechat=?, wecom_userid=?, avatar=?, status=?, permissions=?`;
     if (b.password) {
       sql += ', password_hash=?';
       params.push(hashPassword(b.password));

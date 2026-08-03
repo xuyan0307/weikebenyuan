@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect } from 'react';
 import { toast } from 'sonner';
 import {
-  PlusIcon, SearchIcon, PencilIcon, Trash2Icon, EyeIcon,
+  PlusIcon, SearchIcon, Trash2Icon,
   UploadIcon, XIcon, PlusCircleIcon, ChevronDownIcon,
 } from 'lucide-react';
+import { RecordActionButtons } from './ui/record-action-buttons';
 import type { Therapist, CertWithExpiry, MultiCert } from '../data/mockData';
 import { useTherapists, useTherapistMutations } from '../api/hooks';
 import { useApp } from '../hooks/useApp';
@@ -1068,20 +1069,10 @@ export default function TherapistListPage() {
                   </td>
                   {/* 操作列：仅详情 + 编辑，无删除 */}
                   <td className="px-2 py-2">
-                    <div className="flex justify-center items-center gap-1.5">
-                      <button
-                        onClick={() => setDetailTarget(t)}
-                        className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-blue-600 text-white hover:bg-blue-700 whitespace-nowrap"
-                      >
-                        <EyeIcon size={12} />详情
-                      </button>
-                      <button
-                        onClick={() => openEdit(t)}
-                        className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-blue-100 text-blue-700 hover:bg-blue-200 whitespace-nowrap"
-                      >
-                        <PencilIcon size={12} />编辑
-                      </button>
-                    </div>
+                    <RecordActionButtons
+                      onView={() => setDetailTarget(t)}
+                      onEdit={() => openEdit(t)}
+                    />
                   </td>
                 </tr>
               );

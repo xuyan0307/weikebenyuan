@@ -2,9 +2,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   authApi, customersApi, ordersApi, appointmentsApi, therapistsApi,
   serviceRecordsApi, financeApi, contractsApi, dashboardApi, operationLogsApi,
-  usersApi,
+  usersApi, settingsApi,
 } from './endpoints';
-import type { Customer, CustomerListParams, Order, Appointment, Therapist } from './endpoints';
+import type { Customer, CustomerListParams, Order, Appointment, Therapist, ServiceRecord } from './endpoints';
 import type { QueryParams } from './client';
 
 type SystemUserMutationBody = Parameters<typeof usersApi.create>[0];
@@ -21,12 +21,13 @@ export const qk = {
   salary: (month: string) => ['salary', month] as const,
   income: () => ['income'] as const,
   contracts: (params: QueryParams) => ['contracts', params] as const,
-  dashboardStats: () => ['dashboard', 'stats'] as const,
+  dashboardStats: (period: string, startDate = '', endDate = '') => ['dashboard', 'stats', period, startDate, endDate] as const,
   dashboardRecent: () => ['dashboard', 'recent'] as const,
   dashboardTodos: () => ['dashboard', 'todos'] as const,
-  dashboardChart: () => ['dashboard', 'chart'] as const,
+  dashboardChart: (startDate = '', endDate = '') => ['dashboard', 'chart', startDate, endDate] as const,
   operationLogs: (params: QueryParams) => ['operation-logs', params] as const,
   users: () => ['users'] as const,
+  setting: (key: string) => ['settings', key] as const,
 };
 
 // ====== Customers ======
@@ -79,10 +80,29 @@ export function useAppointments(params: QueryParams) {
 }
 export function useAppointmentMutations() {
   const qc = useQueryClient();
-  const invalidate = () => { qc.invalidateQueries({ queryKey: ['appointments'] }); qc.invalidateQueries({ queryKey: ['orders'] }); qc.invalidateQueries({ queryKey: ['dashboard'] }); };
+  const invalidate = () => { qc.invalidateQueries({ queryKey: ['appointments'] }); qc.invalidateQueries({ queryKey: ['orders'] }); qc.invalidateQueries({ queryKey: ['dashboard'] }); qc.invalidateQueries({ queryKey: ['service-records'] }); qc.invalidateQueries({ queryKey: ['salary'] }); };
   return {
     create: useMutation({ mutationFn: (b: Partial<Appointment>) => appointmentsApi.create(b), onSuccess: invalidate }).mutateAsync,
-    patchStatus: useMutation({ mutationFn: ({ id, status }: { id: string; status: string }) => appointmentsApi.patchStatus(id, status), onSuccess: invalidate }).mutateAsync,
+    update: useMutation({
+      mutationFn: ({ id, body }: { id: string; body: Partial<Appointment> }) =>
+        appointmentsApi.update(id, body),
+      onSuccess: invalidate,
+    }).mutateAsync,
+    patchStatus: useMutation({
+      mutationFn: ({ id, status, signaturePhotos }: { id: string; status: string; signaturePhotos?: unknown[] }) =>
+        appointmentsApi.patchStatus(id, status, { signaturePhotos }),
+      onSuccess: invalidate,
+    }).mutateAsync,
+    patchNotificationStatus: useMutation({
+      mutationFn: ({
+        id,
+        status,
+      }: {
+        id: string;
+        status: '需通知' | '已通知' | '延迟' | '遗漏';
+      }) => appointmentsApi.patchNotificationStatus(id, status),
+      onSuccess: invalidate,
+    }).mutateAsync,
     remove: useMutation({ mutationFn: (id: string) => appointmentsApi.remove(id), onSuccess: invalidate }).mutateAsync,
   };
 }
@@ -96,7 +116,11 @@ export function useTherapist(id: string | null) {
 }
 export function useTherapistMutations() {
   const qc = useQueryClient();
-  const invalidate = () => qc.invalidateQueries({ queryKey: ['therapists'] });
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ['therapists'] });
+    // 技师定档是工资提成的主数据，档案更新后所有工资视图必须立即重算。
+    qc.invalidateQueries({ queryKey: ['salary'] });
+  };
   return {
     create: useMutation({ mutationFn: (b: Partial<Therapist>) => therapistsApi.create(b), onSuccess: invalidate }).mutateAsync,
     update: useMutation({ mutationFn: ({ id, body }: { id: string; body: Partial<Therapist> }) => therapistsApi.update(id, body), onSuccess: invalidate }).mutateAsync,
@@ -109,18 +133,58 @@ export function useTherapistMutations() {
 export function useServiceRecords(params: QueryParams) {
   return useQuery({ queryKey: qk.serviceRecords(params), queryFn: () => serviceRecordsApi.list(params) });
 }
+export function useServiceRecordMutations() {
+  const qc = useQueryClient();
+  const invalidate = () => qc.invalidateQueries({ queryKey: ['service-records'] });
+  return {
+    update: useMutation({
+      mutationFn: ({ id, body }: { id: string; body: Pick<Partial<ServiceRecord>, 'photos'> }) =>
+        serviceRecordsApi.update(id, body),
+      onSuccess: invalidate,
+    }).mutateAsync,
+  };
+}
 
 // ====== Finance ======
-export function useSalary(month: string) {
-  return useQuery({ queryKey: qk.salary(month), queryFn: () => financeApi.salary(month) });
+export function useSalary(month: string, weekStart?: string, scope: 'all' | 'month' = 'month') {
+  return useQuery({
+    queryKey: [...qk.salary(month), weekStart || '', scope],
+    queryFn: () => financeApi.salary(month, weekStart, scope),
+    placeholderData: previous => previous,
+  });
 }
 export function useIncome() {
   return useQuery({ queryKey: qk.income(), queryFn: () => financeApi.income() });
 }
 export function useFinanceMutations() {
   const qc = useQueryClient();
+  const invalidate = () => qc.invalidateQueries({ queryKey: ['salary'] });
   return {
-    settle: useMutation({ mutationFn: (id: string) => financeApi.settle(id), onSuccess: () => qc.invalidateQueries({ queryKey: ['salary'] }) }).mutateAsync,
+    updateEntry: useMutation({
+      mutationFn: ({ id, body }: {
+        id: string;
+        body: Parameters<typeof financeApi.updateSalaryEntry>[1];
+      }) => financeApi.updateSalaryEntry(id, body),
+      onSuccess: invalidate,
+    }).mutateAsync,
+    updateCustomerAdjustment: useMutation({
+      mutationFn: (body: Parameters<typeof financeApi.updateSalaryCustomerAdjustment>[0]) =>
+        financeApi.updateSalaryCustomerAdjustment(body),
+      onSuccess: invalidate,
+    }).mutateAsync,
+    confirmWeek: useMutation({
+      mutationFn: (body: Parameters<typeof financeApi.confirmSalaryWeek>[0]) =>
+        financeApi.confirmSalaryWeek(body),
+      onSuccess: invalidate,
+    }).mutateAsync,
+    settle: useMutation({
+      mutationFn: ({ id, status, settlementNote }: {
+        id: string;
+        status: '审核中' | '已结算';
+        settlementNote?: string;
+      }) => financeApi.settle(id, status, settlementNote),
+      onSuccess: invalidate,
+    }).mutateAsync,
   };
 }
 
@@ -130,24 +194,40 @@ export function useContracts(params: QueryParams) {
 }
 export function useContractMutations() {
   const qc = useQueryClient();
-  const invalidate = () => { qc.invalidateQueries({ queryKey: ['contracts'] }); qc.invalidateQueries({ queryKey: ['orders'] }); };
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ['contracts'] });
+    qc.invalidateQueries({ queryKey: ['orders'] });
+    qc.invalidateQueries({ queryKey: ['dashboard'] });
+  };
   return {
     sign: useMutation({ mutationFn: ({ id, signed }: { id: string; signed: boolean }) => contractsApi.sign(id, signed), onSuccess: invalidate }).mutateAsync,
   };
 }
 
 // ====== Dashboard ======
-export function useDashboardStats() {
-  return useQuery({ queryKey: qk.dashboardStats(), queryFn: () => dashboardApi.stats(), refetchInterval: 60_000 });
+export function useDashboardStats(
+  period: Parameters<typeof dashboardApi.stats>[0] = 'month',
+  startDate = '',
+  endDate = ''
+) {
+  return useQuery({
+    queryKey: qk.dashboardStats(period, startDate, endDate),
+    queryFn: () => dashboardApi.stats(period, startDate, endDate),
+    refetchInterval: 30_000,
+  });
 }
 export function useDashboardRecent() {
   return useQuery({ queryKey: qk.dashboardRecent(), queryFn: () => dashboardApi.recent() });
 }
-export function useDashboardTodos() {
-  return useQuery({ queryKey: qk.dashboardTodos(), queryFn: () => dashboardApi.todos() });
+export function useDashboardTodos(enabled = true) {
+  return useQuery({ queryKey: qk.dashboardTodos(), queryFn: () => dashboardApi.todos(), refetchInterval: 30_000, enabled });
 }
-export function useDashboardChart() {
-  return useQuery({ queryKey: qk.dashboardChart(), queryFn: () => dashboardApi.chart() });
+export function useDashboardChart(startDate = '', endDate = '') {
+  return useQuery({
+    queryKey: qk.dashboardChart(startDate, endDate),
+    queryFn: () => dashboardApi.chart(startDate, endDate),
+    refetchInterval: 30_000,
+  });
 }
 
 // ====== Operation Logs ======
@@ -167,6 +247,21 @@ export function useSystemUserMutations() {
     update: useMutation({ mutationFn: ({ id, body }: { id: string; body: SystemUserMutationBody }) => usersApi.update(id, body), onSuccess: invalidate }).mutateAsync,
     remove: useMutation({ mutationFn: (id: string) => usersApi.remove(id), onSuccess: invalidate }).mutateAsync,
   };
+}
+
+export function usePlatformSetting<T>(key: string) {
+  return useQuery({
+    queryKey: qk.setting(key),
+    queryFn: async () => (await settingsApi.get<T>(key)).value,
+  });
+}
+
+export function usePlatformSettingMutation<T>(key: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (value: T) => settingsApi.update(key, value),
+    onSuccess: (_result, value) => qc.setQueryData(qk.setting(key), value),
+  }).mutateAsync;
 }
 
 // ====== Auth ======

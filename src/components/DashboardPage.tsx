@@ -1,33 +1,46 @@
 import { useState } from 'react';
 import {
-  TrendingUpIcon, TrendingDownIcon, UsersIcon, CreditCardIcon,
-  ArrowUpRightIcon, AlertCircleIcon, CalendarCheckIcon, ClipboardIcon, XCircleIcon,
+  TrendingUpIcon, UsersIcon, CreditCardIcon,
+  ArrowUpRightIcon, AlertCircleIcon, CalendarCheckIcon, ClipboardIcon,
   ArrowRightIcon,
 } from 'lucide-react';
 import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from 'recharts';
 import { useApp } from '../hooks/useApp';
 import { useDashboardStats, useDashboardTodos, useDashboardChart } from '../api/hooks';
+import type { DashboardPeriod } from '../api/endpoints';
+import { DateRangeFilter } from './ui/date-range-filter';
+import { GLOBAL_DATE_RANGE_QUICK_OPTIONS, quickDateRange, type DateRangeValue } from '../utils/dateRange';
+import { useGlobalDateRange } from '../utils/useGlobalDateRange';
+import {
+  DASHBOARD_FILTER_STORAGE_KEY,
+  dashboardTodoTarget,
+} from '../utils/dashboardTodoNavigation';
 
-const TIME_FILTERS = ['今日', '本周', '本月', '今年'];
+const TIME_FILTERS: Array<{ label: string; value: DashboardPeriod }> = [
+  { label: '今日', value: 'today' },
+  { label: '本周', value: 'week' },
+  { label: '本月', value: 'month' },
+  { label: '今年', value: 'year' },
+];
 
 const TODO_ICONS: Record<string, any> = {
-  contract: AlertCircleIcon,
-  appointment: CalendarCheckIcon,
-  service: ClipboardIcon,
-  cancel: XCircleIcon,
+  'new-customer-followup': ClipboardIcon,
+  'order-customer-followup': AlertCircleIcon,
+  'appointment-notification': CalendarCheckIcon,
+  'contract-pending-signature': FileTextIcon,
 };
 
 export default function DashboardPage() {
   const { setActivePage } = useApp();
-  const [timeFilter, setTimeFilter] = useState('本月');
+  const [timeFilter, setTimeFilter] = useState<DashboardPeriod>('month');
+  const [dateRange, setDateRange] = useGlobalDateRange('month');
   const [chartMetric, setChartMetric] = useState('revenue');
-  const [dismissedIds, setDismissedIds] = useState<number[]>([]);
 
-  const statsQ = useDashboardStats();
+  const statsQ = useDashboardStats(timeFilter, dateRange.start, dateRange.end);
   const todosQ = useDashboardTodos();
-  const chartQ = useDashboardChart();
+  const chartQ = useDashboardChart(dateRange.start, dateRange.end);
 
   const s: any = statsQ.data || {};
   const chartData = (chartQ.data ?? []).map((r: any) => ({
@@ -37,47 +50,93 @@ export default function DashboardPage() {
     experienceCards: Number(r.experience_cards) || 0,
     upgrades: Number(r.upgrades) || 0,
   }));
-  const todos = (todosQ.data ?? []).filter((t: any) => !dismissedIds.includes(t.id));
+  const todos = todosQ.data ?? [];
 
   const totalRevenue = Number(s.total_revenue) || 0;
-  const totalCustomers = Number(s.total_customers) || 0;
-  const paidOrders = Number(s.paid_orders) || 0;
-  const todayAppt = Number(s.today_appt) || 0;
-  const activeTherapists = Number(s.active_therapists) || 0;
-  const pendingContract = Number(s.pending_contract) || 0;
+  const experienceRevenue = Number(s.experience_revenue) || 0;
+  const upgradeRevenue = Number(s.upgrade_revenue) || 0;
+  const purchaseRate = Number(s.purchase_rate) || 0;
+  const firstUpgradeCustomers = Number(s.first_upgrade_customers) || 0;
+  const upgradeRate = Number(s.upgrade_rate) || 0;
+  const secondUpgradeCustomers = Number(s.second_upgrade_customers) || 0;
+  const secondUpgradeRate = Number(s.second_upgrade_rate) || 0;
 
   const KPI_CARDS = [
-    { key: 'revenue', label: '累计销售额', value: `¥ ${totalRevenue.toLocaleString()}`, change: 0, color: '#1E88E5', icon: TrendingUpIcon },
-    { key: 'newCustomers', label: '客户总数', value: String(totalCustomers), change: 0, color: '#4CAF50', icon: UsersIcon },
-    { key: 'experienceCards', label: '已付款订单', value: String(paidOrders), change: 0, color: '#AB47BC', icon: CreditCardIcon },
-    { key: 'upgrades', label: '今日预约', value: String(todayAppt), change: 0, color: '#FF7043', icon: ArrowUpRightIcon },
-    { key: 'upgradeRate', label: '在职技师', value: String(activeTherapists), change: 0, color: '#FFC107', icon: TrendingUpIcon },
+    {
+      key: 'revenue',
+      label: '累计销售额',
+      value: `¥ ${totalRevenue.toLocaleString()}`,
+      details: [`体验卡 ¥ ${experienceRevenue.toLocaleString()}`, `升单套餐 ¥ ${upgradeRevenue.toLocaleString()}`],
+      color: '#1E88E5',
+      icon: TrendingUpIcon,
+    },
+    { key: 'newCustomers', label: '新客数量', value: String(Number(s.new_customers) || 0), details: ['按获客时间统计'], color: '#4CAF50', icon: UsersIcon },
+    {
+      key: 'experienceCards',
+      label: '体验卡数量',
+      value: String(Number(s.experience_cards) || 0),
+      details: ['已付款体验卡', `购买率 ${purchaseRate.toFixed(1)}%`],
+      color: '#AB47BC',
+      icon: CreditCardIcon,
+    },
+    {
+      key: 'upgrades',
+      label: '升单数量',
+      value: String(firstUpgradeCustomers),
+      details: ['套餐1客户', `升单率 ${upgradeRate.toFixed(1)}%`],
+      color: '#FF7043',
+      icon: ArrowUpRightIcon,
+    },
+    {
+      key: 'secondUpgrades',
+      label: '二次升单',
+      value: `¥ ${(Number(s.second_upgrade_revenue) || 0).toLocaleString()}`,
+      details: [`套餐2客户 ${secondUpgradeCustomers} 人`, `二次升单率 ${secondUpgradeRate.toFixed(1)}%`],
+      color: '#FFC107',
+      icon: TrendingUpIcon,
+    },
   ];
 
-  function dismissTodo(id: number) {
-    setDismissedIds(prev => [...prev, id]);
+  function openTodo(type: string) {
+    const target = dashboardTodoTarget(type);
+    if (!target) return;
+    sessionStorage.setItem(DASHBOARD_FILTER_STORAGE_KEY, JSON.stringify(target.filter));
+    setActivePage(target.page);
   }
 
   return (
     <div data-cmp="DashboardPage" className="flex flex-col gap-5">
       {/* Time filter */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-start justify-between gap-4">
         <div className="text-sm" style={{ color: 'var(--muted-foreground)' }}>经营概览 · 实时数据</div>
-        <div className="flex gap-1 p-1 rounded-lg" style={{ background: 'var(--muted)' }}>
-          {TIME_FILTERS.map(f => (
+        <div className="flex items-center gap-2">
+          <DateRangeFilter
+            value={dateRange}
+            onChange={value => { setDateRange(value); setTimeFilter('all'); }}
+            quickOptions={GLOBAL_DATE_RANGE_QUICK_OPTIONS}
+            onQuickSelect={value => setTimeFilter(
+              value === 'today' || value === 'week' || value === 'month' || value === 'year'
+                ? value
+                : 'all',
+            )}
+            align="right"
+          />
+          <div className="hidden" style={{ background: 'var(--muted)' }}>
+          {TIME_FILTERS.map(filter => (
             <button
-              key={f}
+              key={filter.value}
               className="px-3 py-1 rounded-md text-sm font-medium transition-all"
               style={{
-                background: timeFilter === f ? '#fff' : 'transparent',
-                color: timeFilter === f ? 'var(--brand)' : 'var(--muted-foreground)',
-                boxShadow: timeFilter === f ? '0 1px 4px rgba(30,136,229,0.15)' : 'none',
+                background: timeFilter === filter.value ? '#fff' : 'transparent',
+                color: timeFilter === filter.value ? 'var(--brand)' : 'var(--muted-foreground)',
+                boxShadow: timeFilter === filter.value ? '0 1px 4px rgba(30,136,229,0.15)' : 'none',
               }}
-              onClick={() => setTimeFilter(f)}
+              onClick={() => { setTimeFilter(filter.value); setDateRange(quickDateRange(filter.value)); }}
             >
-              {f}
+              {filter.label}
             </button>
           ))}
+          </div>
         </div>
       </div>
 
@@ -85,7 +144,6 @@ export default function DashboardPage() {
       <div className="flex gap-4 flex-wrap">
         {KPI_CARDS.map(card => {
           const Icon = card.icon;
-          const isUp = card.change >= 0;
           return (
             <div
               key={card.key}
@@ -99,16 +157,9 @@ export default function DashboardPage() {
                   <Icon size={16} style={{ color: card.color }} />
                 </div>
               </div>
-              <div className="text-2xl font-bold text-foreground mb-1">{card.value}</div>
-              <div className="flex items-center gap-1 text-xs">
-                {isUp
-                  ? <TrendingUpIcon size={12} style={{ color: 'var(--danger)' }} />
-                  : <TrendingDownIcon size={12} style={{ color: 'var(--success)' }} />
-                }
-                <span style={{ color: isUp ? 'var(--danger)' : 'var(--success)' }}>
-                  {isUp ? '+' : ''}{card.change}%
-                </span>
-                <span style={{ color: 'var(--muted-foreground)' }}>环比上月</span>
+              <div className="text-2xl font-bold text-foreground mb-2">{card.value}</div>
+              <div className="flex min-h-8 flex-wrap content-start gap-x-2 gap-y-1 text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                {card.details.map(detail => <span key={detail}>{detail}</span>)}
               </div>
             </div>
           );
@@ -166,22 +217,18 @@ export default function DashboardPage() {
         <div className="bg-card rounded-xl p-5 shadow-custom flex flex-col" style={{ width: 300, flexShrink: 0 }}>
           <div className="flex items-center justify-between mb-4">
             <span className="font-semibold text-foreground">待办中心</span>
-            <span className="badge badge-warning">{todos.length} 项待处理</span>
+            <span className="badge badge-warning">{todos.reduce((sum, todo) => sum + Number(todo.count || 0), 0)} 项待处理</span>
           </div>
           <div className="flex flex-col gap-3 flex-1">
             {todos.map(todo => {
               const Icon = TODO_ICONS[todo.type as keyof typeof TODO_ICONS] ?? AlertCircleIcon;
-              const pageMap: Record<string, string> = {
-                contract: 'orders-contracts',
-                appointment: 'customers-pool',
-                service: 'services-records',
-                cancel: 'services-change',
-              };
               return (
-                <div
+                <button
+                  type="button"
                   key={todo.id}
-                  className="flex items-center gap-3 p-3 rounded-lg"
+                  className="flex items-center gap-3 p-3 rounded-lg text-left transition-transform hover:-translate-y-0.5"
                   style={{ background: 'var(--muted)', border: `1px solid ${todo.color}25` }}
+                  onClick={() => openTodo(todo.type)}
                 >
                   <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
                     style={{ background: todo.color + '18' }}>
@@ -193,23 +240,8 @@ export default function DashboardPage() {
                       <span className="font-bold" style={{ color: todo.color }}>{todo.count}</span> 条待处理
                     </div>
                   </div>
-                  <div className="flex gap-1">
-                    <button
-                      className="p-1.5 rounded-md hover:bg-white transition-colors"
-                      title="前往处理"
-                      onClick={() => setActivePage(pageMap[todo.type] ?? 'dashboard')}
-                    >
-                      <ArrowRightIcon size={13} style={{ color: 'var(--brand)' }} />
-                    </button>
-                    <button
-                      className="p-1.5 rounded-md hover:bg-white transition-colors"
-                      title="标记已处理"
-                      onClick={() => dismissTodo(todo.id)}
-                    >
-                      <XCircleIcon size={13} style={{ color: 'var(--muted-foreground)' }} />
-                    </button>
-                  </div>
-                </div>
+                  <ArrowRightIcon size={14} style={{ color: 'var(--brand)' }} />
+                </button>
               );
             })}
             {todos.length === 0 && (
@@ -222,26 +254,6 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Quick stats row */}
-      <div className="flex gap-4">
-        {[
-          { label: '今日预约', value: todayAppt, sub: '实时', color: 'var(--brand)' },
-          { label: '待付款订单', value: Number(s.pending_pay) || 0, sub: '待收款', color: 'var(--success)' },
-          { label: '在职技师', value: activeTherapists, sub: '可派单', color: '#AB47BC' },
-          { label: '未签合同', value: pendingContract, sub: '待回签', color: 'var(--warning)' },
-        ].map(s => (
-          <div key={s.label} className="flex-1 bg-card rounded-xl p-4 shadow-custom flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl flex items-center justify-center text-xl font-bold text-white"
-              style={{ background: s.color }}>
-              {s.value}
-            </div>
-            <div>
-              <div className="text-sm font-semibold text-foreground">{s.label}</div>
-              <div className="text-xs" style={{ color: 'var(--muted-foreground)' }}>{s.sub}</div>
-            </div>
-          </div>
-        ))}
-      </div>
     </div>
   );
 }

@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { api, getToken, setToken } from '../api/client';
 import { authApi } from '../api/endpoints';
 import type { UserInfo } from '../api/endpoints';
+import { useDashboardTodos } from '../api/hooks';
 
 type Role = 'superadmin' | 'admin' | 'service' | 'therapist' | 'finance';
 
@@ -35,6 +36,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [activePage, setActivePage] = useState('dashboard');
   const [loading, setLoading] = useState(true);
+  const todosQ = useDashboardTodos(Boolean(getToken()));
+  const notifications = (todosQ.data || []).reduce((sum, item) => sum + Number(item.count || 0), 0);
 
   useEffect(() => {
     const token = getToken();
@@ -74,7 +77,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setSidebarCollapsed,
       activePage,
       setActivePage,
-      notifications: 5,
+      notifications,
       loading,
       logout,
     } as AppContextValue}>

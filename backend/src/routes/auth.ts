@@ -3,6 +3,7 @@ import { authenticateToken, signToken } from '../middleware/auth';
 import { getDb } from '../config/database';
 import { comparePassword } from '../utils/bcrypt';
 import { createError } from '../middleware/errorHandler';
+import { auditLog } from '../middleware/auditLog';
 
 const router: Router = Router();
 
@@ -72,7 +73,7 @@ router.get('/me', authenticateToken, async (req, res, next) => {
   }
 });
 
-router.put('/password', authenticateToken, async (req, res, next) => {
+router.put('/password', authenticateToken, auditLog('auth'), async (req, res, next) => {
   try {
     const userId = req.userId;
     if (!userId) return next(createError('未登录', 401));

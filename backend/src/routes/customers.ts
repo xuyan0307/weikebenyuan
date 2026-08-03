@@ -1,13 +1,14 @@
 import { Router } from 'express';
 import { randomUUID } from 'crypto';
 import type { Pool, RowDataPacket } from 'mysql2/promise';
-import { authenticateToken, authorizeRoles } from '../middleware/auth';
+import { authenticateToken, authorizeRoles, AuthRequest } from '../middleware/auth';
 import { auditLog } from '../middleware/auditLog';
 import { getDb } from '../config/database';
 import { createError } from '../middleware/errorHandler';
 import { generateCustomerCode } from '../services/customerCodeService';
 import {
   CustomerDateRange,
+  CustomerFollowTime,
   CustomerListFilters,
   exportCustomers,
   getCustomerFilterOptions,
@@ -39,15 +40,23 @@ function customerFiltersFromQuery(query: Record<string, unknown>): CustomerListF
   const statuses = csvQuery(query.statuses);
   const legacyTag = stringQuery(query.tag);
   const legacyStatus = stringQuery(query.followStatus);
+  const requestedFollowTimes = csvQuery(query.followTimes);
+  const followTimes = requestedFollowTimes.filter(value =>
+    ['today', 'overdue', 'pending', 'none'].includes(value)
+  ) as CustomerFollowTime[];
   return {
     keyword: stringQuery(query.keyword),
     dateRange,
+    startDate: stringQuery(query.startDate),
+    endDate: stringQuery(query.endDate),
     areas: csvQuery(query.areas),
     sources: csvQuery(query.sources),
     statuses: statuses.length > 0 ? statuses : legacyStatus ? [legacyStatus] : [],
+    followTimes,
     tags: tags.length > 0 ? tags : legacyTag ? [legacyTag] : [],
     advisors: csvQuery(query.advisors),
     includeOrdered: query.includeOrdered === '1' || query.includeOrdered === 'true',
+    dueFollowUp: query.dueFollowUp === '1' || query.dueFollowUp === 'true',
   };
 }
 
@@ -63,13 +72,17 @@ async function resolveAdvisorId(db: Pool, body: Record<string, unknown>): Promis
   return (rows as RowDataPacket[])[0]?.id || null;
 }
 
-router.get('/', authenticateToken, async (req, res, next) => {
+router.get('/', authenticateToken, async (req: AuthRequest, res, next) => {
   try {
     const db = getDb();
     const page = Math.max(1, parseInt(req.query.page as string) || 1);
     const pageSize = Math.max(1, parseInt(req.query.pageSize as string) || 10);
+    const filters = customerFiltersFromQuery(req.query);
     const result = await listCustomers(db, {
-      ...customerFiltersFromQuery(req.query),
+      ...filters,
+      advisorId: req.userRole === 'superadmin' || req.userRole === 'admin'
+        ? undefined
+        : req.userId,
       page,
       pageSize,
     });

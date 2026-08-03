@@ -1,16 +1,25 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
-  SearchIcon, PlusIcon, FilterIcon, PhoneIcon, EyeIcon, EditIcon,
+  SearchIcon, PlusIcon, FilterIcon, PhoneIcon,
   ChevronLeftIcon, ChevronRightIcon, XIcon, SaveIcon, UserIcon, CalendarIcon,
   TagIcon, ChevronDownIcon, UploadIcon, DownloadIcon, FileTextIcon, CheckIcon,
   ClockIcon, ShoppingBagIcon, PackageIcon, Trash2Icon,
 } from 'lucide-react';
+import { RecordActionButtons } from './ui/record-action-buttons';
 import type { Customer, CustomerTag, FollowStatus, CustomerProfile, Order } from '../data/mockData';
 import { useApp } from '../hooks/useApp';
 import { useCustomers, useCustomerFilterOptions, useCustomerMutations, useOrders, useSystemUsers } from '../api/hooks';
 import { customersApi } from '../api/endpoints';
 import { toast } from 'sonner';
 import { downloadXlsx, readSpreadsheet, rowsToObjects } from '../utils/spreadsheet';
+import { matchesFollowTime } from '../utils/followTimeFilter';
+import { DateRangeFilter } from './ui/date-range-filter';
+import { GLOBAL_DATE_RANGE_QUICK_OPTIONS, quickDateRange, type DateRangeValue } from '../utils/dateRange';
+import { useGlobalDateRange } from '../utils/useGlobalDateRange';
+import {
+  clearDashboardFilter,
+  readDashboardFilter,
+} from '../utils/dashboardTodoNavigation';
 
 // ─────────────────────────── Tag system ───────────────────────────
 interface TagDef {
@@ -126,6 +135,15 @@ function computeDisplayStatus(c: Customer, storedStatus: string): NewFollowStatu
 // ─────────────────────────── Old status (kept for stored value) ───────────────────────────
 const ALL_STATUSES: NewFollowStatus[] = ['跟进中', '待跟进', '已完成', '延迟'];
 const FILTER_STATUSES = ['跟进中', '待跟进', '已完成', '延迟'];
+const FOLLOW_TIME_OPTIONS = [
+  { value: 'today', label: '今日' },
+  { value: 'overdue', label: '已过期' },
+  { value: 'pending', label: '未开始' },
+] as const;
+const FOLLOW_TIME_VALUES = FOLLOW_TIME_OPTIONS.map(option => option.value);
+const FOLLOW_TIME_LABELS = Object.fromEntries(
+  FOLLOW_TIME_OPTIONS.map(option => [option.value, option.label])
+);
 
 // ─────────────────────────── Options ───────────────────────────
 const SOURCE_OPTIONS = ['小红书', '视频号', '美团大众', '抖音', '老客转介绍', '月嫂介绍', '朋友推荐', '其他'];
@@ -169,9 +187,9 @@ function useDebouncedValue<T>(value: T, delayMs: number): T {
 }
 
 // ─────────────────────────── Date filter ───────────────────────────
-type DateRange = 'all' | 'today' | 'week' | 'month';
+type DateRange = 'all' | 'today' | 'week' | 'month' | 'custom';
 
-function getDateRangeLabel(r: DateRange): string {
+function getDateRangeLabel(r: Exclude<DateRange, 'custom'>): string {
   return { all: '全部', today: '今日', week: '本周', month: '本月' }[r];
 }
 
@@ -384,6 +402,7 @@ interface MultiSelectProps {
   renderLabel?: (selected: string[]) => React.ReactNode;
   width?: number;
   groupedOptions?: { groupLabel: string; groupBadge: string; options: string[] }[];
+  allToggleLabels?: boolean;
 }
 
 function MultiSelectDropdown({
@@ -395,6 +414,7 @@ function MultiSelectDropdown({
   renderLabel,
   width = 200,
   groupedOptions,
+  allToggleLabels = false,
 }: MultiSelectProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -430,7 +450,7 @@ function MultiSelectDropdown({
   }
 
   const displayLabel = isAll
-    ? <span className="text-sm" style={{ color: 'var(--foreground)' }}>全部</span>
+    ? <span className="text-sm" style={{ color: 'var(--foreground)' }}>{allToggleLabels ? '全选' : '全部'}</span>
     : renderLabel
       ? renderLabel(selected)
       : <span className="text-sm" style={{ color: 'var(--brand)' }}>{selected.length > 0 ? `已选 ${selected.length}` : '全部'}</span>;
@@ -474,7 +494,9 @@ function MultiSelectDropdown({
             style={{ background: isAll ? 'var(--brand)' : 'transparent', border: `1.5px solid ${isAll ? 'var(--brand)' : 'var(--border)'}` }}>
             {isAll && <CheckIcon size={10} color="#fff" />}
           </div>
-          <span className="text-sm font-medium text-foreground">全部</span>
+          <span className="text-sm font-medium text-foreground">
+            {allToggleLabels ? '全选' : '全部'}
+          </span>
         </div>
 
         {groupedOptions ? (
@@ -678,11 +700,33 @@ export default function CustomersListPage() {
   const [pageSize, setPageSize] = useState(20);
 
   const [dateRange, setDateRange] = useState<DateRange>('all');
+  const [acquiredDateRange, setAcquiredDateRange] = useGlobalDateRange('all');
   const [areaFilter, setAreaFilter] = useState<string[]>([...AREA_OPTIONS]);
   const [sourceFilter, setSourceFilter] = useState<string[]>([...SOURCE_OPTIONS]);
   const [statusFilter, setStatusFilter] = useState<string[]>([...FILTER_STATUSES]);
+  const [followTimeFilter, setFollowTimeFilter] = useState<string[]>(() => {
+    const filter = readDashboardFilter();
+    if (filter.customerFollowTime === 'today') {
+      clearDashboardFilter();
+      return ['today'];
+    }
+    return [...FOLLOW_TIME_VALUES];
+  });
   const [tagFilter, setTagFilter] = useState<CustomerTag[]>([...ALL_TAGS]);
   const [advisorFilter, setAdvisorFilter] = useState<string[]>([]);
+  const [dueFollowUp, setDueFollowUp] = useState(() => {
+    try {
+      const raw = sessionStorage.getItem('weikebenyuan:dashboard-filter');
+      const filter = raw ? JSON.parse(raw) : null;
+      if (filter?.dueFollowUp) {
+        sessionStorage.removeItem('weikebenyuan:dashboard-filter');
+        return true;
+      }
+    } catch {
+      // Ignore stale navigation state.
+    }
+    return false;
+  });
 
   const advisorFilterOptions = uniqueStrings([
     ...advisorNames,
@@ -691,19 +735,28 @@ export default function CustomersListPage() {
 
   const customerFilterParams = {
     keyword: debouncedSearch.trim(),
-    dateRange,
+    dateRange: dateRange === 'custom' ? 'all' : dateRange,
+    startDate: acquiredDateRange.start,
+    endDate: acquiredDateRange.end,
     areas: selectedQueryValue(areaFilter, AREA_OPTIONS),
     sources: selectedQueryValue(sourceFilter, SOURCE_OPTIONS),
     statuses: selectedQueryValue(statusFilter, FILTER_STATUSES),
+    followTimes: followTimeFilter.length === 0
+      ? 'none'
+      : selectedQueryValue(followTimeFilter, FOLLOW_TIME_VALUES),
     tags: selectedQueryValue(tagFilter, ALL_TAGS),
     advisors: selectedQueryValue(advisorFilter, advisorFilterOptions),
+    dueFollowUp: dueFollowUp ? 1 : undefined,
   };
 
   const [detailId, setDetailId] = useState<string | null>(null);
   const [detailTab, setDetailTab] = useState<'basic' | 'profile' | 'follow' | 'orders'>('basic');
 
   const customersQuery = useCustomers({ ...customerFilterParams, page, pageSize });
-  const customers = (customersQuery.data?.data ?? []) as unknown as Customer[];
+  const returnedCustomers = (customersQuery.data?.data ?? []) as unknown as Customer[];
+  const customers = returnedCustomers.filter(customer =>
+    matchesFollowTime(customer.followDate, followTimeFilter, { emptyMeansAll: false })
+  );
   const totalCustomers = customersQuery.data?.total ?? 0;
   const mutations = useCustomerMutations();
   const ordersQuery = useOrders({ customerId: detailId || '', page: 1, pageSize: 100 });
@@ -712,11 +765,17 @@ export default function CustomersListPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [addForm, setAddForm] = useState<CustomerForm>(blankForm(textOf(currentUser.name), currentUser.id, currentUser.name));
   const addFormRef = useRef(addForm);
+  const addFormScrollRef = useRef<HTMLDivElement>(null);
+  const addFormScrollPositionRef = useRef<number | null>(null);
+  const addFormScrollTimerRef = useRef<number | null>(null);
   const [addErrors, setAddErrors] = useState<Partial<Record<keyof CustomerForm, string>>>({});
 
   const [editId, setEditId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<CustomerForm>(blankForm(textOf(currentUser.name), currentUser.id, currentUser.name));
   const editFormRef = useRef(editForm);
+  const editFormScrollRef = useRef<HTMLDivElement>(null);
+  const editFormScrollPositionRef = useRef<number | null>(null);
+  const editFormScrollTimerRef = useRef<number | null>(null);
   const [editErrors, setEditErrors] = useState<Partial<Record<keyof CustomerForm, string>>>({});
 
   const [showLegend, setShowLegend] = useState(false);
@@ -902,7 +961,9 @@ export default function CustomersListPage() {
     let exportCustomers: Customer[];
     try {
       const response = await customersApi.exportList(customerFilterParams);
-      exportCustomers = response.data as unknown as Customer[];
+      exportCustomers = (response.data as unknown as Customer[]).filter(customer =>
+        matchesFollowTime(customer.followDate, followTimeFilter, { emptyMeansAll: false })
+      );
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '导出失败');
       return;
@@ -993,14 +1054,53 @@ export default function CustomersListPage() {
     errors: Partial<Record<keyof CustomerForm, string>>,
     isEdit: boolean,
     previewId?: string,
+    scrollRef?: React.RefObject<HTMLDivElement>,
+    scrollPositionRef?: React.RefObject<number | null>,
+    scrollTimerRef?: React.RefObject<number | null>,
   ) {
     const tagOptions = isEdit ? ALL_TAGS : INIT_TAG_OPTIONS;
     const formAdvisorOptions = uniquePersonOptions([
       ...advisorOptions,
       form.advisor ? { id: form.advisor, name: form.advisor } : { id: defaultAdvisorName, name: defaultAdvisorName },
     ]);
+    const restoreFormScrollPosition = () => {
+      const scrollTop = scrollPositionRef?.current;
+      if (scrollTop === null || scrollTop === undefined) return;
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+          scrollRef?.current?.scrollTo({ top: scrollTop, behavior: 'auto' });
+        });
+      });
+    };
+    const rememberFormScrollPosition = () => {
+      if (scrollPositionRef && scrollRef?.current && scrollPositionRef.current === null) {
+        scrollPositionRef.current = scrollRef.current.scrollTop;
+      }
+    };
+    const scheduleStableScrollPosition = (scrollTop: number) => {
+      if (!scrollPositionRef || !scrollTimerRef) return;
+      if (scrollTimerRef.current !== null) {
+        window.clearTimeout(scrollTimerRef.current);
+      }
+      scrollTimerRef.current = window.setTimeout(() => {
+        scrollPositionRef.current = scrollTop;
+        scrollTimerRef.current = null;
+      }, 100);
+    };
+    const patchWithoutScrollJump = (key: keyof CustomerForm, value: string) => {
+      if (scrollPositionRef?.current === null || scrollPositionRef?.current === undefined) {
+        rememberFormScrollPosition();
+      }
+      patch(key, value);
+      restoreFormScrollPosition();
+    };
     return (
-      <div className="flex flex-col gap-4 p-6 overflow-y-auto" style={{ maxHeight: 560 }}>
+      <div
+        ref={scrollRef}
+        className="flex flex-col gap-4 p-6 overflow-y-auto"
+        style={{ maxHeight: 560, overflowAnchor: 'none', scrollbarGutter: 'stable' }}
+        onScroll={event => scheduleStableScrollPosition(event.currentTarget.scrollTop)}
+      >
         {/* Row 1: 获客时间 / 客户ID / 来源渠道 / 归属客服 */}
         <div className="flex gap-3">
           <div className="flex-1">
@@ -1139,7 +1239,11 @@ export default function CustomersListPage() {
               <div className="flex-1">
                 <FF label="下次跟进时间">
                   <input type="date" className={inputCls} style={inputStyle}
-                    value={form.followDate} onChange={e => patch('followDate', e.target.value)} />
+                    value={form.followDate}
+                    onPointerDown={rememberFormScrollPosition}
+                    onFocus={restoreFormScrollPosition}
+                    onClick={restoreFormScrollPosition}
+                    onChange={e => patchWithoutScrollJump('followDate', e.target.value)} />
                 </FF>
               </div>
             </div>
@@ -1317,6 +1421,7 @@ export default function CustomersListPage() {
                 onClick={() => {
                   const nextForm = blankForm(defaultAdvisorName, defaultFollower.id, defaultFollower.name);
                   addFormRef.current = nextForm;
+                  addFormScrollPositionRef.current = 0;
                   setAddForm(nextForm);
                   setAddErrors({});
                   setShowAdd(true);
@@ -1327,12 +1432,34 @@ export default function CustomersListPage() {
           )}
         </div>
 
+        <DateRangeFilter
+          className="hidden"
+          label="获客时间范围"
+          value={acquiredDateRange}
+          onChange={value => { setAcquiredDateRange(value); setDateRange('custom'); resetPage(); }}
+        />
+
         {/* row 2: filter pills */}
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-nowrap items-center gap-2">
+          <DateRangeFilter
+            label="获客时间范围"
+            value={acquiredDateRange}
+            onChange={value => { setAcquiredDateRange(value); setDateRange('custom'); resetPage(); }}
+            quickOptions={GLOBAL_DATE_RANGE_QUICK_OPTIONS}
+            onQuickSelect={value => {
+              setDateRange(
+                value === 'all' || value === 'today' || value === 'week' || value === 'month'
+                  ? value
+                  : 'custom',
+              );
+              resetPage();
+            }}
+          />
+          <div className="hidden" style={{ background: 'var(--border)' }} />
           {/* 获客时间 */}
-          <div className="flex items-center gap-1">
+          <div className="hidden">
             <span className="text-xs font-medium mr-1" style={{ color: 'var(--muted-foreground)' }}>获客时间</span>
-            {(['all', 'today', 'week', 'month'] as DateRange[]).map(r => (
+            {(['all', 'today', 'week', 'month'] as Exclude<DateRange, 'custom'>[]).map(r => (
               <button key={r}
                 className="px-2.5 py-1 rounded-md text-xs font-medium transition-all"
                 style={{
@@ -1340,7 +1467,7 @@ export default function CustomersListPage() {
                   color: dateRange === r ? '#fff' : 'var(--foreground)',
                   border: `1px solid ${dateRange === r ? 'var(--brand)' : 'var(--border)'}`,
                 }}
-                onClick={() => { setDateRange(r); resetPage(); }}>
+                onClick={() => { setDateRange(r); setAcquiredDateRange(quickDateRange(r)); resetPage(); }}>
                 {getDateRangeLabel(r)}
               </button>
             ))}
@@ -1379,6 +1506,23 @@ export default function CustomersListPage() {
             }}
           />
 
+          <MultiSelectDropdown
+            label="跟进时间"
+            allOptions={FOLLOW_TIME_VALUES}
+            selected={followTimeFilter}
+            onChange={v => { setFollowTimeFilter(v); resetPage(); }}
+            width={180}
+            allToggleLabels
+            renderOption={opt => <span className="text-sm text-foreground">{FOLLOW_TIME_LABELS[opt] ?? opt}</span>}
+            renderLabel={selected => (
+              <span className="text-sm" style={{ color: 'var(--brand)' }}>
+                {selected.length === 0
+                  ? '全不选'
+                  : selected.map(value => FOLLOW_TIME_LABELS[value] ?? value).join('、')}
+              </span>
+            )}
+          />
+
           {/* 客户标签 — with annotations */}
           <MultiSelectDropdown
             label="标签"
@@ -1402,6 +1546,16 @@ export default function CustomersListPage() {
             onChange={v => { setAdvisorFilter(v); resetPage(); }}
             width={180}
           />
+          {dueFollowUp && (
+            <button
+              type="button"
+              className="rounded-md border border-orange-200 bg-orange-50 px-3 py-1.5 text-xs font-medium text-orange-700"
+              onClick={() => { setDueFollowUp(false); resetPage(); }}
+              title="清除到期跟进筛选"
+            >
+              到期需跟进 ×
+            </button>
+          )}
         </div>
 
         {/* ══ Tag legend table (collapsible) ══ */}
@@ -1561,28 +1715,19 @@ export default function CustomersListPage() {
                     </td>
                     <td className="text-sm text-center" style={{ color: 'var(--muted-foreground)' }}><span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={c.advisor}>{c.advisor}</span></td>
                     <td className="text-center">
-                      <div className="flex items-center justify-center gap-1">
-                        <button className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium hover:opacity-80 transition-opacity"
-                          style={{ background: 'rgba(30,136,229,0.1)', color: 'var(--brand)' }}
-                          onClick={() => { setDetailId(c.id); setDetailTab('basic'); }}>
-                          <EyeIcon size={11} />查看
-                        </button>
-                        {canEdit && (
-                          <button className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium hover:opacity-80 transition-opacity"
-                            style={{ background: 'rgba(100,100,100,0.1)', color: 'var(--foreground)' }}
-                            onClick={() => {
+                      <RecordActionButtons
+                        onView={() => { setDetailId(c.id); setDetailTab('basic'); }}
+                        onEdit={canEdit ? () => {
                               const nextForm = customerToForm(c, defaultAdvisorName);
                               nextForm.followerId = defaultFollower.id;
                               nextForm.followerName = defaultFollower.name;
                               editFormRef.current = nextForm;
+                              editFormScrollPositionRef.current = 0;
                               setEditForm(nextForm);
                               setEditErrors({});
                               setEditId(c.id);
-                            }}>
-                            <EditIcon size={11} />编辑
-                          </button>
-                        )}
-                      </div>
+                            } : undefined}
+                      />
                     </td>
                   </tr>
                 );
@@ -1951,6 +2096,7 @@ export default function CustomersListPage() {
                       if (!detailCustomer) return;
                       const nextForm = customerToForm(detailCustomer, defaultAdvisorName, defaultFollower.id, defaultFollower.name);
                       editFormRef.current = nextForm;
+                      editFormScrollPositionRef.current = 0;
                       setEditForm(nextForm);
                       setEditErrors({});
                       setEditId(detailCustomer.id);
@@ -1968,13 +2114,33 @@ export default function CustomersListPage() {
       {/* ══ Add Modal ══ */}
       <ModalWrap show={showAdd} title="新增客户"
         onClose={() => setShowAdd(false)} onConfirm={handleAdd}>
-        {renderForm(addFormRef.current, patchAdd, patchAddProducts, addErrors, false, '自动生成')}
+        {renderForm(
+          addFormRef.current,
+          patchAdd,
+          patchAddProducts,
+          addErrors,
+          false,
+          '自动生成',
+          addFormScrollRef,
+          addFormScrollPositionRef,
+          addFormScrollTimerRef,
+        )}
       </ModalWrap>
 
       {/* ══ Edit Modal ══ */}
       <ModalWrap show={!!editId} title={`编辑客户 — ${editCustomer?.name ?? ''}`}
         onClose={() => setEditId(null)} onConfirm={handleEdit} onDelete={canManageBulk ? handleDeleteCustomer : undefined}>
-        {renderForm(editFormRef.current, patchEdit, patchEditProducts, editErrors, true, editId ?? undefined)}
+        {renderForm(
+          editFormRef.current,
+          patchEdit,
+          patchEditProducts,
+          editErrors,
+          true,
+          editId ?? undefined,
+          editFormScrollRef,
+          editFormScrollPositionRef,
+          editFormScrollTimerRef,
+        )}
       </ModalWrap>
 
       {/* ══ Import Modal ══ */}

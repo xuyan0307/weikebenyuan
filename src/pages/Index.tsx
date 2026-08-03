@@ -10,8 +10,6 @@ const OrdersListPage = lazy(() => import('../components/OrdersListPage'));
 const ContractListPage = lazy(() => import('../components/ContractListPage'));
 const AppointmentsCalendarPage = lazy(() => import('../components/AppointmentsCalendarPage'));
 const AppointmentsListPage = lazy(() => import('../components/AppointmentsListPage'));
-const ServiceRecordsPage = lazy(() => import('../components/ServiceRecordsPage'));
-const ServiceProgressPage = lazy(() => import('../components/ServiceProgressPage'));
 const TherapistListPage = lazy(() => import('../components/TherapistListPage'));
 const FinanceSalaryPage = lazy(() => import('../components/FinanceSalaryPage'));
 const FinanceIncomePage = lazy(() => import('../components/FinanceIncomePage'));
@@ -107,10 +105,6 @@ function AppShell() {
         return <AppointmentsCalendarPage />;
       case 'appointments-list':
         return <AppointmentsListPage />;
-      case 'services-records':
-        return <ServiceRecordsPage />;
-      case 'services-change':
-        return <ServiceProgressPage />;
       case 'therapists-list':
         return <TherapistListPage />;
       case 'finance-salary':

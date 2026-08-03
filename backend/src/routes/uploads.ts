@@ -6,6 +6,7 @@ import path from 'path';
 import { authenticateToken } from '../middleware/auth';
 import { createOssClient, hasOssConfig, ossFileUrl } from '../utils/oss';
 import { createError } from '../middleware/errorHandler';
+import { auditLog } from '../middleware/auditLog';
 
 const router: Router = Router();
 const uploadDir = process.env.UPLOAD_DIR || path.resolve(process.cwd(), 'uploads');
@@ -78,7 +79,7 @@ router.get('/files/*', async (req, res, next) => {
   }
 });
 
-router.post('/', authenticateToken, upload.array('files', 10), async (req, res, next) => {
+router.post('/', authenticateToken, auditLog('uploads'), upload.array('files', 10), async (req, res, next) => {
   try {
     const files = (req.files || []) as Express.Multer.File[];
     if (files.length === 0) {

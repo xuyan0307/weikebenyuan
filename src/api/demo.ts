@@ -5,7 +5,6 @@ import {
   ORDERS,
   SALARY_RECORDS,
   THERAPISTS,
-  TODO_ITEMS,
   USERS,
 } from '../data/mockData';
 
@@ -94,6 +93,26 @@ function nextId(prefix: string) {
   return `${prefix}${Date.now().toString().slice(-8)}`;
 }
 
+function localDateKey(date = new Date()) {
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0'),
+  ].join('-');
+}
+
+function latestOrderFollowDate(order: any) {
+  const records = Array.isArray(order?.servicePeople?.followRecords)
+    ? order.servicePeople.followRecords
+    : [];
+  return [...records]
+    .sort((left: any, right: any) =>
+      String(right?.createdAt || right?.date || '').localeCompare(
+        String(left?.createdAt || left?.date || '')
+      )
+    )[0]?.date || '';
+}
+
 function currentUser() {
   return {
     id: '1',
@@ -110,11 +129,29 @@ function filterCustomers(rows: any[], params?: Record<string, any>) {
   const keyword = String(params?.keyword || '').trim();
   const tag = String(params?.tag || '').trim();
   const followStatus = String(params?.followStatus || '').trim();
-  const includeOrdered = params?.includeOrdered === '1' || params?.includeOrdered === 'true';
+  const followTimes = String(params?.followTimes || '').split(',').map(value => value.trim()).filter(Boolean);
+  const includeOrdered = params?.includeOrdered === 1 || params?.includeOrdered === true || params?.includeOrdered === '1' || params?.includeOrdered === 'true';
+  const dueFollowUp = params?.dueFollowUp === 1 || params?.dueFollowUp === true || params?.dueFollowUp === '1' || params?.dueFollowUp === 'true';
+  const today = new Date().toISOString().slice(0, 10);
   return rows.filter(row => {
+    if (followTimes.includes('none')) return false;
     if (!includeOrdered && Number(row.totalOrders || 0) > 0) return false;
     if (tag && row.tag !== tag) return false;
     if (followStatus && row.followStatus !== followStatus) return false;
+    if (followTimes.length > 0 && followTimes.length < 3) {
+      if (!row.followDate) return false;
+      const followTime = row.followDate === today
+        ? 'today'
+        : row.followDate < today
+          ? 'overdue'
+          : 'pending';
+      if (!followTimes.includes(followTime)) return false;
+    }
+    if (dueFollowUp && (
+      !row.followDate
+      || row.followDate > today
+      || ['已完成', '已成交', '已预约', '已流失'].includes(row.followStatus)
+    )) return false;
     if (keyword) {
       const text = `${row.id} ${row.name} ${row.phone} ${row.wechat} ${row.area}`;
       if (!text.includes(keyword)) return false;
@@ -155,25 +192,34 @@ function filterTherapists(rows: any[], params?: Record<string, any>) {
 
 function makeStats(db: any) {
   const paidOrders = db.orders.filter((o: any) => o.payStatus === '已付款');
+  const experienceOrders = paidOrders.filter((o: any) => o.type === '体验卡');
+  const upgradeOrders = paidOrders.filter((o: any) => o.type === '套餐');
+  const packagesByCustomer = new Map<string, any[]>();
+  upgradeOrders.forEach((order: any) => {
+    const key = String(order.customerId || order.customerName || '');
+    packagesByCustomer.set(key, [...(packagesByCustomer.get(key) || []), order]);
+  });
+  const secondUpgrades = Array.from(packagesByCustomer.values()).flatMap(orders =>
+    orders.sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt))).slice(1)
+  );
   return {
-    total_customers: db.customers.length,
-    pending_follow: db.customers.filter((c: any) => c.followStatus === '待跟进').length,
-    following: db.customers.filter((c: any) => c.followStatus === '跟进中').length,
-    dealt: db.customers.filter((c: any) => c.followStatus === '已成交').length,
-    total_orders: db.orders.length,
-    pending_pay: db.orders.filter((o: any) => o.payStatus === '待付款').length,
-    paid_orders: paidOrders.length,
-    pending_contract: db.orders.filter((o: any) => !o.contractSigned).length,
-    pending_appt: db.appointments.filter((a: any) => a.status === '待确认').length,
-    today_appt: db.appointments.filter((a: any) => a.status === '已确认').length,
-    active_therapists: db.therapists.filter((t: any) => t.status === '在职').length,
+    period: 'month',
+    new_customers: db.customers.length,
     total_revenue: paidOrders.reduce((sum: number, o: any) => sum + Number(o.amount || 0), 0),
+    experience_revenue: experienceOrders.reduce((sum: number, o: any) => sum + Number(o.amount || 0), 0),
+    upgrade_revenue: upgradeOrders.reduce((sum: number, o: any) => sum + Number(o.amount || 0), 0),
+    experience_cards: experienceOrders.length,
+    upgrades: upgradeOrders.length,
+    second_upgrade_count: secondUpgrades.length,
+    second_upgrade_revenue: secondUpgrades.reduce((sum: number, o: any) => sum + Number(o.amount || 0), 0),
   };
 }
 
 function makeContracts(db: any, params?: Record<string, any>) {
-  const signed = String(params?.signed || '').trim();
-  const rows = db.orders.map((o: any) => ({
+  const signed = String(params?.signed ?? '').trim();
+  const rows = db.orders
+    .filter((o: any) => o.type === '套餐' && o.payStatus === '已付款')
+    .map((o: any) => ({
     id: o.id,
     orderId: o.id,
     customerId: o.customerId,
@@ -184,8 +230,8 @@ function makeContracts(db: any, params?: Record<string, any>) {
     contractSigned: Boolean(o.contractSigned),
     createdAt: o.createdAt,
   })).filter((row: any) => {
-    if (signed === 'true') return row.contractSigned;
-    if (signed === 'false') return !row.contractSigned;
+    if (signed === 'true' || signed === '1') return row.contractSigned;
+    if (signed === 'false' || signed === '0') return !row.contractSigned;
     return true;
   });
   return rows;
@@ -245,7 +291,58 @@ export async function handleDemoRequest<T>(
       upgrades: row.upgrades,
     })) as T;
   }
-  if (path === '/dashboard/todos') return clone(TODO_ITEMS) as T;
+  if (path === '/dashboard/todos') {
+    const today = localDateKey();
+    const orderCustomerIds = new Set(
+      db.orders
+        .filter((item: any) => latestOrderFollowDate(item) === today)
+        .map((item: any) => String(item.customerId || item.customerCode || ''))
+        .filter(Boolean)
+    );
+    return [
+      {
+        id: 1,
+        type: 'new-customer-followup',
+        label: '新客待跟进通知',
+        count: db.customers.filter((item: any) =>
+          ['D1', 'D2', 'D3'].includes(item.tag)
+          && Number(item.totalOrders || 0) === 0
+          && item.followDate === today
+        ).length,
+        color: '#1E88E5',
+        urgency: 'high',
+      },
+      {
+        id: 2,
+        type: 'order-customer-followup',
+        label: '订单客户待跟进通知',
+        count: orderCustomerIds.size,
+        color: '#FF7043',
+        urgency: 'high',
+      },
+      {
+        id: 3,
+        type: 'appointment-notification',
+        label: '预约通知',
+        count: db.appointments.filter((item: any) =>
+          item.notifyStatus === '需通知'
+          && !['已完成', '取消', '已取消'].includes(item.status)
+        ).length,
+        color: '#FFC107',
+        urgency: 'high',
+      },
+      {
+        id: 4,
+        type: 'contract-pending-signature',
+        label: '合同待回签',
+        count: db.orders.filter((item: any) =>
+          item.type === '套餐' && !item.contractSigned
+        ).length,
+        color: '#E53935',
+        urgency: 'high',
+      },
+    ] as T;
+  }
   if (path === '/dashboard/recent') {
     return {
       customers: db.customers.slice(0, 5),
@@ -256,6 +353,11 @@ export async function handleDemoRequest<T>(
 
   if (parts[0] === 'customers') {
     if (method === 'GET' && parts.length === 1) return pageRows(filterCustomers(db.customers, params), params) as T;
+    if (method === 'GET' && parts[1] === 'filter-options') {
+      return {
+        advisors: Array.from(new Set(db.customers.map((customer: any) => customer.advisor).filter(Boolean))),
+      } as T;
+    }
     if (method === 'GET') return db.customers.find((c: any) => c.id === parts[1] || c._id === parts[1]) as T;
     if (method === 'POST') {
       const item = { id: nextId('10'), totalOrders: 0, lastFollow: '', ...body };
@@ -335,6 +437,22 @@ export async function handleDemoRequest<T>(
       log(db, method, path);
       saveDb(db);
       return { id: item.id, no: item.id } as T;
+    }
+    if (method === 'PUT') {
+      upsertById(db.appointments, parts[1], body);
+      log(db, method, path);
+      saveDb(db);
+      return { message: '预约已更新' } as T;
+    }
+    if (method === 'PATCH' && parts[2] === 'notification-status') {
+      const item = db.appointments.find((a: any) => a.id === parts[1] || a._id === parts[1]);
+      if (item) {
+        item.notifyStatus = body.status;
+        item.notifyManualStatus = body.status;
+      }
+      log(db, method, path);
+      saveDb(db);
+      return { message: '通知状态已更新', status: body.status } as T;
     }
     if (method === 'PATCH') {
       const item = db.appointments.find((a: any) => a.id === parts[1]);

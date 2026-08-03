@@ -1,55 +1,45 @@
 import { Router } from 'express';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { getDb } from '../config/database';
+import { calculatePercentage } from '../services/dashboardMetrics';
+import {
+  buildDashboardTodoQueries,
+  mapDashboardTodos,
+} from '../services/dashboardTodoService';
+import {
+  dashboardAppointmentScope,
+  dashboardCustomerScope,
+  dashboardOrderScope,
+} from '../services/dashboardDataScope';
 
 const router: Router = Router();
 
-function canViewAll(req: AuthRequest): boolean {
-  return req.userRole === 'superadmin' || req.userRole === 'admin';
+function dashboardActor(req: AuthRequest) {
+  return { role: req.userRole, userId: req.userId };
 }
 
 function customerScope(req: AuthRequest, alias = 'c') {
-  return canViewAll(req) ? '1=1' : `${alias}.advisor_id = ?`;
+  return dashboardCustomerScope(dashboardActor(req), alias).where;
 }
 
 function orderScope(req: AuthRequest, alias = 'o') {
-  return canViewAll(req)
-    ? '1=1'
-    : `JSON_UNQUOTE(JSON_EXTRACT(${alias}.customer_snapshot, '$.advisorId')) = ?`;
+  return dashboardOrderScope(dashboardActor(req), alias).where;
 }
 
 function customerScopeParams(req: AuthRequest) {
-  return canViewAll(req) ? [] : [req.userId || ''];
+  return dashboardCustomerScope(dashboardActor(req)).params;
 }
 
 function orderScopeParams(req: AuthRequest) {
-  return canViewAll(req) ? [] : [req.userId || ''];
+  return dashboardOrderScope(dashboardActor(req)).params;
 }
 
 function appointmentScope(req: AuthRequest, alias = 'a') {
-  if (canViewAll(req)) return '1=1';
-  return `(
-    ${alias}.customer_id IN (SELECT c.id FROM customers c WHERE c.advisor_id = ?)
-    OR ${alias}.customer_id IN (
-      SELECT o.customer_id FROM orders o
-      WHERE JSON_UNQUOTE(JSON_EXTRACT(o.customer_snapshot, '$.advisorId')) = ?
-    )
-  )`;
+  return dashboardAppointmentScope(dashboardActor(req), alias).where;
 }
 
 function appointmentScopeParams(req: AuthRequest) {
-  return canViewAll(req) ? [] : [req.userId || '', req.userId || ''];
-}
-
-function serviceScope(req: AuthRequest, alias = 's') {
-  if (canViewAll(req)) return '1=1';
-  return `(
-    ${alias}.customer_id IN (SELECT c.id FROM customers c WHERE c.advisor_id = ?)
-    OR ${alias}.customer_id IN (
-      SELECT o.customer_id FROM orders o
-      WHERE JSON_UNQUOTE(JSON_EXTRACT(o.customer_snapshot, '$.advisorId')) = ?
-    )
-  )`;
+  return dashboardAppointmentScope(dashboardActor(req)).params;
 }
 
 function lastMonths(count: number) {
@@ -60,73 +50,153 @@ function lastMonths(count: number) {
   });
 }
 
+type DashboardPeriod = 'today' | 'week' | 'month' | 'year' | 'all';
+
+function dashboardPeriod(value: unknown): DashboardPeriod {
+  const period = String(value || 'month');
+  return ['today', 'week', 'month', 'year', 'all'].includes(period)
+    ? period as DashboardPeriod
+    : 'month';
+}
+
+function periodSql(period: DashboardPeriod, expression: string) {
+  if (period === 'today') return `DATE(${expression}) = CURDATE()`;
+  if (period === 'week') return `YEARWEEK(${expression}, 1) = YEARWEEK(CURDATE(), 1)`;
+  if (period === 'month') return `DATE_FORMAT(${expression}, '%Y-%m') = DATE_FORMAT(CURDATE(), '%Y-%m')`;
+  if (period === 'year') return `YEAR(${expression}) = YEAR(CURDATE())`;
+  return '1=1';
+}
+
+function dateQuery(value: unknown) {
+  const date = String(value || '').trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : '';
+}
+
+function dashboardDateRange(
+  period: DashboardPeriod,
+  expression: string,
+  startDate: string,
+  endDate: string
+) {
+  if (!startDate && !endDate) return { sql: periodSql(period, expression), params: [] as string[] };
+  const conditions: string[] = [];
+  const params: string[] = [];
+  if (startDate) {
+    conditions.push(`DATE(${expression}) >= ?`);
+    params.push(startDate);
+  }
+  if (endDate) {
+    conditions.push(`DATE(${expression}) <= ?`);
+    params.push(endDate);
+  }
+  return { sql: conditions.join(' AND ') || '1=1', params };
+}
+
+function monthsInRange(startDate: string, endDate: string) {
+  const fallback = lastMonths(6);
+  if (!startDate || !endDate) return fallback;
+  const start = new Date(`${startDate}T00:00:00`);
+  const end = new Date(`${endDate}T00:00:00`);
+  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || start > end) return fallback;
+  const months: string[] = [];
+  const cursor = new Date(start.getFullYear(), start.getMonth(), 1);
+  const last = new Date(end.getFullYear(), end.getMonth(), 1);
+  while (cursor <= last && months.length < 60) {
+    months.push(`${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`);
+    cursor.setMonth(cursor.getMonth() + 1);
+  }
+  return months.length ? months : fallback;
+}
+
 router.get('/stats', authenticateToken, async (req: AuthRequest, res, next) => {
   try {
     const db = getDb();
+    const period = dashboardPeriod(req.query.period);
+    const startDate = dateQuery(req.query.startDate);
+    const endDate = dateQuery(req.query.endDate);
     const customerWhere = customerScope(req);
     const orderWhere = orderScope(req);
-    const appointmentWhere = appointmentScope(req);
-    const serviceWhere = serviceScope(req);
+    const customerPeriod = dashboardDateRange(period, 'c.acquired_at', startDate, endDate);
+    const snapshotPeriod = dashboardDateRange(
+      period,
+      "STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(o.customer_snapshot, '$.acquiredAt')), '%Y-%m-%d')",
+      startDate,
+      endDate
+    );
+    const orderPeriod = dashboardDateRange(period, 'COALESCE(o.paid_at, o.purchase_date, o.created_at)', startDate, endDate);
+    const rankedPeriod = dashboardDateRange(period, 'COALESCE(ranked.paid_at, ranked.purchase_date, ranked.created_at)', startDate, endDate);
 
-    const [[customerRows], [orderRows], [appointmentRows], [serviceRows], [therapistRows]] = await Promise.all([
+    const [[customerRows], [snapshotCustomerRows], [orderRows], [packageUpgradeRows]] = await Promise.all([
       db.query(
-        `SELECT COUNT(*) AS pool_customers,
-                SUM(follow_status='待跟进') AS pending_follow,
-                SUM(follow_status='跟进中') AS following,
-                SUM(follow_status='已成交') AS dealt
-         FROM customers c WHERE ${customerWhere}`,
-        customerScopeParams(req)
+        `SELECT COUNT(*) AS new_customers
+         FROM customers c
+         WHERE ${customerWhere} AND ${customerPeriod.sql}`,
+        [...customerScopeParams(req), ...customerPeriod.params]
       ),
       db.query(
-        `SELECT COUNT(DISTINCT customer_id) AS ordered_customers,
-                COUNT(*) AS total_orders,
-                SUM(pay_status='待付款') AS pending_pay,
-                SUM(pay_status='已付款') AS paid_orders,
-                SUM(contract_signed=0) AS pending_contract,
-                COALESCE(SUM(CASE WHEN pay_status='已付款' THEN amount ELSE 0 END), 0) AS total_revenue
-         FROM orders o WHERE ${orderWhere}`,
-        orderScopeParams(req)
+        `SELECT COUNT(DISTINCT o.customer_id) AS new_customers
+         FROM orders o
+         WHERE ${orderWhere}
+           AND NOT EXISTS (SELECT 1 FROM customers current_customer WHERE current_customer.id=o.customer_id)
+           AND ${snapshotPeriod.sql}`,
+        [...orderScopeParams(req), ...snapshotPeriod.params]
       ),
       db.query(
-        `SELECT SUM(status='待确认') AS pending_appt,
-                SUM(date=CURDATE()) AS today_appt
-         FROM appointments a WHERE ${appointmentWhere}`,
-        appointmentScopeParams(req)
+        `SELECT
+           COALESCE(SUM(CASE WHEN o.pay_status='已付款' THEN o.amount ELSE 0 END), 0) AS total_revenue,
+           COALESCE(SUM(CASE WHEN o.pay_status='已付款' AND o.type='体验卡' THEN o.amount ELSE 0 END), 0) AS experience_revenue,
+           COALESCE(SUM(CASE WHEN o.pay_status='已付款' AND o.type='套餐' THEN o.amount ELSE 0 END), 0) AS upgrade_revenue,
+           SUM(o.pay_status='已付款' AND o.type='体验卡') AS experience_cards,
+           SUM(o.pay_status='已付款' AND o.type='套餐') AS upgrades
+         FROM orders o
+         WHERE ${orderWhere} AND ${orderPeriod.sql}`,
+        [...orderScopeParams(req), ...orderPeriod.params]
       ),
       db.query(
-        `SELECT COUNT(*) AS service_records FROM service_records s WHERE ${serviceWhere}`,
-        canViewAll(req) ? [] : [req.userId || '', req.userId || '']
+        `SELECT COALESCE(SUM(ranked.package_sequence=1), 0) AS first_upgrade_customers,
+                COALESCE(SUM(ranked.package_sequence=2), 0) AS second_upgrade_customers,
+                COALESCE(SUM(CASE WHEN ranked.package_sequence=2 THEN ranked.amount ELSE 0 END), 0) AS second_upgrade_revenue
+         FROM (
+           SELECT o.amount, o.paid_at, o.purchase_date, o.created_at,
+                  ROW_NUMBER() OVER (
+                    PARTITION BY o.customer_id
+                    ORDER BY COALESCE(o.paid_at, o.purchase_date, o.created_at), o.created_at, o.id
+                  ) AS package_sequence
+           FROM orders o
+           WHERE ${orderWhere} AND o.pay_status='已付款' AND o.type='套餐'
+         ) ranked
+         WHERE ranked.package_sequence IN (1, 2)
+           AND ${rankedPeriod.sql}`,
+        [...orderScopeParams(req), ...rankedPeriod.params]
       ),
-      canViewAll(req)
-        ? db.query("SELECT COUNT(*) AS active_therapists FROM therapists WHERE status='在职'")
-        : db.query(
-          `SELECT COUNT(DISTINCT a.therapist_id) AS active_therapists
-           FROM appointments a JOIN therapists t ON t.id=a.therapist_id
-           WHERE ${appointmentWhere} AND t.status='在职'`,
-          appointmentScopeParams(req)
-        ),
     ]);
 
     const customers = (customerRows as any[])[0] || {};
+    const snapshotCustomers = (snapshotCustomerRows as any[])[0] || {};
     const orders = (orderRows as any[])[0] || {};
-    const appointments = (appointmentRows as any[])[0] || {};
-    const services = (serviceRows as any[])[0] || {};
-    const therapists = (therapistRows as any[])[0] || {};
+    const packageUpgrades = (packageUpgradeRows as any[])[0] || {};
+    const newCustomers = Number(customers.new_customers || 0) + Number(snapshotCustomers.new_customers || 0);
+    const experienceCards = Number(orders.experience_cards || 0);
+    const firstUpgradeCustomers = Number(packageUpgrades.first_upgrade_customers || 0);
+    const secondUpgradeCustomers = Number(packageUpgrades.second_upgrade_customers || 0);
 
     res.json({
-      total_customers: Number(customers.pool_customers || 0) + Number(orders.ordered_customers || 0),
-      pending_follow: Number(customers.pending_follow || 0),
-      following: Number(customers.following || 0),
-      dealt: Number(customers.dealt || 0),
-      total_orders: Number(orders.total_orders || 0),
-      pending_pay: Number(orders.pending_pay || 0),
-      paid_orders: Number(orders.paid_orders || 0),
-      pending_contract: Number(orders.pending_contract || 0),
-      pending_appt: Number(appointments.pending_appt || 0),
-      today_appt: Number(appointments.today_appt || 0),
-      active_therapists: Number(therapists.active_therapists || 0),
-      service_records: Number(services.service_records || 0),
+      period,
+      start_date: startDate || null,
+      end_date: endDate || null,
+      new_customers: newCustomers,
       total_revenue: Number(orders.total_revenue || 0),
+      experience_revenue: Number(orders.experience_revenue || 0),
+      upgrade_revenue: Number(orders.upgrade_revenue || 0),
+      experience_cards: experienceCards,
+      purchase_rate: calculatePercentage(experienceCards, newCustomers),
+      upgrades: Number(orders.upgrades || 0),
+      first_upgrade_customers: firstUpgradeCustomers,
+      upgrade_rate: calculatePercentage(firstUpgradeCustomers, experienceCards),
+      second_upgrade_count: secondUpgradeCustomers,
+      second_upgrade_customers: secondUpgradeCustomers,
+      second_upgrade_rate: calculatePercentage(secondUpgradeCustomers, firstUpgradeCustomers),
+      second_upgrade_revenue: Number(packageUpgrades.second_upgrade_revenue || 0),
     });
   } catch (err) { next(err); }
 });
@@ -179,42 +249,47 @@ router.get('/todos', authenticateToken, async (req: AuthRequest, res, next) => {
     const customerWhere = customerScope(req);
     const orderWhere = orderScope(req);
     const appointmentWhere = appointmentScope(req);
-    const [[contractRows], [customerRows], [serviceRows], [cancelRows]] = await Promise.all([
+    const queries = buildDashboardTodoQueries({
+      customerWhere,
+      orderWhere,
+      appointmentWhere,
+    });
+    const [[customerRows], [orderRows], [appointmentRows], [contractRows]] = await Promise.all([
       db.query(
-        `SELECT COUNT(*) AS cnt FROM orders o
-         WHERE ${orderWhere} AND o.contract_signed=0 AND o.pay_status='已付款'`,
-        orderScopeParams(req)
-      ),
-      db.query(
-        `SELECT COUNT(*) AS cnt FROM customers c
-         WHERE ${customerWhere} AND c.follow_status='待跟进'`,
+        queries.newCustomers,
         customerScopeParams(req)
       ),
       db.query(
-        `SELECT COUNT(*) AS cnt FROM orders o
-         WHERE ${orderWhere} AND o.pay_status='已付款' AND o.used_times < o.total_times`,
+        queries.orderCustomers,
         orderScopeParams(req)
       ),
       db.query(
-        `SELECT COUNT(*) AS cnt FROM appointments a
-         WHERE ${appointmentWhere} AND a.status='待确认'`,
+        queries.appointments,
         appointmentScopeParams(req)
       ),
+      db.query(
+        queries.contracts,
+        orderScopeParams(req)
+      ),
     ]);
-    res.json([
-      { id: 1, type: 'contract', label: '合同未回签', count: Number((contractRows as any[])[0]?.cnt || 0), color: '#F44336', urgency: 'high' },
-      { id: 2, type: 'appointment', label: '待预约客户', count: Number((customerRows as any[])[0]?.cnt || 0), color: '#FFC107', urgency: 'medium' },
-      { id: 3, type: 'service', label: '待服务订单', count: Number((serviceRows as any[])[0]?.cnt || 0), color: '#1E88E5', urgency: 'medium' },
-      { id: 4, type: 'cancel', label: '待确认取消', count: Number((cancelRows as any[])[0]?.cnt || 0), color: '#FF7043', urgency: 'high' },
-    ]);
+    res.json(mapDashboardTodos({
+      newCustomerCount: Number((customerRows as any[])[0]?.cnt || 0),
+      orderCustomerCount: Number((orderRows as any[])[0]?.cnt || 0),
+      appointmentCount: Number((appointmentRows as any[])[0]?.cnt || 0),
+      contractCount: Number((contractRows as any[])[0]?.cnt || 0),
+    }));
   } catch (err) { next(err); }
 });
 
 router.get('/chart', authenticateToken, async (req: AuthRequest, res, next) => {
   try {
     const db = getDb();
-    const months = lastMonths(6);
-    const firstMonth = `${months[0]}-01`;
+    const startDate = dateQuery(req.query.startDate);
+    const endDate = dateQuery(req.query.endDate);
+    const months = monthsInRange(startDate, endDate);
+    const firstDate = startDate || `${months[0]}-01`;
+    const lastDate = endDate || '';
+    const rangeEndSql = lastDate ? ' AND DATE(%EXPR%) <= ?' : '';
     const orderWhere = orderScope(req);
     const customerWhere = customerScope(req);
 
@@ -224,24 +299,25 @@ router.get('/chart', authenticateToken, async (req: AuthRequest, res, next) => {
                 COALESCE(SUM(CASE WHEN o.pay_status='已付款' THEN o.amount ELSE 0 END), 0) AS revenue,
                 SUM(o.type='体验卡') AS experience_cards,
                 SUM(o.is_upgrade=1) AS upgrades
-         FROM orders o WHERE ${orderWhere} AND o.created_at >= ?
+         FROM orders o WHERE ${orderWhere} AND o.created_at >= ?${rangeEndSql.replace('%EXPR%', 'o.created_at')}
          GROUP BY DATE_FORMAT(o.created_at, '%Y-%m')`,
-        [...orderScopeParams(req), firstMonth]
+        [...orderScopeParams(req), firstDate, ...(lastDate ? [lastDate] : [])]
       ),
       db.query(
         `SELECT DATE_FORMAT(c.acquired_at, '%Y-%m') AS month, COUNT(*) AS new_customers
-         FROM customers c WHERE ${customerWhere} AND c.acquired_at >= ?
+         FROM customers c WHERE ${customerWhere} AND c.acquired_at >= ?${rangeEndSql.replace('%EXPR%', 'c.acquired_at')}
          GROUP BY DATE_FORMAT(c.acquired_at, '%Y-%m')`,
-        [...customerScopeParams(req), firstMonth]
+        [...customerScopeParams(req), firstDate, ...(lastDate ? [lastDate] : [])]
       ),
       db.query(
         `SELECT DATE_FORMAT(STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(o.customer_snapshot, '$.acquiredAt')), '%Y-%m-%d'), '%Y-%m') AS month,
                 COUNT(DISTINCT o.customer_id) AS new_customers
          FROM orders o
          WHERE ${orderWhere}
-           AND STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(o.customer_snapshot, '$.acquiredAt')), '%Y-%m-%d') >= ?
+           AND NOT EXISTS (SELECT 1 FROM customers current_customer WHERE current_customer.id=o.customer_id)
+           AND STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(o.customer_snapshot, '$.acquiredAt')), '%Y-%m-%d') >= ?${lastDate ? " AND DATE(STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(o.customer_snapshot, '$.acquiredAt')), '%Y-%m-%d')) <= ?" : ''}
          GROUP BY DATE_FORMAT(STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(o.customer_snapshot, '$.acquiredAt')), '%Y-%m-%d'), '%Y-%m')`,
-        [...orderScopeParams(req), firstMonth]
+        [...orderScopeParams(req), firstDate, ...(lastDate ? [lastDate] : [])]
       ),
     ]);
 

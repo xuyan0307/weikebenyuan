@@ -2,10 +2,13 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   SearchIcon, FilterIcon, UsersIcon, CreditCardIcon, TrendingUpIcon,
   CoinsIcon, TargetIcon, ChevronDownIcon, CheckIcon, XIcon,
-  ChevronLeftIcon, ChevronRightIcon,
+  ChevronLeftIcon, ChevronRightIcon, FileSignatureIcon,
 } from 'lucide-react';
-import { useCustomers, useOrders } from '../api/hooks';
+import { useContractMutations, useContracts, useCustomers, useOrders, usePlatformSetting, usePlatformSettingMutation } from '../api/hooks';
 import { useApp } from '../hooks/useApp';
+import { DateRangeFilter } from './ui/date-range-filter';
+import { GLOBAL_DATE_RANGE_QUICK_OPTIONS, formatLocalDate, quickDateRange, type DateRangeValue } from '../utils/dateRange';
+import { useGlobalDateRange } from '../utils/useGlobalDateRange';
 
 type TimeDimension = 'day' | 'week' | 'month' | 'year';
 
@@ -31,12 +34,7 @@ const DIMENSION_LABEL: Record<TimeDimension, string> = {
   year: '今年',
 };
 
-const STORAGE_PREFIX = 'chankang.report.monthlyTrialTarget.';
 const PAGE_SIZE = 10;
-
-function advisorTargetStorageKey(month: string, advisor: string) {
-  return `${STORAGE_PREFIX}${month}.${encodeURIComponent(advisor)}`;
-}
 
 function todayStr() {
   const d = new Date();
@@ -236,17 +234,124 @@ function CheckBox({ checked }: { checked: boolean }) {
 }
 
 export default function ContractListPage() {
+  const [pendingOnly, setPendingOnly] = useState(() => {
+    try {
+      const raw = sessionStorage.getItem('weikebenyuan:dashboard-filter');
+      const filter = raw ? JSON.parse(raw) : null;
+      if (filter?.pendingContracts) {
+        sessionStorage.removeItem('weikebenyuan:dashboard-filter');
+        return true;
+      }
+    } catch {
+      // Ignore stale navigation state.
+    }
+    return false;
+  });
+
+  return pendingOnly
+    ? <PendingContractList onShowReport={() => setPendingOnly(false)} />
+    : <OrderReportPage />;
+}
+
+function PendingContractList({ onShowReport }: { onShowReport: () => void }) {
+  const [page, setPage] = useState(1);
+  const contractsQuery = useContracts({ page, pageSize: 20, signed: 0 });
+  const { sign } = useContractMutations();
+  const contracts = contractsQuery.data?.data ?? [];
+  const total = contractsQuery.data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / 20));
+
+  return (
+    <div data-cmp="PendingContractList" className="flex flex-col gap-4">
+      <div className="flex items-center justify-between rounded-xl bg-card p-5 shadow-custom">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-red-50 text-red-500">
+            <FileSignatureIcon size={20} />
+          </div>
+          <div>
+            <h2 className="font-semibold text-foreground">合同待回签客户</h2>
+            <p className="text-sm" style={{ color: 'var(--muted-foreground)' }}>
+              共 {total} 份已付款套餐合同未回签
+            </p>
+          </div>
+        </div>
+        <button className="rounded-lg border px-3 py-2 text-sm hover:bg-muted" onClick={onShowReport}>
+          返回数据报表
+        </button>
+      </div>
+
+      <div className="overflow-hidden rounded-xl bg-card shadow-custom">
+        <div className="overflow-x-auto">
+          <table className="data-table w-full">
+            <thead>
+              <tr>
+                <th>客户</th>
+                <th>订单号</th>
+                <th>订单类型</th>
+                <th>套餐金额</th>
+                <th>付款状态</th>
+                <th>下单日期</th>
+                <th>合同状态</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {contracts.map(contract => (
+                <tr key={contract.id}>
+                  <td className="font-medium">{contract.customerName || '—'}</td>
+                  <td>{contract.orderId}</td>
+                  <td>{contract.type}</td>
+                  <td className="font-semibold text-green-600">{money(contract.amount)}</td>
+                  <td><span className="badge badge-success">{contract.payStatus}</span></td>
+                  <td>{contract.createdAt || '—'}</td>
+                  <td><span className="badge badge-danger">待回签</span></td>
+                  <td>
+                    <button
+                      className="rounded-lg bg-blue-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-600"
+                      onClick={() => { void sign({ id: contract.id, signed: true }); }}
+                    >
+                      标记已回签
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {!contractsQuery.isLoading && contracts.length === 0 && (
+                <tr><td colSpan={8} className="py-12 text-center text-sm text-gray-500">暂无待回签合同</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+        <div className="flex items-center justify-between border-t px-4 py-3">
+          <span className="text-sm text-gray-500">共 {total} 条</span>
+          <div className="flex items-center gap-2">
+            <button className="rounded border px-3 py-1 text-sm disabled:opacity-40" disabled={page <= 1} onClick={() => setPage(value => value - 1)}>上一页</button>
+            <span className="text-sm">{page} / {totalPages}</span>
+            <button className="rounded border px-3 py-1 text-sm disabled:opacity-40" disabled={page >= totalPages} onClick={() => setPage(value => value + 1)}>下一页</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function OrderReportPage() {
   const { currentUser } = useApp();
   const [search, setSearch] = useState('');
   const [advisorFilter, setAdvisorFilter] = useState<string[]>([]);
   const [dimension, setDimension] = useState<TimeDimension>('month');
   const [periodValue, setPeriodValue] = useState(monthStr());
+  const [customRangeActive, setCustomRangeActive] = useState(true);
+  const [customDateRange, setCustomDateRange] = useGlobalDateRange('month');
   const [page, setPage] = useState(1);
   const [advisorTargets, setAdvisorTargets] = useState<Record<string, string>>({});
   const canEditTargets = currentUser.role === 'admin' || currentUser.role === 'superadmin';
 
+  const presetRange = periodRange(dimension, periodValue);
+  const activeDateRange = customRangeActive
+    ? customDateRange
+    : { start: formatLocalDate(presetRange.start), end: formatLocalDate(presetRange.end) };
   const customersQ = useCustomers({ page: 1, pageSize: 10000, includeOrdered: 1 });
-  const ordersQ = useOrders({ page: 1, pageSize: 10000 });
+  const ordersQ = useOrders({ page: 1, pageSize: 10000, from: activeDateRange.start, to: activeDateRange.end });
   const customers: any[] = customersQ.data?.data ?? [];
   const orders: any[] = ordersQ.data?.data ?? [];
 
@@ -257,8 +362,13 @@ export default function ContractListPage() {
     if (dimension === 'year') setPeriodValue(String(new Date().getFullYear()));
   }, [dimension]);
 
-  const { start, end } = periodRange(dimension, periodValue);
+  const start = parseDate(activeDateRange.start) ?? presetRange.start;
+  const end = parseDate(activeDateRange.end) ?? presetRange.end;
+  end.setHours(23, 59, 59, 999);
   const selectedMonth = dimension === 'month' ? periodValue : monthStr(start);
+  const targetSettingKey = `advisor-targets:${selectedMonth}`;
+  const targetSetting = usePlatformSetting<Record<string, string>>(targetSettingKey);
+  const saveTargetSetting = usePlatformSettingMutation<Record<string, string>>(targetSettingKey);
 
   const customerById = useMemo(() => {
     const map = new Map<string, any>();
@@ -279,10 +389,10 @@ export default function ContractListPage() {
   useEffect(() => {
     const next: Record<string, string> = {};
     advisorOptions.forEach(opt => {
-      next[opt.value] = localStorage.getItem(advisorTargetStorageKey(selectedMonth, opt.value)) || '0';
+      next[opt.value] = targetSetting.data?.[opt.value] || '0';
     });
     setAdvisorTargets(next);
-  }, [selectedMonth, advisorOptionsKey]);
+  }, [selectedMonth, advisorOptionsKey, targetSetting.data]);
 
   function advisorTarget(advisor: string) {
     return Math.max(0, Number(advisorTargets[advisor]) || 0);
@@ -291,8 +401,11 @@ export default function ContractListPage() {
   function saveAdvisorTarget(advisor: string, value: string) {
     if (!canEditTargets) return;
     const normalized = String(Math.max(0, Number(value) || 0));
-    setAdvisorTargets(prev => ({ ...prev, [advisor]: normalized }));
-    localStorage.setItem(advisorTargetStorageKey(selectedMonth, advisor), normalized);
+    setAdvisorTargets(prev => {
+      const next = { ...prev, [advisor]: normalized };
+      void saveTargetSetting(next);
+      return next;
+    });
   }
 
   const reportRows = useMemo<AdvisorReportRow[]>(() => {
@@ -319,19 +432,21 @@ export default function ContractListPage() {
     advisorOptions.forEach(opt => ensure(opt.value));
 
     customers.forEach(c => {
+      if (!inRange(c.acquiredAt, start, end)) return;
       const advisor = normalizeAdvisor(c.advisor);
       const row = ensure(advisor);
       const customerId = String(c.id || c._id || c.customerCode || c.name);
-      if (inRange(c.acquiredAt, start, end)) row.customerIds.add(customerId);
+      row.customerIds.add(customerId);
     });
 
     orders.forEach(o => {
-      if (!inRange(o.createdAt || o.purchaseDate || o.paidAt, start, end)) return;
       const customer = customerById.get(o.customerId) || customerById.get(o.customerCode) || customerById.get(o.customerName);
-      const advisor = normalizeAdvisor(o.advisor || customer?.advisor);
+      const advisor = normalizeAdvisor(customer?.advisor || o.advisor);
       const row = ensure(advisor);
       const customerId = customer ? String(customer.id || customer._id || customer.customerCode || customer.name) : customerKeyOf(o);
+      row.customerIds.add(customerId);
 
+      if (!inRange(o.createdAt || o.purchaseDate || o.paidAt, start, end)) return;
       if (isTrialOrder(o)) {
         row.trialCardCount += 1;
         row.trialCustomerIds.add(customerId);
@@ -371,12 +486,12 @@ export default function ContractListPage() {
   }), { customers: 0, trials: 0, upgrades: 0, sales: 0, target: 0 });
   const target = summary.target;
   const completionRate = target > 0 ? summary.trials / target : 0;
-  const showMonthlyAssessment = dimension === 'month';
+  const showMonthlyAssessment = dimension === 'month' && !customRangeActive;
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
-  useEffect(() => { setPage(1); }, [search, advisorFilter, dimension, periodValue]);
+  useEffect(() => { setPage(1); }, [search, advisorFilter, dimension, periodValue, customRangeActive, customDateRange.start, customDateRange.end]);
 
   return (
     <div data-cmp="OrderReportPage" className="flex flex-col gap-4">
@@ -390,7 +505,17 @@ export default function ContractListPage() {
         )}
       </div>
 
-      <div className="bg-card rounded-xl p-4 shadow-custom flex flex-wrap items-center gap-3">
+      <div className="bg-card rounded-xl p-4 shadow-custom flex flex-nowrap items-center gap-3">
+        <DateRangeFilter
+          label="统计时间范围"
+          value={activeDateRange}
+          onChange={value => { setCustomDateRange(value); setCustomRangeActive(true); }}
+          quickOptions={GLOBAL_DATE_RANGE_QUICK_OPTIONS}
+          onQuickSelect={value => {
+            setDimension(value === 'today' ? 'day' : value === 'week' ? 'week' : value === 'year' ? 'year' : 'month');
+            setCustomRangeActive(true);
+          }}
+        />
         <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg" style={{ background: 'var(--muted)', minWidth: 230, height: 36 }}>
           <SearchIcon size={14} style={{ color: 'var(--muted-foreground)' }} />
           <input
@@ -404,7 +529,7 @@ export default function ContractListPage() {
 
         <MultiSelect label="客服" options={advisorOptions} selected={advisorFilter} onChange={setAdvisorFilter} />
 
-        <div className="flex items-center rounded-lg overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+        <div className="hidden" style={{ border: '1px solid var(--border)' }}>
           {(['day', 'week', 'month', 'year'] as TimeDimension[]).map(item => (
             <button
               key={item}
@@ -415,20 +540,20 @@ export default function ContractListPage() {
                 color: dimension === item ? '#fff' : 'var(--foreground)',
                 borderRight: item !== 'year' ? '1px solid var(--border)' : undefined,
               }}
-              onClick={() => setDimension(item)}
+              onClick={() => { setDimension(item); setCustomRangeActive(false); }}
             >
               {DIMENSION_LABEL[item]}
             </button>
           ))}
         </div>
 
-        {dimension === 'day' && <input type="date" className="text-sm rounded-lg px-3 outline-none" style={dateInputStyle} value={periodValue} max={todayStr()} onChange={e => setPeriodValue(e.target.value)} />}
-        {dimension === 'week' && <input type="week" className="text-sm rounded-lg px-3 outline-none" style={dateInputStyle} value={periodValue} max={weekStr()} onChange={e => setPeriodValue(e.target.value)} />}
-        {dimension === 'month' && <input type="month" className="text-sm rounded-lg px-3 outline-none" style={dateInputStyle} value={periodValue} max={monthStr()} onChange={e => setPeriodValue(e.target.value)} />}
+        {dimension === 'day' && <input type="date" className="hidden" style={dateInputStyle} value={periodValue} max={todayStr()} onChange={e => setPeriodValue(e.target.value)} />}
+        {dimension === 'week' && <input type="week" className="hidden" style={dateInputStyle} value={periodValue} max={weekStr()} onChange={e => setPeriodValue(e.target.value)} />}
+        {dimension === 'month' && <input type="month" className="hidden" style={dateInputStyle} value={periodValue} max={monthStr()} onChange={e => setPeriodValue(e.target.value)} />}
         {dimension === 'year' && (
           <input
             type="number"
-            className="text-sm rounded-lg px-3 outline-none"
+            className="hidden"
             style={{ ...dateInputStyle, width: 110 }}
             min={2020}
             max={new Date().getFullYear()}

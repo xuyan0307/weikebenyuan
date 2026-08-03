@@ -12,10 +12,16 @@ export interface OrderWriteBody {
   customerWechat?: string;
   customerPhone?: string;
   customerArea?: string;
+  customerSource?: string;
+  customerAcquiredAt?: string;
   customerAdvisor?: string;
   customerTag?: string;
+  customerFollowStatus?: string;
+  customerFollowDate?: string;
+  customerIntendedProduct?: string;
   customerSituation?: string;
   customerRemark?: string;
+  customerProfile?: unknown;
   source?: string;
   purchaseDate?: string;
   followStatus?: string;
@@ -77,6 +83,12 @@ interface OrderDbRow {
   used_times: number;
   total_times: number;
   purchase_date: string | Date | null;
+}
+
+interface OrderCustomerTagRow {
+  id: string;
+  customer_snapshot: unknown;
+  service_people: unknown;
 }
 
 export function normalizePayStatus(
@@ -180,15 +192,15 @@ async function resolveOrderCustomerId(
       body.customerWechat || null,
       customerPhone || '',
       body.customerArea || null,
-      body.source || '订单录入',
-      body.purchaseDate || new Date(),
+      body.customerSource || body.source || '订单录入',
+      body.customerAcquiredAt || body.purchaseDate || new Date(),
       body.customerTag || 'D1',
-      '待跟进',
+      body.customerFollowStatus || body.followStatus || '待跟进',
       advisorId,
-      JSON.stringify({ age: 0, deliveryDate: '', deliveryType: '未知', babyCount: 0, feedingType: '未知', followTask: '', followRecords: [] }),
+      JSON.stringify(body.customerProfile || { age: 0, deliveryDate: '', deliveryType: '未知', babyCount: 0, feedingType: '未知', followTask: '', followRecords: [] }),
       body.customerSituation || null,
-      body.serviceItems || null,
-      '订单创建时自动建档',
+      body.customerIntendedProduct || body.serviceItems || null,
+      body.customerRemark || '订单创建时自动建档',
     ]
   );
   return customerId;
@@ -238,16 +250,16 @@ async function getCustomerSnapshot(
     wechat: fallback.customerWechat || '',
     phone: fallback.customerPhone || '',
     area: fallback.customerArea || '',
-    source: fallback.source || '',
-    acquiredAt: fallback.purchaseDate || '',
+    source: fallback.customerSource || fallback.source || '',
+    acquiredAt: fallback.customerAcquiredAt || fallback.purchaseDate || '',
     tag: fallback.customerTag || '',
-    followStatus: fallback.followStatus || '待跟进',
-    followDate: fallback.followDate || '',
+    followStatus: fallback.customerFollowStatus || fallback.followStatus || '待跟进',
+    followDate: fallback.customerFollowDate || fallback.followDate || '',
     advisorId: '',
     advisor: fallback.customerAdvisor || fallback.advisor || '',
-    profile: {},
+    profile: fallback.customerProfile || {},
     situation: fallback.customerSituation || '',
-    intendedProduct: fallback.serviceItems || '',
+    intendedProduct: fallback.customerIntendedProduct || fallback.serviceItems || '',
     remark: fallback.customerRemark || '',
   };
 }
@@ -263,14 +275,70 @@ async function applyCustomerEdits(
   if (body.customerWechat !== undefined) next.wechat = body.customerWechat;
   if (body.customerPhone !== undefined) next.phone = body.customerPhone;
   if (body.customerArea !== undefined) next.area = body.customerArea;
-  if (body.source !== undefined) next.source = body.source;
+  if (body.customerSource !== undefined || body.source !== undefined) next.source = body.customerSource ?? body.source ?? '';
+  if (body.customerAcquiredAt !== undefined) next.acquiredAt = body.customerAcquiredAt;
   if (body.customerTag !== undefined) next.tag = body.customerTag;
+  if (body.customerFollowStatus !== undefined || body.followStatus !== undefined) {
+    next.followStatus = body.customerFollowStatus ?? body.followStatus ?? '';
+  }
+  if (body.customerFollowDate !== undefined || body.followDate !== undefined) {
+    next.followDate = body.customerFollowDate ?? body.followDate ?? '';
+  }
   if (advisor !== undefined) {
     next.advisor = advisor || '';
     next.advisorId = advisor ? await resolveAdvisorId(db, advisor) : '';
   }
-  if (body.serviceItems !== undefined) next.intendedProduct = body.serviceItems;
+  if (body.customerProfile !== undefined) next.profile = body.customerProfile;
+  if (body.customerSituation !== undefined) next.situation = body.customerSituation;
+  if (body.customerIntendedProduct !== undefined) next.intendedProduct = body.customerIntendedProduct;
+  else if (body.serviceItems !== undefined && !next.intendedProduct) next.intendedProduct = body.serviceItems;
+  if (body.customerRemark !== undefined) next.remark = body.customerRemark;
   return next;
+}
+
+export function applyCanonicalCustomerTag<T extends Record<string, unknown>>(
+  value: T,
+  tag: string
+): T {
+  return { ...value, tag };
+}
+
+async function synchronizeCustomerTag(
+  db: PoolConnection,
+  customerId: string,
+  customerCode: string,
+  tag: string
+) {
+  const [rows] = await db.execute(
+    `SELECT id, customer_snapshot, service_people
+     FROM orders
+     WHERE customer_id = ?
+        OR JSON_UNQUOTE(JSON_EXTRACT(customer_snapshot, '$.id')) = ?
+        OR JSON_UNQUOTE(JSON_EXTRACT(customer_snapshot, '$.customerCode')) = ?
+     FOR UPDATE`,
+    [customerId, customerId, customerCode]
+  );
+
+  for (const row of rows as OrderCustomerTagRow[]) {
+    const snapshot = applyCanonicalCustomerTag(
+      parseJson<Record<string, unknown>>(row.customer_snapshot, {}),
+      tag
+    );
+    const servicePeople = parseJson<Record<string, unknown>>(row.service_people, {});
+    await db.execute(
+      'UPDATE orders SET customer_snapshot = ?, service_people = ? WHERE id = ?',
+      [
+        JSON.stringify(snapshot),
+        jsonOrNull({ ...servicePeople, upgradeCustomerTag: tag }),
+        row.id,
+      ]
+    );
+  }
+
+  await db.execute(
+    'UPDATE customers SET tag = ? WHERE id = ? OR customer_code = ?',
+    [tag, customerId, customerCode]
+  );
 }
 
 export async function createOrder(body: OrderWriteBody) {
@@ -287,7 +355,8 @@ export async function createOrder(body: OrderWriteBody) {
     });
 
     const customerId = await resolveOrderCustomerId(connection, body, leadCustomer?.id);
-    const customerSnapshot = await getCustomerSnapshot(connection, customerId, body);
+    const sourceSnapshot = await getCustomerSnapshot(connection, customerId, body);
+    const customerSnapshot = await applyCustomerEdits(connection, sourceSnapshot, body);
     await assertCustomerHasNoOtherOrder(connection, {
       requestedId,
       customerId,
@@ -312,6 +381,14 @@ export async function createOrder(body: OrderWriteBody) {
         jsonOrNull(body.servicePhotoRecords || []),
       ]
     );
+    if (body.customerTag !== undefined) {
+      await synchronizeCustomerTag(
+        connection,
+        customerId,
+        customerSnapshot.customerCode,
+        body.customerTag
+      );
+    }
     if (customerId) await connection.execute('DELETE FROM customers WHERE id = ?', [customerId]);
     await connection.commit();
     return { id, orderNo };
@@ -408,6 +485,14 @@ export async function updateOrder(orderId: string, body: OrderWriteBody, actor: 
       ]
     );
 
+    if (body.customerTag !== undefined) {
+      await synchronizeCustomerTag(
+        connection,
+        customerId,
+        customerSnapshot.customerCode,
+        body.customerTag
+      );
+    }
     if (customerId && customerId !== existing.customer_id) {
       await connection.execute('DELETE FROM customers WHERE id = ?', [customerId]);
     }

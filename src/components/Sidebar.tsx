@@ -48,7 +48,7 @@ export default function Sidebar() {
   const { currentUser } = useApp();
   const [expandedKeys, setExpandedKeys] = useState<string[]>(['dashboard']);
 
-  const visibleNavItems = NAV_ITEMS.filter(item => hasPermission(currentUser.role, item.module));
+  const visibleNavItems = NAV_ITEMS.filter(item => hasPermission(currentUser?.role || '', item.module));
 
   function toggleExpand(key: string) {
     setExpandedKeys(prev =>

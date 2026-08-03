@@ -6,6 +6,7 @@ import { getDb } from '../config/database';
 import { ossFileUrl } from '../utils/oss';
 import { formatDateOnly, parseJson } from '../utils/serialization';
 import { createOrder, deleteOrder, normalizePayStatus, updateOrder } from '../services/orderService';
+import { dashboardOrderScope } from '../services/dashboardDataScope';
 
 const router: Router = Router();
 
@@ -93,19 +94,29 @@ function mapRow(r: RowDataPacket) {
   };
 }
 
-router.get('/', authenticateToken, async (req, res, next) => {
+router.get('/', authenticateToken, async (req: AuthRequest, res, next) => {
   try {
     const db = getDb();
     const page = Math.max(1, parseInt(req.query.page as string) || 1);
     const pageSize = Math.max(1, parseInt(req.query.pageSize as string) || 10);
     const payStatus = (req.query.payStatus as string) || '';
     const customerId = (req.query.customerId as string) || '';
+    const from = (req.query.from as string) || '';
+    const to = (req.query.to as string) || '';
     const offset = (page - 1) * pageSize;
 
     const where: string[] = [];
     const params: unknown[] = [];
+    const dataScope = dashboardOrderScope(
+      { role: req.userRole, userId: req.userId },
+      'o'
+    );
+    where.push(dataScope.where);
+    params.push(...dataScope.params);
     if (payStatus) { where.push('o.pay_status = ?'); params.push(payStatus); }
     if (customerId) { where.push('(o.customer_id = ? OR o.customer_id IN (SELECT id FROM customers WHERE customer_code = ?))'); params.push(customerId, customerId); }
+    if (from) { where.push('DATE(COALESCE(o.purchase_date, o.created_at)) >= ?'); params.push(from); }
+    if (to) { where.push('DATE(COALESCE(o.purchase_date, o.created_at)) <= ?'); params.push(to); }
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
     const [countRows] = await db.query(`SELECT COUNT(*) AS cnt FROM orders o ${whereSql}`, params);
@@ -146,9 +157,13 @@ router.post('/', authenticateToken, auditLog('orders'), async (req: AuthRequest,
   } catch (err) { next(err); }
 });
 
-router.get('/:id', authenticateToken, async (req, res, next) => {
+router.get('/:id', authenticateToken, async (req: AuthRequest, res, next) => {
   try {
     const db = getDb();
+    const dataScope = dashboardOrderScope(
+      { role: req.userRole, userId: req.userId },
+      'o'
+    );
     const [rows] = await db.execute(
       `SELECT o.*, DATE_FORMAT(o.purchase_date, '%Y-%m-%d') AS purchase_date_text,
               c.name AS customer_name, c.customer_code, c.wechat AS customer_wechat, c.phone AS customer_phone,
@@ -159,9 +174,10 @@ router.get('/:id', authenticateToken, async (req, res, next) => {
        FROM orders o
        LEFT JOIN customers c ON c.id = o.customer_id
        LEFT JOIN users u ON u.id = c.advisor_id
-       WHERE o.id = ? OR o.order_no = ?
+       WHERE (o.id = ? OR o.order_no = ?)
+         AND ${dataScope.where}
        LIMIT 1`,
-      [req.params.id, req.params.id]
+      [req.params.id, req.params.id, ...dataScope.params]
     );
     const order = (rows as RowDataPacket[])[0];
     if (!order) {
