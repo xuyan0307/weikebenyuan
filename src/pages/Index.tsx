@@ -1,6 +1,7 @@
 import { AppProvider, useApp } from '../hooks/useApp';
 import Sidebar from '../components/Sidebar';
 import TopBar from '../components/TopBar';
+import RegulatoryFooter from '../components/RegulatoryFooter';
 import React, { lazy, Suspense } from 'react';
 
 const DashboardPage = lazy(() => import('../components/DashboardPage'));
@@ -138,12 +139,15 @@ function AppShell() {
         <TopBar />
 
         {/* Page content */}
-        <main className="flex-1 overflow-y-auto px-6 py-5">
-          <PageErrorBoundary pageKey={activePage} key={activePage}>
-            <Suspense fallback={<PageLoading />}>
-              {renderActivePage()}
-            </Suspense>
-          </PageErrorBoundary>
+        <main className="flex flex-1 flex-col overflow-y-auto px-6 py-5">
+          <div className="flex-1">
+            <PageErrorBoundary pageKey={activePage} key={activePage}>
+              <Suspense fallback={<PageLoading />}>
+                {renderActivePage()}
+              </Suspense>
+            </PageErrorBoundary>
+          </div>
+          <RegulatoryFooter className="mt-4" />
         </main>
       </div>
     </div>
