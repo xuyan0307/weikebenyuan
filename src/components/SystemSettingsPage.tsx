@@ -461,9 +461,16 @@ export default function SystemSettingsPage() {
         {/* 操作栏 */}
         <div className="flex items-center gap-3 flex-wrap">
           <input
+            type="search"
+            name="system-user-directory-search"
             value={searchText}
             onChange={e => setSearchText(e.target.value)}
             placeholder="搜索姓名 / 账号 / 手机号"
+            aria-label="搜索系统账号"
+            autoComplete="off"
+            data-form-type="other"
+            data-1p-ignore="true"
+            data-lpignore="true"
             className="border border-border rounded-lg px-3 py-1.5 text-sm bg-card text-foreground outline-none focus:ring-2 focus:ring-brand/30 w-52"
           />
           <div className="relative">
