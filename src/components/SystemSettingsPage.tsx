@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   UserPlusIcon, EditIcon, Trash2Icon, ShieldIcon, ShieldCheckIcon,
   BellIcon, WifiIcon, PhoneIcon, CheckIcon, XIcon, PlusIcon,
@@ -8,6 +8,7 @@ import {
 import { useApp } from '../hooks/useApp';
 import { usePlatformSetting, usePlatformSettingMutation, useSystemUserMutations, useSystemUsers } from '../api/hooks';
 import type { SystemUserDto } from '../api/endpoints';
+import { shouldClearAccountSearchAutofill } from '../utils/accountSearch';
 
 // ──────────────────────────────────────────────────────────────────────────────
 // 类型定义
@@ -272,6 +273,30 @@ export default function SystemSettingsPage() {
   // 搜索 / 筛选
   const [searchText, setSearchText] = useState('');
   const [filterRole, setFilterRole] = useState<SystemRole | '__all__'>('__all__');
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const searchHasUserInputRef = useRef(false);
+
+  useEffect(() => {
+    searchHasUserInputRef.current = false;
+    setSearchText('');
+
+    const clearDelayedLoginAutofill = () => {
+      const input = searchInputRef.current;
+      if (!input || !shouldClearAccountSearchAutofill(
+        input.value,
+        currentUser.username,
+        currentUser.name,
+        searchHasUserInputRef.current,
+      )) return;
+
+      input.value = '';
+      setSearchText('');
+    };
+
+    clearDelayedLoginAutofill();
+    const timer = window.setInterval(clearDelayedLoginAutofill, 250);
+    return () => window.clearInterval(timer);
+  }, [currentUser.id, currentUser.name, currentUser.username]);
 
   // ── 账号操作 ──────────────────────────────────────────────────────────────
 
@@ -461,10 +486,27 @@ export default function SystemSettingsPage() {
         {/* 操作栏 */}
         <div className="flex items-center gap-3 flex-wrap">
           <input
+            ref={searchInputRef}
             type="search"
             name="system-user-directory-search"
             value={searchText}
-            onChange={e => setSearchText(e.target.value)}
+            onKeyDown={() => { searchHasUserInputRef.current = true; }}
+            onPaste={() => { searchHasUserInputRef.current = true; }}
+            onChange={e => {
+              const value = e.target.value;
+              if (shouldClearAccountSearchAutofill(
+                value,
+                currentUser.username,
+                currentUser.name,
+                searchHasUserInputRef.current,
+              )) {
+                e.target.value = '';
+                setSearchText('');
+                return;
+              }
+              searchHasUserInputRef.current = Boolean(value);
+              setSearchText(value);
+            }}
             placeholder="搜索姓名 / 账号 / 手机号"
             aria-label="搜索系统账号"
             autoComplete="off"
