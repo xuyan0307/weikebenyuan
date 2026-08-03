@@ -4,9 +4,10 @@
 
 - 生产域名：`https://weikebenyuan.com`
 - Git 分支：`agent/platform-architecture-release`
-- 发布提交：`ad16803fca09`
+- 当前生产提交：`754aa3cd5bbf`
+- 空库部署基线：`ad16803fca09`
 - GitHub PR：`https://github.com/xuyan0307/weikebenyuan/pull/1`
-- ECS 当前版本目录：`/opt/releases/ad16803fca09`
+- ECS 当前版本目录：`/opt/releases/754aa3cd5bbf`
 - ECS 当前版本软链接：`/opt/weikebenyuan-current`
 - 发布前备份：`/opt/backups/weikebenyuan/20260803-105540`
 
@@ -87,3 +88,12 @@
 5. 再录入客户、订单、合同、排期和历史结算数据。
 6. 每批导入后核对业务记录、凭证记录和操作审计数量。
 
+## 8. 发布后修复记录
+
+### 2026-08-03：账号搜索框自动填充
+
+- 修复系统设置页账号搜索框被浏览器误判为登录用户名字段、自动回填当前超级管理员账号的问题。
+- 搜索状态仍以空字符串初始化；输入框改为明确的搜索类型和独立字段名，并增加浏览器及常见密码管理器自动填充隔离标记。
+- 前后端生产构建通过，自动化测试 97/97 通过。
+- 正式域名前端资源已确认包含搜索字段标识和自动填充保护，当前发布目录为 `/opt/releases/754aa3cd5bbf`。
+- 本次只替换应用版本，不重置 RDS、OSS 或上传文件；发布后数据库连接正常，现有 2 个账号均保留。
