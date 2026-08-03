@@ -2,6 +2,7 @@ import mysql from 'mysql2/promise';
 import { createClient } from 'redis';
 import { seedIfEmpty } from './seed';
 import { runMigrations } from './migrations';
+import { ensureBaseSchema } from './baseSchema';
 
 let pool: mysql.Pool;
 let redisClient: ReturnType<typeof createClient> | null = null;
@@ -24,6 +25,7 @@ export async function initDatabase() {
     const connection = await pool.getConnection();
     console.log('MySQL connected successfully');
     connection.release();
+    await ensureBaseSchema(pool);
     await runMigrations(pool);
     await seedIfEmpty(pool);
   } catch (error) {

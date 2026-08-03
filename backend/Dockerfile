@@ -4,10 +4,11 @@ WORKDIR /app
 
 RUN npm config set registry https://registry.npmmirror.com/
 
-COPY package*.json ./
+COPY backend/package*.json ./
 RUN npm ci --include=dev
 
-COPY . .
+COPY backend/ .
+COPY init.sql ./init.sql
 RUN npm run build
 RUN npm prune --omit=dev
 
@@ -21,6 +22,7 @@ RUN addgroup -g 1001 -S appuser && \
 COPY --from=builder --chown=appuser:appuser /app/node_modules ./node_modules
 COPY --from=builder --chown=appuser:appuser /app/dist ./dist
 COPY --from=builder --chown=appuser:appuser /app/package.json ./package.json
+COPY --from=builder --chown=appuser:appuser /app/init.sql ./init.sql
 
 USER appuser
 
