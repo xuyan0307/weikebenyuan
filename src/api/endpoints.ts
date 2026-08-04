@@ -105,6 +105,7 @@ export interface Order {
   usedTimes: number; totalTimes: number;
   isUpgrade: boolean; contractSigned: boolean; hasCoupon: boolean; serviceItemCount: number;
   serviceItems?: string; servicePeople?: unknown; appointmentTime?: string; serviceNote?: string;
+  purchaseRangeProjection?: { active: boolean; displayPurchaseDate: string; visibleStageKeys: string[] };
   contractAttachments?: unknown[]; servicePhotoRecords?: unknown[];
 }
 export const ordersApi = {

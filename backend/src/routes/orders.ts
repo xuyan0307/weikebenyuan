@@ -7,6 +7,7 @@ import { ossFileUrl } from '../utils/oss';
 import { formatDateOnly, parseJson } from '../utils/serialization';
 import { createOrder, deleteOrder, normalizePayStatus, updateOrder } from '../services/orderService';
 import { dashboardOrderScope } from '../services/dashboardDataScope';
+import { projectOrderPurchaseRange } from '../services/orderPurchaseRangeService';
 
 const router: Router = Router();
 
@@ -58,8 +59,15 @@ function orderCustomerFromRow(r: RowDataPacket) {
   };
 }
 
-function mapRow(r: RowDataPacket) {
+function mapRow(r: RowDataPacket, from = '', to = '') {
   const customer = orderCustomerFromRow(r);
+  const servicePeople = parseJson(r.service_people, null);
+  const purchaseRangeProjection = projectOrderPurchaseRange({
+    type: String(r.type || ''),
+    purchaseDate: r.purchase_date_text,
+    createdDate: r.created_at,
+    servicePeople,
+  }, from, to);
   return {
     id: r.order_no || r.id,
     _id: r.id,
@@ -86,7 +94,8 @@ function mapRow(r: RowDataPacket) {
     hasCoupon: !!r.has_coupon,
     serviceItemCount: r.service_item_count || 1,
     serviceItems: r.service_items || r.intended_product || '',
-    servicePeople: parseJson(r.service_people, null),
+    servicePeople,
+    purchaseRangeProjection,
     appointmentTime: r.appointment_time || '',
     serviceNote: r.service_note || '',
     contractAttachments: withSignedAttachmentUrls(parseJson(r.contract_attachments, [])),
@@ -115,15 +124,9 @@ router.get('/', authenticateToken, async (req: AuthRequest, res, next) => {
     params.push(...dataScope.params);
     if (payStatus) { where.push('o.pay_status = ?'); params.push(payStatus); }
     if (customerId) { where.push('(o.customer_id = ? OR o.customer_id IN (SELECT id FROM customers WHERE customer_code = ?))'); params.push(customerId, customerId); }
-    if (from) { where.push('DATE(COALESCE(o.purchase_date, o.created_at)) >= ?'); params.push(from); }
-    if (to) { where.push('DATE(COALESCE(o.purchase_date, o.created_at)) <= ?'); params.push(to); }
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
-    const [countRows] = await db.query(`SELECT COUNT(*) AS cnt FROM orders o ${whereSql}`, params);
-    const total = (countRows as Array<{ cnt: number }>)[0].cnt;
-
-    const [rows] = await db.query(
-      `SELECT o.id, o.order_no, o.customer_id, o.customer_snapshot, o.type, o.amount, o.pay_status, o.paid_at,
+    const selectColumns = `SELECT o.id, o.order_no, o.customer_id, o.customer_snapshot, o.type, o.amount, o.pay_status, o.paid_at,
               DATE_FORMAT(o.purchase_date, '%Y-%m-%d') AS purchase_date_text,
               o.used_times, o.total_times, o.manual_progress_at, o.is_upgrade, o.contract_signed, o.has_coupon,
               o.service_item_count, o.service_items, o.service_people, o.appointment_time,
@@ -132,7 +135,34 @@ router.get('/', authenticateToken, async (req: AuthRequest, res, next) => {
               c.area AS customer_area, c.source AS customer_source, c.tag AS customer_tag, c.follow_status AS customer_follow_status,
               c.follow_date AS customer_follow_date, c.advisor_id AS customer_advisor_id, c.profile AS customer_profile,
               c.situation AS customer_situation, c.remark AS customer_remark, c.acquired_at, c.intended_product,
-              u.name AS advisor_name
+              u.name AS advisor_name`;
+    const joins = `LEFT JOIN customers c ON c.id = o.customer_id
+       LEFT JOIN users u ON u.id = c.advisor_id`;
+
+    if (from || to) {
+      const [rangeRows] = await db.query(
+        `${selectColumns} FROM orders o ${joins} ${whereSql}
+         ORDER BY o.purchase_date DESC, o.created_at DESC`,
+        params,
+      );
+      const projected = (rangeRows as RowDataPacket[])
+        .map(row => mapRow(row, from, to))
+        .filter(order => order.purchaseRangeProjection.visibleStageKeys.length > 0)
+        .sort((a, b) => b.purchaseRangeProjection.displayPurchaseDate.localeCompare(a.purchaseRangeProjection.displayPurchaseDate));
+      res.json({
+        total: projected.length,
+        page,
+        pageSize,
+        data: projected.slice(offset, offset + pageSize),
+      });
+      return;
+    }
+
+    const [countRows] = await db.query(`SELECT COUNT(*) AS cnt FROM orders o ${whereSql}`, params);
+    const total = (countRows as Array<{ cnt: number }>)[0].cnt;
+
+    const [rows] = await db.query(
+      `${selectColumns}
        FROM (
          SELECT o.id
          FROM orders o
@@ -141,12 +171,11 @@ router.get('/', authenticateToken, async (req: AuthRequest, res, next) => {
          LIMIT ? OFFSET ?
        ) page_orders
        JOIN orders o ON o.id = page_orders.id
-       LEFT JOIN customers c ON c.id = o.customer_id
-       LEFT JOIN users u ON u.id = c.advisor_id
+       ${joins}
        ORDER BY o.purchase_date DESC, o.created_at DESC`,
       [...params, pageSize, offset]
     );
-    res.json({ total, page, pageSize, data: (rows as RowDataPacket[]).map(mapRow) });
+    res.json({ total, page, pageSize, data: (rows as RowDataPacket[]).map(row => mapRow(row)) });
   } catch (err) { next(err); }
 });
 

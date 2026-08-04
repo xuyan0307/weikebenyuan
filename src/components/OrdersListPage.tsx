@@ -1151,6 +1151,7 @@ interface AmountStage {
   key: string;
   label: string;
   amount: number;
+  purchaseDate: string;
 }
 
 function getOrderAmountStages(order: any): AmountStage[] {
@@ -1166,12 +1167,14 @@ function getOrderAmountStages(order: any): AmountStage[] {
       key: 'experience',
       label: '体验卡',
       amount: Number(experienceSnapshot.amount) || 0,
+      purchaseDate: experienceSnapshot.purchaseDate || '',
     });
   } else if (order?.type === '体验卡') {
     result.push({
       key: 'experience',
       label: '体验卡',
       amount: Number(order.amount) || 0,
+      purchaseDate: order.purchaseDate || order.createdAt || '',
     });
   }
 
@@ -1187,6 +1190,7 @@ function getOrderAmountStages(order: any): AmountStage[] {
         key: `package-${packageNumber}`,
         label: `套餐${packageNumber}`,
         amount: Number(stage.amount) || 0,
+        purchaseDate: stage.purchaseDate || '',
       });
     });
 
@@ -1197,15 +1201,20 @@ function getOrderAmountStages(order: any): AmountStage[] {
       key: currentKey,
       label: `套餐${activePackageNumber}`,
       amount: Number(order.amount) || 0,
+      purchaseDate: order.purchaseDate || order.createdAt || '',
     };
     const existingIndex = result.findIndex(stage => stage.key === currentKey);
     if (existingIndex >= 0) result[existingIndex] = currentStage;
     else result.push(currentStage);
   }
 
-  return result.length > 0
+  const stages = result.length > 0
     ? result
-    : [{ key: 'current', label: '金额', amount: Number(order?.amount) || 0 }];
+    : [{ key: 'current', label: '金额', amount: Number(order?.amount) || 0, purchaseDate: order?.purchaseDate || order?.createdAt || '' }];
+  const projection = order?.purchaseRangeProjection;
+  if (!projection?.active) return stages;
+  const visibleKeys = new Set(ensureArray<string>(projection.visibleStageKeys));
+  return stages.filter(stage => visibleKeys.has(stage.key));
 }
 
 function openAttachment(att: OrderAttachment) {
@@ -3528,7 +3537,10 @@ export default function OrdersListPage() {
 
   const filtered = enrichedOrders.filter(o => {
     const matchSearch = !search || o.customerName.includes(search) || o.id.includes(search);
-    const matchPurchaseDate = dateInRange(o.purchaseDate || o.createdAt, purchaseCustomRange);
+    const projection = o.purchaseRangeProjection;
+    const matchPurchaseDate = projection?.active
+      ? ensureArray<string>(projection.visibleStageKeys).length > 0
+      : dateInRange(o.purchaseDate || o.createdAt, purchaseCustomRange);
     const matchType = fType.length === 0 || fType.includes(o.type);
     const normalizedPay = o.payStatus === '已支付' ? '已付款' : o.payStatus === '待支付' ? '待付款' : o.payStatus;
     const matchPay = fPay.length === 0 || fPay.includes(normalizedPay);
@@ -3545,8 +3557,8 @@ export default function OrdersListPage() {
     const matchTherapist = fTherapist.length === 0 || fTherapist.some(t => therapistDisplay.includes(t));
     return matchSearch && matchPurchaseDate && matchType && matchPay && matchContract && matchArea && matchTag && matchFollowTime && matchAdvisor && matchTherapist;
   }).sort((a, b) => {
-    const bTime = new Date(`${b.purchaseDate || ''}T00:00:00`).getTime();
-    const aTime = new Date(`${a.purchaseDate || ''}T00:00:00`).getTime();
+    const bTime = new Date(`${b.purchaseRangeProjection?.displayPurchaseDate || b.purchaseDate || ''}T00:00:00`).getTime();
+    const aTime = new Date(`${a.purchaseRangeProjection?.displayPurchaseDate || a.purchaseDate || ''}T00:00:00`).getTime();
     return (Number.isFinite(bTime) ? bTime : 0) - (Number.isFinite(aTime) ? aTime : 0);
   });
 
@@ -3590,8 +3602,9 @@ export default function OrdersListPage() {
     const rows = filtered.map(order => {
       const follow = getFollowDisplay(order);
       return [
-        order.id, order.purchaseDate || '', order.resolvedCustomerId, order.customerName, order.customerPhone, order.area, order.tag || '', order.advisor,
-        order.type, order.serviceItems || '', follow.status, follow.date, follow.task, payStatusDisplay(effectiveOrderPayStatus(order)), order.amount,
+        order.id, order.purchaseRangeProjection?.displayPurchaseDate || order.purchaseDate || '', order.resolvedCustomerId, order.customerName, order.customerPhone, order.area, order.tag || '', order.advisor,
+        order.type, order.serviceItems || '', follow.status, follow.date, follow.task, payStatusDisplay(effectiveOrderPayStatus(order)),
+        getOrderAmountStages(order).reduce((sum, stage) => sum + stage.amount, 0),
         getContractStatus(order), getTherapistDisplay(order), order.appointmentTime || '', order.serviceNote || '',
       ];
     });
@@ -3899,7 +3912,9 @@ export default function OrdersListPage() {
                     <tr key={o.id}>
                       {/* Frozen: 购卡时间 */}
                       <td style={STICKY_TD_STYLE(0, bgColor)}>
-                        <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>{o.purchaseDate || '—'}</span>
+                        <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                          {o.purchaseRangeProjection?.displayPurchaseDate || o.purchaseDate || '—'}
+                        </span>
                       </td>
 
                       {/* Frozen: 客户ID */}
