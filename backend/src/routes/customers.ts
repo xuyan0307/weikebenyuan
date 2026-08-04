@@ -6,6 +6,7 @@ import { auditLog } from '../middleware/auditLog';
 import { getDb } from '../config/database';
 import { createError } from '../middleware/errorHandler';
 import { generateCustomerCode } from '../services/customerCodeService';
+import { mergeCustomerProfileFollowHistory } from '../services/followHistoryService';
 import {
   CustomerDateRange,
   CustomerFollowTime,
@@ -60,7 +61,7 @@ function customerFiltersFromQuery(query: Record<string, unknown>): CustomerListF
   };
 }
 
-async function resolveAdvisorId(db: Pool, body: Record<string, unknown>): Promise<string | null> {
+async function resolveAdvisorId(db: Pick<Pool, 'execute'>, body: Record<string, unknown>): Promise<string | null> {
   if (typeof body.advisorId === 'string' && body.advisorId) return body.advisorId;
   const advisorName = typeof body.advisor === 'string' ? body.advisor.trim() : '';
   if (!advisorName) return null;
@@ -150,26 +151,41 @@ router.post('/', authenticateToken, auditLog('customers'), async (req, res, next
 });
 
 router.put('/:id', authenticateToken, auditLog('customers'), async (req, res, next) => {
+  const db = getDb();
+  const connection = await db.getConnection();
   try {
     const b = req.body || {};
-    const db = getDb();
-    const advisorId = await resolveAdvisorId(db, b);
-    await db.execute(
+    await connection.beginTransaction();
+    const [profileRows] = await connection.execute(
+      'SELECT id, profile FROM customers WHERE id=? OR customer_code=? LIMIT 1 FOR UPDATE',
+      [req.params.id, req.params.id]
+    );
+    const existing = (profileRows as Array<{ id: string; profile: unknown }>)[0];
+    if (!existing) throw createError('客户不存在', 404);
+    const advisorId = await resolveAdvisorId(connection, b);
+    const profile = mergeCustomerProfileFollowHistory(existing.profile, b.profile);
+    await connection.execute(
       `UPDATE customers SET
         name=?, wechat=?, phone=?, area=?, source=?, acquired_at=?, tag=?, follow_status=?,
         follow_date=?, advisor_id=?, profile=?, situation=?, intended_product=?, remark=?
-       WHERE id=? OR customer_code=?`,
+       WHERE id=?`,
       [
         b.name ?? '', b.wechat ?? null, b.phone ?? '', b.area ?? null, b.source ?? null,
         nullableDate(b.acquiredAt), b.tag ?? null, b.followStatus ?? '待跟进',
         nullableDate(b.followDate), advisorId,
-        b.profile ? JSON.stringify(b.profile) : null,
+        JSON.stringify(profile),
         b.situation ?? null, b.intendedProduct ?? null, b.remark ?? null,
-        req.params.id, req.params.id,
+        existing.id,
       ]
     );
+    await connection.commit();
     res.json({ message: '更新成功' });
-  } catch (err) { next(err); }
+  } catch (err) {
+    await connection.rollback();
+    next(err);
+  } finally {
+    connection.release();
+  }
 });
 
 router.patch('/:id/follow', authenticateToken, auditLog('customers'), async (req, res, next) => {

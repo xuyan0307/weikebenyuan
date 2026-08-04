@@ -158,6 +158,66 @@ function EditableCell({
   );
 }
 
+function InlineStringCell({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  if (editing) {
+    return (
+      <input
+        autoFocus
+        value={draft}
+        onChange={e => setDraft(e.target.value)}
+        onBlur={() => { onChange(draft); setEditing(false); }}
+        onKeyDown={e => {
+          if (e.key === 'Enter') { onChange(draft); setEditing(false); }
+          if (e.key === 'Escape') setEditing(false);
+        }}
+        className="border border-brand rounded px-1.5 py-0.5 text-sm bg-background text-foreground outline-none w-full"
+      />
+    );
+  }
+  return (
+    <span
+      className="cursor-pointer hover:text-brand transition-colors block"
+      onClick={() => { setDraft(value); setEditing(true); }}
+    >
+      {value || <span className="text-muted-foreground/40">点击编辑</span>}
+    </span>
+  );
+}
+
+function InlineMoneyCell({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  if (editing) {
+    return (
+      <input
+        autoFocus
+        type="number"
+        value={draft}
+        onChange={e => setDraft(e.target.value)}
+        onBlur={() => { onChange(parseFloat(draft) || 0); setEditing(false); }}
+        onKeyDown={e => {
+          if (e.key === 'Enter') { onChange(parseFloat(draft) || 0); setEditing(false); }
+          if (e.key === 'Escape') setEditing(false);
+        }}
+        className="w-24 border border-brand rounded px-1.5 py-0.5 text-sm text-right bg-background text-foreground outline-none"
+      />
+    );
+  }
+  return (
+    <span
+      className={`cursor-pointer hover:text-brand transition-colors ${value < 0 ? 'text-danger' : ''}`}
+      onClick={() => { setDraft(value === 0 ? '' : String(value)); setEditing(true); }}
+    >
+      {value === 0
+        ? <span className="text-muted-foreground/40">—</span>
+        : <span>{value < 0 ? '-' : ''}{Math.abs(value).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+      }
+    </span>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 主页面
 // ─────────────────────────────────────────────────────────────────────────────
@@ -353,66 +413,6 @@ export default function FinanceIncomePage() {
   // ─────────────────────────────────────────────────────────────────────────
   // 渲染：内联编辑表格行
   // ─────────────────────────────────────────────────────────────────────────
-
-  function InlineStringCell({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-    const [editing, setEditing] = useState(false);
-    const [draft, setDraft] = useState('');
-    if (editing) {
-      return (
-        <input
-          autoFocus
-          value={draft}
-          onChange={e => setDraft(e.target.value)}
-          onBlur={() => { onChange(draft); setEditing(false); }}
-          onKeyDown={e => {
-            if (e.key === 'Enter') { onChange(draft); setEditing(false); }
-            if (e.key === 'Escape') setEditing(false);
-          }}
-          className="border border-brand rounded px-1.5 py-0.5 text-sm bg-background text-foreground outline-none w-full"
-        />
-      );
-    }
-    return (
-      <span
-        className="cursor-pointer hover:text-brand transition-colors block"
-        onClick={() => { setDraft(value); setEditing(true); }}
-      >
-        {value || <span className="text-muted-foreground/40">点击编辑</span>}
-      </span>
-    );
-  }
-
-  function InlineMoneyCell({ value, onChange }: { value: number; onChange: (v: number) => void }) {
-    const [editing, setEditing] = useState(false);
-    const [draft, setDraft] = useState('');
-    if (editing) {
-      return (
-        <input
-          autoFocus
-          type="number"
-          value={draft}
-          onChange={e => setDraft(e.target.value)}
-          onBlur={() => { onChange(parseFloat(draft) || 0); setEditing(false); }}
-          onKeyDown={e => {
-            if (e.key === 'Enter') { onChange(parseFloat(draft) || 0); setEditing(false); }
-            if (e.key === 'Escape') setEditing(false);
-          }}
-          className="w-24 border border-brand rounded px-1.5 py-0.5 text-sm text-right bg-background text-foreground outline-none"
-        />
-      );
-    }
-    return (
-      <span
-        className={`cursor-pointer hover:text-brand transition-colors ${value < 0 ? 'text-danger' : ''}`}
-        onClick={() => { setDraft(value === 0 ? '' : String(value)); setEditing(true); }}
-      >
-        {value === 0
-          ? <span className="text-muted-foreground/40">—</span>
-          : <span>{value < 0 ? '-' : ''}{Math.abs(value).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-        }
-      </span>
-    );
-  }
 
   // ─────────────────────────────────────────────────────────────────────────
   // 渲染二级页面

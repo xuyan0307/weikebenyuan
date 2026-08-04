@@ -3,6 +3,7 @@ import type { PoolConnection } from 'mysql2/promise';
 import { getDb } from '../config/database';
 import { createError } from '../middleware/errorHandler';
 import { formatDateOnly, jsonOrNull, parseJson } from '../utils/serialization';
+import { mergeCustomerProfileFollowHistory, mergeOrderFollowHistory } from './followHistoryService';
 
 export interface OrderWriteBody {
   id?: string;
@@ -83,6 +84,7 @@ interface OrderDbRow {
   used_times: number;
   total_times: number;
   purchase_date: string | Date | null;
+  service_people: unknown;
 }
 
 interface OrderCustomerTagRow {
@@ -288,7 +290,9 @@ async function applyCustomerEdits(
     next.advisor = advisor || '';
     next.advisorId = advisor ? await resolveAdvisorId(db, advisor) : '';
   }
-  if (body.customerProfile !== undefined) next.profile = body.customerProfile;
+  if (body.customerProfile !== undefined) {
+    next.profile = mergeCustomerProfileFollowHistory(next.profile, body.customerProfile);
+  }
   if (body.customerSituation !== undefined) next.situation = body.customerSituation;
   if (body.customerIntendedProduct !== undefined) next.intendedProduct = body.customerIntendedProduct;
   else if (body.serviceItems !== undefined && !next.intendedProduct) next.intendedProduct = body.serviceItems;
@@ -406,7 +410,7 @@ export async function updateOrder(orderId: string, body: OrderWriteBody, actor: 
   try {
     await connection.beginTransaction();
     const [rows] = await connection.execute(
-      `SELECT id, customer_id, customer_snapshot, type, used_times, total_times, purchase_date
+      `SELECT id, customer_id, customer_snapshot, type, used_times, total_times, purchase_date, service_people
        FROM orders WHERE id=? OR order_no=? LIMIT 1 FOR UPDATE`,
       [orderId, orderId]
     );
@@ -450,6 +454,7 @@ export async function updateOrder(orderId: string, body: OrderWriteBody, actor: 
     const usedTimes = manualProgressEdit
       ? Math.min(totalTimes, Math.max(0, Number(body.usedTimes) || 0))
       : Number(existing.used_times) || 0;
+    const servicePeople = mergeOrderFollowHistory(existing.service_people, body.servicePeople);
 
     await connection.execute(
       `UPDATE orders
@@ -475,7 +480,7 @@ export async function updateOrder(orderId: string, body: OrderWriteBody, actor: 
         body.hasCoupon ? 1 : 0,
         body.serviceItemCount || 1,
         body.serviceItems || null,
-        jsonOrNull(body.servicePeople),
+        jsonOrNull(servicePeople),
         body.appointmentTime || null,
         body.serviceNote || null,
         jsonOrNull(body.contractAttachments || []),

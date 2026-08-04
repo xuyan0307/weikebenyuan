@@ -385,7 +385,8 @@ function customerToForm(c: Customer, fallbackAdvisor = '', followerId = '', foll
     advisor, remark: textOf(c.remark),
     followStatus: latestOpenRecord?.status ?? computeDisplayStatus(c, c.followStatus),
     followDate: latestOpenRecord?.date ?? textOf(c.followDate),
-    followContent: latestOpenRecord?.feedback ?? '',
+    // Feedback is evidence for one specific interaction and must never be reused as a draft.
+    followContent: '',
     followerId: latestOpenRecord?.followerId || followerId || '',
     followerName: latestOpenRecord?.followerName || followerName || advisor,
     followTask: latestOpenRecord?.content ?? getFollowTask(c),
@@ -617,6 +618,43 @@ function FF({ label, required = false, children }: { label: string; required?: b
         {label}{required && <span style={{ color: '#ef4444' }}>*</span>}
       </label>
       {children}
+    </div>
+  );
+}
+
+function CustomerModalWrap({ show, title, onClose, onConfirm, onDelete, confirmLabel = '保存', children, width = 880 }: {
+  show: boolean; title: string; onClose: () => void; onConfirm: () => void; onDelete?: () => void;
+  confirmLabel?: string; children: React.ReactNode; width?: number;
+}) {
+  if (!show) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center transition-opacity duration-200 opacity-100 pointer-events-auto"
+      style={{ background: 'rgba(0,0,0,0.45)' }}>
+      <div className="bg-card rounded-2xl shadow-custom flex flex-col overflow-hidden"
+        style={{ width, maxHeight: '90vh' }}>
+        <div className="flex items-center gap-3 px-6 py-4 flex-shrink-0"
+          style={{ borderBottom: '1px solid var(--border)' }}>
+          <span className="font-bold text-base text-foreground">{title}</span>
+          <div className="flex-1" />
+          <button className="p-1.5 rounded hover:bg-muted" onClick={onClose}><XIcon size={16} /></button>
+        </div>
+        {children}
+        <div className="flex justify-end gap-2 px-6 py-4 flex-shrink-0"
+          style={{ borderTop: '1px solid var(--border)' }}>
+          {onDelete && <button className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium hover:bg-muted transition-colors"
+            style={{ color: 'var(--danger)', border: '1px solid rgba(220,38,38,0.35)' }} onClick={onDelete}>
+            <Trash2Icon size={13} />删除客户
+          </button>}
+          <button className="px-4 py-2 rounded-lg text-sm font-medium hover:bg-muted transition-colors"
+            style={{ color: 'var(--muted-foreground)', border: '1px solid var(--border)' }}
+            onClick={onClose}>取消</button>
+          <button className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium text-white hover:opacity-90 transition-opacity"
+            style={{ background: 'var(--brand)' }} onClick={onConfirm}>
+            <SaveIcon size={13} />{confirmLabel}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -884,9 +922,8 @@ export default function CustomersListPage() {
       draft.followDate !== textOf(existingCustomer?.followDate) ||
       draft.followStatus !== previousDisplayStatus;
     if (hasUpdate) {
-      const latestRecord = nextFollowRecords[0];
       const rec: FollowRecord = {
-        id: latestRecord && latestRecord.status !== '已完成' ? latestRecord.id : `fr_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+        id: `fr_${Date.now()}_${Math.random().toString(36).slice(2)}`,
         date: draft.followDate || todayStr(),
         content: draft.followTask.trim(),
         feedback: draft.followContent.trim(),
@@ -896,9 +933,7 @@ export default function CustomersListPage() {
         followerName: draft.followerName || currentUser.name,
         createdAt: nowIso(),
       };
-      nextFollowRecords = latestRecord && latestRecord.status !== '已完成'
-        ? [rec, ...nextFollowRecords.slice(1)]
-        : [rec, ...nextFollowRecords];
+      nextFollowRecords = [rec, ...nextFollowRecords];
     }
 
     const updated: any = {
@@ -1319,44 +1354,6 @@ export default function CustomersListPage() {
           <input className={inputCls} style={inputStyle} placeholder="其他备注"
             defaultValue={form.remark} onChange={e => patch('remark', e.target.value, false)} />
         </FF>
-      </div>
-    );
-  }
-
-  // ── modal wrapper ──
-  function ModalWrap({ show, title, onClose, onConfirm, onDelete, confirmLabel = '保存', children, width = 880 }: {
-    show: boolean; title: string; onClose: () => void; onConfirm: () => void; onDelete?: () => void;
-    confirmLabel?: string; children: React.ReactNode; width?: number;
-  }) {
-    if (!show) return null;
-
-    return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center transition-opacity duration-200 opacity-100 pointer-events-auto"
-        style={{ background: 'rgba(0,0,0,0.45)' }}>
-        <div className="bg-card rounded-2xl shadow-custom flex flex-col overflow-hidden"
-          style={{ width, maxHeight: '90vh' }}>
-          <div className="flex items-center gap-3 px-6 py-4 flex-shrink-0"
-            style={{ borderBottom: '1px solid var(--border)' }}>
-            <span className="font-bold text-base text-foreground">{title}</span>
-            <div className="flex-1" />
-            <button className="p-1.5 rounded hover:bg-muted" onClick={onClose}><XIcon size={16} /></button>
-          </div>
-          {children}
-          <div className="flex justify-end gap-2 px-6 py-4 flex-shrink-0"
-            style={{ borderTop: '1px solid var(--border)' }}>
-            {onDelete && <button className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium hover:bg-muted transition-colors"
-              style={{ color: 'var(--danger)', border: '1px solid rgba(220,38,38,0.35)' }} onClick={onDelete}>
-              <Trash2Icon size={13} />删除客户
-            </button>}
-            <button className="px-4 py-2 rounded-lg text-sm font-medium hover:bg-muted transition-colors"
-              style={{ color: 'var(--muted-foreground)', border: '1px solid var(--border)' }}
-              onClick={onClose}>取消</button>
-            <button className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium text-white hover:opacity-90 transition-opacity"
-              style={{ background: 'var(--brand)' }} onClick={onConfirm}>
-              <SaveIcon size={13} />{confirmLabel}
-            </button>
-          </div>
-        </div>
       </div>
     );
   }
@@ -2112,7 +2109,7 @@ export default function CustomersListPage() {
       </div>
 
       {/* ══ Add Modal ══ */}
-      <ModalWrap show={showAdd} title="新增客户"
+      <CustomerModalWrap show={showAdd} title="新增客户"
         onClose={() => setShowAdd(false)} onConfirm={handleAdd}>
         {renderForm(
           addFormRef.current,
@@ -2125,10 +2122,10 @@ export default function CustomersListPage() {
           addFormScrollPositionRef,
           addFormScrollTimerRef,
         )}
-      </ModalWrap>
+      </CustomerModalWrap>
 
       {/* ══ Edit Modal ══ */}
-      <ModalWrap show={!!editId} title={`编辑客户 — ${editCustomer?.name ?? ''}`}
+      <CustomerModalWrap show={!!editId} title={`编辑客户 — ${editCustomer?.name ?? ''}`}
         onClose={() => setEditId(null)} onConfirm={handleEdit} onDelete={canManageBulk ? handleDeleteCustomer : undefined}>
         {renderForm(
           editFormRef.current,
@@ -2141,7 +2138,7 @@ export default function CustomersListPage() {
           editFormScrollPositionRef,
           editFormScrollTimerRef,
         )}
-      </ModalWrap>
+      </CustomerModalWrap>
 
       {/* ══ Import Modal ══ */}
       <div className={`fixed inset-0 z-50 flex items-center justify-center transition-opacity duration-200

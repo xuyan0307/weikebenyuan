@@ -1316,7 +1316,7 @@ function formFromOrder(order: any): OrderForm {
     newFollowDate: latestOpenRecord?.date || '',
     newFollowStatus: latestOpenRecord?.status || '待跟进',
     newFollowContent: latestOpenRecord?.content || '',
-    newFollowFeedback: latestOpenRecord?.feedback || '',
+    newFollowFeedback: '',
     newFollowFollowerId: latestOpenRecord?.followerId || '',
     newFollowFollowerName: latestOpenRecord?.followerName || latestOpenRecord?.operator || '',
   };
@@ -1557,12 +1557,9 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
 
   function handleAddFollow() {
     if (!form.newFollowContent.trim() && !form.newFollowFeedback.trim()) return;
-    const sortedRecords = sortFollowRecords(form.followRecords);
-    const latestRecord = sortedRecords[0];
-    const shouldUpdateLatest = Boolean(latestRecord && latestRecord.status !== '已完成');
     const follower = followerOptions.find(u => u.id === form.newFollowFollowerId) ?? defaultFollower;
     const rec: FollowRecord = {
-      id: shouldUpdateLatest ? latestRecord?.id : `fr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      id: `fr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       date: form.newFollowDate || new Date().toISOString().slice(0, 10),
       content: form.newFollowContent.trim(),
       feedback: form.newFollowFeedback.trim(),
@@ -1572,19 +1569,18 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
       followerName: follower.name,
       createdAt: nowRecordTime(),
     };
-    const nextRecords = shouldUpdateLatest
-      ? sortFollowRecords(form.followRecords.map((r, idx) => idx === form.followRecords.indexOf(latestRecord!) ? rec : r))
-      : sortFollowRecords([rec, ...form.followRecords]);
-    const keepDraft = rec.status !== '已完成';
+    const nextRecords = sortFollowRecords([rec, ...form.followRecords]);
     setForm(prev => ({
       ...prev,
       followRecords: nextRecords,
-      newFollowDate: keepDraft ? rec.date : '',
-      newFollowStatus: keepDraft ? rec.status : '待跟进',
-      newFollowContent: keepDraft ? rec.content : '',
-      newFollowFeedback: keepDraft ? rec.feedback : '',
-      newFollowFollowerId: keepDraft ? follower.id : defaultFollower.id,
-      newFollowFollowerName: keepDraft ? follower.name : defaultFollower.name,
+      // Keep the current task as the next draft, but clear one-off feedback so every save
+      // creates a new immutable interaction record.
+      newFollowDate: rec.status === '已完成' ? '' : rec.date,
+      newFollowStatus: rec.status === '已完成' ? '待跟进' : rec.status,
+      newFollowContent: rec.status === '已完成' ? '' : rec.content,
+      newFollowFeedback: '',
+      newFollowFollowerId: follower.id,
+      newFollowFollowerName: follower.name,
     }));
   }
 
@@ -3069,7 +3065,7 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
                           style={{ background: 'var(--brand)' }}
                         >
                           <PlusIcon size={14} />
-                          {sortFollowRecords(form.followRecords)[0]?.status !== '已完成' && form.followRecords.length > 0 ? '保存本次' : '新增本次'}
+                          保存本次
                         </button>
                       </div>
                       {form.followRecords.length > 0 && (

@@ -1,5 +1,7 @@
 const test = require('node:test');
 require('./orderPurchaseRangeService.test.cjs');
+require('./followHistoryService.test.cjs');
+require('./formStability.test.cjs');
 const assert = require('node:assert/strict');
 const { applyCanonicalCustomerTag, normalizePayStatus } = require('../dist/services/orderService');
 
