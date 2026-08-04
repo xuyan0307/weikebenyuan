@@ -16,6 +16,13 @@ test('timeSlotStart supports exact booking time and schedule periods', () => {
   assert.equal(timeSlotStart('晚上'), '18:00');
 });
 
+test('appointmentStartAt keeps mysql DATE objects on the selected China day', () => {
+  assert.equal(
+    appointmentStartAt(new Date('2026-08-03T16:00:00.000Z'), '12:00').toISOString(),
+    '2026-08-04T04:00:00.000Z',
+  );
+});
+
 test('appointmentStartAt consistently uses China Standard Time', () => {
   assert.equal(
     appointmentStartAt('2026-07-28', '10:30').toISOString(),

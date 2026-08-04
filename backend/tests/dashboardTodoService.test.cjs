@@ -30,6 +30,7 @@ test('dashboard todo queries use the same business boundaries as destination fil
   assert.match(queries.appointments, /notify_manual_status = '需通知'/);
   assert.match(queries.appointments, /notify_replied_at IS NULL/);
   assert.match(queries.appointments, /SUBSTRING_INDEX\(a\.time_slot, '-', 1\)/);
+  assert.match(queries.appointments, /DATE_ADD\(UTC_TIMESTAMP\(\), INTERVAL 8 HOUR\)/);
   assert.match(queries.appointments, /INTERVAL 2 HOUR/);
   assert.match(queries.appointments, /INTERVAL 12 HOUR/);
 });

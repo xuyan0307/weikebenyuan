@@ -1,6 +1,7 @@
 import type { Pool, ResultSetHeader } from 'mysql2/promise';
 import { getDb } from '../config/database';
 import { randomUUID } from 'crypto';
+import { formatDateOnly } from '../utils/serialization';
 
 export type AppointmentNotifyStatus = '需通知' | '已通知' | '延迟' | '遗漏';
 export const APPOINTMENT_NOTIFY_STATUSES: AppointmentNotifyStatus[] = [
@@ -49,13 +50,7 @@ async function auditAutomaticDelivery(
 }
 
 function dateOnly(value: string | Date) {
-  if (value instanceof Date) {
-    const y = value.getFullYear();
-    const m = String(value.getMonth() + 1).padStart(2, '0');
-    const d = String(value.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-  }
-  return String(value).slice(0, 10);
+  return formatDateOnly(value);
 }
 
 export function timeSlotStart(timeSlot: string) {

@@ -19,3 +19,8 @@ test('formatDateOnly does not shift database date strings across timezones', () 
   assert.equal(formatDateOnly('2026-07-17'), '2026-07-17');
   assert.equal(formatDateOnly(''), '');
 });
+
+test('formatDateOnly keeps a mysql DATE on its China business day', () => {
+  assert.equal(formatDateOnly(new Date('2026-08-03T16:00:00.000Z')), '2026-08-04');
+  assert.equal(formatDateOnly(new Date('2026-08-04T00:00:00.000Z')), '2026-08-04');
+});

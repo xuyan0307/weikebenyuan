@@ -14,6 +14,9 @@ export interface DashboardTodoCountRows {
 export function buildDashboardTodoQueries(scope: DashboardTodoQueryScope) {
   const appointmentStartSql =
     "TIMESTAMP(DATE(a.date), TIME(SUBSTRING_INDEX(a.time_slot, '-', 1)))";
+  // Appointment dates/times are China-local business values. UTC_TIMESTAMP is stable
+  // across RDS/server timezone settings, so convert it explicitly before comparison.
+  const chinaNowSql = "DATE_ADD(UTC_TIMESTAMP(), INTERVAL 8 HOUR)";
   return {
     newCustomers: `SELECT COUNT(*) AS cnt
       FROM customers c
@@ -41,8 +44,8 @@ export function buildDashboardTodoQueries(scope: DashboardTodoQueryScope) {
           OR (
             a.notify_manual_status IS NULL
             AND a.notify_replied_at IS NULL
-            AND ${appointmentStartSql} > DATE_ADD(NOW(), INTERVAL 2 HOUR)
-            AND ${appointmentStartSql} <= DATE_ADD(NOW(), INTERVAL 12 HOUR)
+            AND ${appointmentStartSql} > DATE_ADD(${chinaNowSql}, INTERVAL 2 HOUR)
+            AND ${appointmentStartSql} <= DATE_ADD(${chinaNowSql}, INTERVAL 12 HOUR)
           )
         )`,
   };
