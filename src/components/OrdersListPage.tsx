@@ -29,6 +29,7 @@ import { downloadXlsx, readSpreadsheet, rowsToObjects } from '../utils/spreadshe
 import { DateRangeFilter } from './ui/date-range-filter';
 import { GLOBAL_DATE_RANGE_QUICK_OPTIONS, dateInRange, quickDateRange, type DateRangeValue } from '../utils/dateRange';
 import { useGlobalDateRange } from '../utils/useGlobalDateRange';
+import { sumOrderAmountStages } from '../utils/orderAmountSummary';
 
 /* ─── Types ─────────────────────────────────────────── */
 type NewPayStatus = '已支付' | '待支付' | '已付定金' | '已退款';
@@ -3560,16 +3561,11 @@ export default function OrdersListPage() {
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const paginated = filtered.slice((page - 1) * pageSize, page * pageSize);
-  const amountStagesByOrder = new Map<string, Map<string, AmountStage>>(
-    filtered.map(order => [
-      order.id,
-      new Map(getOrderAmountStages(order).map(stage => [stage.key, stage])),
-    ]),
-  );
+  const amountStageRows = filtered.map(order => getOrderAmountStages(order));
   const maxPackageNumber = Math.max(
     1,
-    ...Array.from(amountStagesByOrder.values()).flatMap(stages =>
-      Array.from(stages.keys())
+    ...amountStageRows.flatMap(stages =>
+      stages.map(stage => stage.key)
         .filter(key => key.startsWith('package-'))
         .map(key => Number(key.slice('package-'.length)) || 0),
     ),
@@ -3581,15 +3577,7 @@ export default function OrdersListPage() {
       label: `套餐${index + 1}金额`,
     })),
   ];
-  const amountTotals = new Map(
-    amountColumns.map(column => [
-      column.key,
-      Array.from(amountStagesByOrder.values()).reduce(
-        (total, stages) => total + (stages.get(column.key)?.amount || 0),
-        0,
-      ),
-    ]),
-  );
+  const amountTotals = sumOrderAmountStages(amountStageRows);
 
   useEffect(() => { setPage(1); }, [search, purchaseDateRange, purchaseCustomRange.start, purchaseCustomRange.end, fType, fPay, fContract, fArea, fTag, fFollowTime, fAdvisor, fTherapist]);
 
@@ -3879,7 +3867,11 @@ export default function OrdersListPage() {
                   <td style={STICKY_TD_STYLE(3, 'rgba(30,136,229,0.06)')} />
                   {NORMAL_COLS_BEFORE_AMOUNT.map((_, index) => <td key={`summary-before-${index}`} />)}
                   {amountColumns.map(column => (
-                    <td key={`summary-${column.key}`} style={{ textAlign: 'center' }}>
+                    <td
+                      key={`summary-${column.key}`}
+                      style={{ textAlign: 'center' }}
+                      title={`当前筛选 ${filtered.length} 条订单的${column.label}逐行合计`}
+                    >
                       <span className="text-sm font-bold" style={{ color: 'var(--brand)' }}>
                         ¥{(amountTotals.get(column.key) || 0).toLocaleString()}
                       </span>
@@ -3902,10 +3894,12 @@ export default function OrdersListPage() {
                   const contractStatus = getContractStatus(o);
                   const followInfo = getFollowDisplay(o);
                   const displayPayStatus = effectiveOrderPayStatus(o);
-                  const orderAmountStages = amountStagesByOrder.get(o.id) || new Map<string, AmountStage>();
+                  const orderAmountStages = new Map(
+                    getOrderAmountStages(o).map(stage => [stage.key, stage]),
+                  );
 
                   return (
-                    <tr key={o.id}>
+                    <tr key={o._id || o.id}>
                       {/* Frozen: 购卡时间 */}
                       <td style={STICKY_TD_STYLE(0, bgColor)}>
                         <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
