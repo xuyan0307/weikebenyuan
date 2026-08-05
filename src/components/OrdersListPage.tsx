@@ -390,7 +390,7 @@ const STICKY_RIGHT_TH_STYLE: React.CSSProperties = {
   width: ACTION_COL_W,
   minWidth: ACTION_COL_W,
   maxWidth: ACTION_COL_W,
-  zIndex: 4,
+  zIndex: 12,
   background: 'var(--muted)',
   borderLeft: '2px solid var(--border)',
   boxShadow: RIGHT_FREEZE_SHADOW,
@@ -406,7 +406,7 @@ function STICKY_RIGHT_TD_STYLE(bg: string): React.CSSProperties {
     width: ACTION_COL_W,
     minWidth: ACTION_COL_W,
     maxWidth: ACTION_COL_W,
-    zIndex: 3,
+    zIndex: 10,
     background: bg,
     borderLeft: '2px solid var(--border)',
     boxShadow: RIGHT_FREEZE_SHADOW,
@@ -3960,7 +3960,8 @@ export default function OrdersListPage() {
                     </td>
                   ))}
                   {NORMAL_COLS_AFTER_AMOUNT.map((_, index) => <td key={`summary-after-${index}`} />)}
-                  <td style={STICKY_RIGHT_TD_STYLE('rgba(30,136,229,0.06)')} />
+                  {/* Keep the frozen action pane opaque so horizontally scrolled totals never bleed through it. */}
+                  <td style={STICKY_RIGHT_TD_STYLE('var(--card)')} />
                 </tr>
                 {paginated.map(o => {
                   const bgColor = 'var(--card)';

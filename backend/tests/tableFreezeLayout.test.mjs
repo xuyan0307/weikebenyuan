@@ -22,4 +22,8 @@ test('customer table freezes only acquisition time/name and places id after advi
 test('order table freezes only purchase time/name and places id after advisor', () => {
   assertSharedFreezeContract(ordersSource, '购卡时间');
   assert.match(ordersSource, /<th>归属客服<\/th>\s*<th[^>]*>客户ID<\/th>\s*<th>技师<\/th>/);
+  assert.match(ordersSource, /zIndex: 12,[\s\S]*?function STICKY_RIGHT_TD_STYLE[\s\S]*?zIndex: 10,/,
+    'right-frozen action pane must render above horizontally scrolled table content');
+  assert.match(ordersSource, /STICKY_RIGHT_TD_STYLE\('var\(--card\)'\)/,
+    'summary-row action cell must use an opaque background');
 });
