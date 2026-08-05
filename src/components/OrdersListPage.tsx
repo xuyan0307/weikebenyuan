@@ -30,6 +30,11 @@ import { DateRangeFilter } from './ui/date-range-filter';
 import { GLOBAL_DATE_RANGE_QUICK_OPTIONS, dateInRange, quickDateRange, type DateRangeValue } from '../utils/dateRange';
 import { useGlobalDateRange } from '../utils/useGlobalDateRange';
 import { sumOrderAmountStages } from '../utils/orderAmountSummary';
+import {
+  clearOrderAppointmentDraft,
+  readOrderAppointmentDraft,
+  saveOrderAppointmentDraft,
+} from '../utils/orderAppointmentFlow';
 
 /* ─── Types ─────────────────────────────────────────── */
 type NewPayStatus = '已支付' | '待支付' | '已付定金' | '已退款';
@@ -1451,9 +1456,22 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
     .sort((a, b) => `${a.date} ${a.timeSlot}`.localeCompare(`${b.date} ${b.timeSlot}`))[0];
 
   function goToAppointmentCalendar() {
+    if (mode !== 'edit' || !editOrderId) {
+      toast.error('请先保存订单，再为客户预约');
+      return;
+    }
+    saveOrderAppointmentDraft(sessionStorage, {
+      orderId: editOrderId,
+      mode: 'edit',
+      activeTab,
+      form,
+      orderSnapshot: order,
+      isManualProgressDirty,
+    });
     sessionStorage.setItem('weikebenyuan:appointment-prefill', JSON.stringify({
       customerId: form.customerId,
       customerName: form.customerName,
+      returnToOrderEditor: true,
       therapistNames: [form.servicePerson1.assign, form.servicePerson2.assign, form.servicePerson3.assign]
         .filter(name => name && name !== '待分配' && name !== '无'),
     }));
@@ -1502,6 +1520,16 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
     setShowPackageUpgradeConfirmation(false);
     setPendingUpgradeTag('');
     setIsEditingExperienceSnapshot(false);
+    const suspendedDraft = mode === 'edit' && editOrderId
+      ? readOrderAppointmentDraft<OrderForm, any>(sessionStorage)
+      : null;
+    if (suspendedDraft?.orderId === editOrderId) {
+      setActiveTab(suspendedDraft.activeTab as OrderModalTab);
+      setForm(suspendedDraft.form);
+      setIsManualProgressDirty(suspendedDraft.isManualProgressDirty);
+      clearOrderAppointmentDraft(sessionStorage);
+      return;
+    }
     const nextForm = order && mode !== 'create' ? formFromOrder(order) : initForm();
     nextForm.newFollowFollowerId = nextForm.newFollowFollowerId || defaultFollower.id;
     nextForm.newFollowFollowerName = nextForm.newFollowFollowerName || defaultFollower.name;
@@ -3431,6 +3459,7 @@ export default function OrdersListPage() {
   const [modalMode, setModalMode] = useState<OrderModalMode>('create');
   const [editOrderId, setEditOrderId] = useState('');
   const [selectedOrder, setSelectedOrder] = useState<any | null>(null);
+  const appointmentResumeAttemptedRef = useRef(false);
   const [showImport, setShowImport] = useState(false);
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importMsg, setImportMsg] = useState('');
@@ -3478,6 +3507,25 @@ export default function OrdersListPage() {
   const CUSTOMERS: any[] = customersQ.data?.data ?? [];
   const THERAPISTS: any[] = therapistsQ.data?.data ?? [];
   const ORDERS: any[] = ordersQ.data?.data ?? [];
+  useEffect(() => {
+    if (appointmentResumeAttemptedRef.current || !ordersQ.data) return;
+    appointmentResumeAttemptedRef.current = true;
+    const draft = readOrderAppointmentDraft<OrderForm, any>(sessionStorage);
+    if (!draft) return;
+    const resumeOrder = ORDERS.find(item =>
+      item.id === draft.orderId || item._id === draft.orderId || item.no === draft.orderId
+    ) ?? draft.orderSnapshot;
+    if (!resumeOrder) {
+      clearOrderAppointmentDraft(sessionStorage);
+      toast.error('未找到原订单，无法恢复预约前的编辑内容');
+      return;
+    }
+    setModalMode('edit');
+    setEditOrderId(draft.orderId);
+    setSelectedOrder(resumeOrder);
+    setShowModal(true);
+    toast.success('预约流程已返回，请继续完成并保存订单修改');
+  }, [ordersQ.data]);
   const customerById = new Map(CUSTOMERS.flatMap(c => [[c.id, c], [c._id, c]].filter(([id]) => !!id) as [string, any][]));
   const customerByName = new Map(CUSTOMERS.map(c => [c.name, c]));
   const TYPE_OPTIONS = [

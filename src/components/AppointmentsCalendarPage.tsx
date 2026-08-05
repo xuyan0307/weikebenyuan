@@ -1416,7 +1416,7 @@ function EditScheduleBanner({ therapistName, onSave, onCancel }: EditScheduleBan
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function AppointmentsCalendarPage() {
-  const { currentUser } = useApp();
+  const { currentUser, setActivePage } = useApp();
   const isTherapist = currentUser.role === 'therapist';
 
   const apptsQ = useAppointments({ page: 1, pageSize: 1000 });
@@ -1436,6 +1436,7 @@ export default function AppointmentsCalendarPage() {
   const [draftSlotStatus, setDraftSlotStatus] = useState<Record<string, ScheduleState>>({});
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [prefillCustomerId, setPrefillCustomerId] = useState('');
+  const [returnToOrderEditor, setReturnToOrderEditor] = useState(false);
   const [completionTarget, setCompletionTarget] = useState<Appointment | null>(null);
   const [completionSignaturePhotos, setCompletionSignaturePhotos] = useState<UploadedFile[]>([]);
   const [completionUploading, setCompletionUploading] = useState(false);
@@ -1451,11 +1452,16 @@ export default function AppointmentsCalendarPage() {
     const raw = sessionStorage.getItem('weikebenyuan:appointment-prefill');
     if (!raw) return;
     try {
-      const prefill = JSON.parse(raw) as { customerId?: string; therapistNames?: string[] };
+      const prefill = JSON.parse(raw) as {
+        customerId?: string;
+        therapistNames?: string[];
+        returnToOrderEditor?: boolean;
+      };
       const therapist = calendarTherapists.find(item => prefill.therapistNames?.includes(item.name));
       if (therapist) {
         setSelectedTherapistIds([therapist.id]);
         setPrefillCustomerId(prefill.customerId || '');
+        setReturnToOrderEditor(Boolean(prefill.returnToOrderEditor));
         setShowCreateModal(true);
         sessionStorage.removeItem('weikebenyuan:appointment-prefill');
       }
@@ -1524,6 +1530,14 @@ export default function AppointmentsCalendarPage() {
     return (editMode ? draftSlotStatus[key] : slotStatus[key]) ?? '空闲';
   }
 
+  function closeCreateModal() {
+    setShowCreateModal(false);
+    if (returnToOrderEditor) {
+      setReturnToOrderEditor(false);
+      setActivePage('orders-list');
+    }
+  }
+
   function enterEditMode() {
     setDraftSlotStatus({ ...slotStatus });
     setEditMode(true);
@@ -1586,6 +1600,10 @@ export default function AppointmentsCalendarPage() {
 
       setShowCreateModal(false);
       toast.success(`已为「${newAppt.customerName}」创建预约`);
+      if (returnToOrderEditor) {
+        setReturnToOrderEditor(false);
+        setActivePage('orders-list');
+      }
     } catch (err: any) {
       toast.error('预约保存失败：' + (err?.message ?? ''));
     }
@@ -2067,7 +2085,7 @@ export default function AppointmentsCalendarPage() {
         slotStatus={slotStatus}
         localOrderUsedTimes={localOrderUsedTimes}
         initialCustomerId={prefillCustomerId}
-        onClose={() => setShowCreateModal(false)}
+        onClose={closeCreateModal}
         onSave={handleNewAppt}
       />
     </div>
