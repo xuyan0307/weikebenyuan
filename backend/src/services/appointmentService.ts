@@ -174,10 +174,11 @@ export async function updateAppointment(
   try {
     await connection.beginTransaction();
     const [rows] = await connection.execute(
-      `SELECT id, appointment_no, customer_id, therapist_id, date, time_slot, service, status,
-              area, remark, progress_applied_at
-       FROM appointments
-       WHERE id = ? OR appointment_no = ?
+      `SELECT a.id, a.appointment_no, a.customer_id, a.therapist_id, a.date, a.time_slot,
+              a.service, a.status, a.area, a.remark, a.progress_applied_at,
+              EXISTS(SELECT 1 FROM service_records sr WHERE sr.appointment_id = a.id) AS has_service_record
+       FROM appointments a
+       WHERE a.id = ? OR a.appointment_no = ?
        LIMIT 1 FOR UPDATE`,
       [appointmentId, appointmentId]
     );
@@ -196,6 +197,13 @@ export async function updateAppointment(
       therapistId !== current.therapist_id
       || date !== formatDateOnly(current.date)
       || timeSlot !== current.time_slot;
+    const scheduleLocked = current.status.includes('完成')
+      || current.status.includes('取消')
+      || Boolean(current.progress_applied_at)
+      || Boolean(current.has_service_record);
+    if (scheduleChanged && scheduleLocked) {
+      throw createError('已完成、已取消或已产生服务凭证的预约不能改约', 409);
+    }
     if (scheduleChanged && isAppointmentTimePast(date, timeSlot)) {
       throw createError('已经过去的时间不能修改，请重新选择', 400);
     }
@@ -215,7 +223,8 @@ export async function updateAppointment(
 
     await connection.execute(
       `UPDATE appointments
-       SET therapist_id = ?, date = ?, time_slot = ?, service = ?, area = ?, remark = ?
+       SET therapist_id = ?, date = ?, time_slot = ?, service = ?, area = ?, remark = ?,
+           notify_scheduled_at = CASE WHEN ? THEN NULL ELSE notify_scheduled_at END
        WHERE id = ?`,
       [
         therapistId,
@@ -224,6 +233,7 @@ export async function updateAppointment(
         body.service ?? current.service ?? '',
         body.area ?? current.area ?? null,
         body.remark ?? current.remark ?? null,
+        scheduleChanged ? 1 : 0,
         current.id,
       ]
     );

@@ -134,9 +134,41 @@ test('updateAppointment updates the selected appointment and excludes itself fro
   assert.equal(pool.calls.some(call => String(call).includes('id <> ?')), true);
   assert.equal(pool.calls.some(call => String(call).includes("status NOT IN ('已取消', '取消')")), true);
   assert.equal(pool.calls.some(call => String(call).includes('UPDATE appointments')), true);
+  assert.equal(pool.calls.some(call => String(call).includes('notify_scheduled_at = CASE WHEN')), true);
   assert.equal(pool.calls.includes('commit'), true);
   assert.equal(pool.calls.includes('rollback'), false);
   assert.equal(pool.calls.at(-1), 'release');
+});
+
+test('updateAppointment rejects rescheduling completed appointment evidence', async () => {
+  const pool = fakePool([[
+    {
+      id: 'appointment-completed',
+      appointment_no: 'A-COMPLETED',
+      customer_id: 'customer-1',
+      therapist_id: 'therapist-1',
+      date: '2099-07-18',
+      time_slot: '09:00',
+      service: '骨盆',
+      status: '已完成',
+      area: '湖里',
+      remark: '',
+      progress_applied_at: '2099-07-18 10:00:00',
+      has_service_record: 1,
+    },
+  ]]);
+
+  await assert.rejects(
+    updateAppointment('appointment-completed', {
+      date: '2099-07-19',
+      timeSlot: '13:30',
+    }, pool),
+    error => error.statusCode === 409
+  );
+
+  assert.equal(pool.calls.some(call => String(call).includes('UPDATE appointments')), false);
+  assert.equal(pool.calls.includes('commit'), false);
+  assert.equal(pool.calls.includes('rollback'), true);
 });
 
 test('updateAppointment rolls back when another appointment occupies the therapist period', async () => {

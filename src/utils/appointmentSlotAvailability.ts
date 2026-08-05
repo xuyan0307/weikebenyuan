@@ -19,3 +19,11 @@ export function hasBlockingAppointment(
 ): boolean {
   return appointments.some(appointmentBlocksSlot);
 }
+
+/** 改约时排除当前预约自身，但仍阻止同一时段内的其他有效预约。 */
+export function hasBlockingAppointmentExcluding<T extends AppointmentSlotRecord & { id?: string }>(
+  appointments: T[],
+  excludedId: string
+): boolean {
+  return appointments.some(appointment => appointment.id !== excludedId && appointmentBlocksSlot(appointment));
+}

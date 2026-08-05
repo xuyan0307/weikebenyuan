@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   appointmentBlocksSlot,
   hasBlockingAppointment,
+  hasBlockingAppointmentExcluding,
   isCancelledAppointment,
 } from '../../src/utils/appointmentSlotAvailability.ts';
 
@@ -31,4 +32,15 @@ test('a new active appointment blocks a slot even when cancelled history is also
     { status: '已取消' },
     { status: '待确认' },
   ]), true);
+});
+
+test('rescheduling excludes the current appointment but still detects another active booking', () => {
+  assert.equal(hasBlockingAppointmentExcluding([
+    { id: 'current', status: '待确认' },
+    { id: 'cancelled-history', status: '已取消' },
+  ], 'current'), false);
+  assert.equal(hasBlockingAppointmentExcluding([
+    { id: 'current', status: '待确认' },
+    { id: 'other', status: '已确认' },
+  ], 'current'), true);
 });

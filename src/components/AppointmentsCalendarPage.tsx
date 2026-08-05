@@ -21,6 +21,7 @@ import {
 import {
   appointmentBlocksSlot,
   hasBlockingAppointment,
+  hasBlockingAppointmentExcluding,
   isCancelledAppointment,
 } from '../utils/appointmentSlotAvailability';
 
@@ -324,6 +325,7 @@ interface AppointmentCardProps {
   remarkDraft?: string;
   onRemarkChange?: (v: string) => void;
   onRemarkSave?: () => void;
+  onReschedule?: () => void;
   onComplete?: () => void;
 }
 
@@ -342,6 +344,7 @@ function AppointmentCard({
   remarkDraft = '',
   onRemarkChange = () => {},
   onRemarkSave = () => {},
+  onReschedule = () => {},
   onComplete = () => {},
 }: AppointmentCardProps) {
   const ordersQ = useOrders({ page: 1, pageSize: 1000 });
@@ -463,6 +466,16 @@ function AppointmentCard({
             </div>
           ) : (
             <div className="flex items-center gap-1 flex-wrap">
+              {!isCancelled && appt.status !== '已完成' && (
+                <button
+                  className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs font-medium transition-colors hover:opacity-80"
+                  style={{ background: '#DBEAFE', color: '#1D4ED8', border: '1px solid #BFDBFE' }}
+                  onClick={e => { e.stopPropagation(); onReschedule(); }}
+                >
+                  <EditIcon size={10} />
+                  调整时间
+                </button>
+              )}
               {/* Remark toggle button */}
               <button
                 className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs font-medium transition-colors hover:opacity-80"
@@ -613,6 +626,216 @@ function WeekPicker({ weekOffset, onClose, onSelect }: WeekPickerProps) {
 }
 
 // ─── CreateModal ──────────────────────────────────────────────────────────────
+
+interface RescheduleModalProps {
+  visible: boolean;
+  appointment: Appointment | null;
+  baseWeekOffset: number;
+  localAppts: Appointment[];
+  slotStatus: Record<string, ScheduleState>;
+  onClose: () => void;
+  onSave: (appointment: Appointment, date: string, timeSlot: string) => Promise<void>;
+}
+
+function RescheduleModal({
+  visible,
+  appointment,
+  baseWeekOffset,
+  localAppts,
+  slotStatus,
+  onClose,
+  onSave,
+}: RescheduleModalProps) {
+  const [weekIndex, setWeekIndex] = useState<0 | 1>(0);
+  const [selectedDate, setSelectedDate] = useState('');
+  const [selectedSlot, setSelectedSlot] = useState<SlotLabel | ''>('');
+  const [startHour, setStartHour] = useState('09');
+  const [startMin, setStartMin] = useState('00');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!visible || !appointment) return;
+    setWeekIndex(0);
+    setSelectedDate(appointment.date);
+    setSelectedSlot(slotLabelFromTimeSlot(appointment.timeSlot));
+    const [hour = '09', minute = '00'] = appointment.timeSlot.split(':');
+    setStartHour(hour);
+    setStartMin(minute);
+    setSaving(false);
+  }, [visible, appointment]);
+
+  const weekDates = useMemo(
+    () => getWeekDates(baseWeekOffset + weekIndex),
+    [baseWeekOffset, weekIndex]
+  );
+
+  function hourOptions(slot: SlotLabel | ''): string[] {
+    const definition = TIME_SLOTS.find(item => item.label === slot);
+    if (!definition) return [];
+    const start = Number(definition.start);
+    const end = Number(definition.end) - 1;
+    return Array.from({ length: end - start + 1 }, (_, index) => String(start + index).padStart(2, '0'));
+  }
+
+  function minuteOptions(slot: SlotLabel | '', hour: string): string[] {
+    const options = ['00', '15', '30', '45'];
+    const definition = TIME_SLOTS.find(item => item.label === slot);
+    if (definition && Number(hour) === Number(definition.end) - 1) options.push('59');
+    return options;
+  }
+
+  function firstAvailableTime(date: string, slot: SlotLabel): { hour: string; minute: string } | null {
+    for (const hour of hourOptions(slot)) {
+      for (const minute of minuteOptions(slot, hour)) {
+        if (!isAppointmentTimePast(date, hour, minute)) return { hour, minute };
+      }
+    }
+    return null;
+  }
+
+  function isAvailable(date: string, slot: SlotLabel): boolean {
+    if (!appointment) return false;
+    const definition = TIME_SLOTS.find(item => item.label === slot);
+    if (!definition || isSlotExpired(date, definition)) return false;
+    if ((slotStatus[slotKeyFor(appointment.therapistId, date, slot)] ?? '空闲') !== '空闲') return false;
+    const sameSlotAppointments = localAppts.filter(item =>
+      item.therapistId === appointment.therapistId
+      && item.date === date
+      && slotLabelFromTimeSlot(item.timeSlot) === slot
+    );
+    return !hasBlockingAppointmentExcluding(sameSlotAppointments, appointment.id);
+  }
+
+  function selectSlot(date: string, slot: SlotLabel) {
+    if (!isAvailable(date, slot)) return;
+    const first = firstAvailableTime(date, slot);
+    if (!first) return;
+    setSelectedDate(date);
+    setSelectedSlot(slot);
+    setStartHour(first.hour);
+    setStartMin(first.minute);
+  }
+
+  async function submit() {
+    if (!appointment || !selectedDate || !selectedSlot || saving) return;
+    if (!isAvailable(selectedDate, selectedSlot)) {
+      toast.error('该时间段已不可预约，请重新选择');
+      return;
+    }
+    if (isAppointmentTimePast(selectedDate, startHour, startMin)) {
+      toast.error('已经过去的时间不能改约');
+      return;
+    }
+    setSaving(true);
+    try {
+      await onSave(appointment, selectedDate, `${startHour}:${startMin}`);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!visible || !appointment) return null;
+  const changed = selectedDate !== appointment.date || `${startHour}:${startMin}` !== appointment.timeSlot;
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.45)' }}>
+      <div className="rounded-2xl shadow-custom overflow-hidden" style={{ width: 760, maxWidth: 'calc(100vw - 32px)', background: 'var(--card)' }}>
+        <div className="px-6 py-4 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border)' }}>
+          <div>
+            <div className="font-bold text-lg text-foreground">调整预约时间</div>
+            <div className="text-xs mt-1" style={{ color: 'var(--muted-foreground)' }}>
+              {appointment.customerName} · {appointment.therapistName} · 当前 {appointment.date} {appointment.timeSlot}
+            </div>
+          </div>
+          <button className="p-1.5 rounded-lg hover:bg-muted" onClick={onClose}><XIcon size={18} /></button>
+        </div>
+
+        <div className="px-6 py-5">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <div className="font-medium text-sm text-foreground">选择该技师的其他空闲时间</div>
+              <div className="text-xs mt-1" style={{ color: 'var(--muted-foreground)' }}>已占用、忙碌、待定和已过期时段不可选择</div>
+            </div>
+            <div className="flex rounded-lg p-1" style={{ background: 'var(--muted)' }}>
+              {([0, 1] as const).map(index => {
+                const dates = getWeekDates(baseWeekOffset + index);
+                return (
+                  <button
+                    key={index}
+                    className="px-3 py-1.5 rounded-md text-xs font-medium"
+                    style={{ background: weekIndex === index ? 'var(--brand)' : 'transparent', color: weekIndex === index ? '#fff' : 'var(--muted-foreground)' }}
+                    onClick={() => setWeekIndex(index)}
+                  >
+                    {index === 0 ? '本显示周' : '下一周'} {formatDisplayDate(dates[0])}–{formatDisplayDate(dates[6])}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+            <div className="grid" style={{ gridTemplateColumns: '72px repeat(7, minmax(0, 1fr))', background: 'var(--muted)' }}>
+              <div className="px-2 py-3 text-xs font-semibold" style={{ color: 'var(--muted-foreground)' }}>时段</div>
+              {weekDates.map((date, index) => (
+                <div key={date} className="px-1 py-2 text-center text-xs" style={{ borderLeft: '1px solid var(--border)' }}>
+                  <div style={{ color: 'var(--muted-foreground)' }}>{WEEK_DAYS[index]}</div>
+                  <div className="font-semibold mt-0.5 text-foreground">{formatDisplayDate(date)}</div>
+                </div>
+              ))}
+            </div>
+            {TIME_SLOTS.map(slot => (
+              <div key={slot.label} className="grid" style={{ gridTemplateColumns: '72px repeat(7, minmax(0, 1fr))', borderTop: '1px solid var(--border)' }}>
+                <div className="px-2 py-3 text-xs font-medium text-foreground">{slot.label}</div>
+                {weekDates.map(date => {
+                  const available = isAvailable(date, slot.label);
+                  const active = selectedDate === date && selectedSlot === slot.label;
+                  const current = appointment.date === date && slotLabelFromTimeSlot(appointment.timeSlot) === slot.label;
+                  return (
+                    <div key={date} className="p-1.5" style={{ borderLeft: '1px solid var(--border)' }}>
+                      <button
+                        className="w-full rounded-md py-2 text-xs font-medium"
+                        disabled={!available}
+                        style={{
+                          background: active ? '#DBEAFE' : available ? '#F0FDF4' : 'var(--muted)',
+                          color: active ? '#1D4ED8' : available ? '#16A34A' : 'var(--muted-foreground)',
+                          border: `1px solid ${active ? '#60A5FA' : available ? '#86EFAC' : 'var(--border)'}`,
+                          opacity: available ? 1 : 0.55,
+                          cursor: available ? 'pointer' : 'not-allowed',
+                        }}
+                        onClick={() => selectSlot(date, slot.label)}
+                      >
+                        {current ? '当前' : available ? '空闲' : '不可选'}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-4 flex items-center gap-3">
+            <span className="text-sm" style={{ color: 'var(--muted-foreground)' }}>精确开始时间</span>
+            <select className="rounded-lg px-3 py-2 text-sm" style={{ border: '1px solid var(--border)', background: 'var(--card)' }} value={startHour} onChange={event => setStartHour(event.target.value)} disabled={!selectedSlot}>
+              {hourOptions(selectedSlot).map(hour => <option key={hour} value={hour}>{hour}时</option>)}
+            </select>
+            <span>:</span>
+            <select className="rounded-lg px-3 py-2 text-sm" style={{ border: '1px solid var(--border)', background: 'var(--card)' }} value={startMin} onChange={event => setStartMin(event.target.value)} disabled={!selectedSlot}>
+              {minuteOptions(selectedSlot, startHour).map(minute => <option key={minute} value={minute}>{minute}分</option>)}
+            </select>
+            {selectedDate && <span className="text-sm font-medium text-foreground">{selectedDate}</span>}
+          </div>
+        </div>
+
+        <div className="px-6 py-4 flex justify-end gap-3" style={{ borderTop: '1px solid var(--border)' }}>
+          <button className="px-4 py-2 rounded-lg text-sm" style={{ border: '1px solid var(--border)' }} onClick={onClose}>取消</button>
+          <button className="px-4 py-2 rounded-lg text-sm text-white disabled:opacity-50" style={{ background: 'var(--brand)' }} disabled={!changed || saving} onClick={submit}>
+            {saving ? '保存中...' : '确认改约'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 interface CreateModalProps {
   visible: boolean;
@@ -1264,6 +1487,7 @@ export default function AppointmentsCalendarPage() {
   // Edit mode: inline remark editing state
   const [editingRemarkId, setEditingRemarkId] = useState<string | null>(null);
   const [confirmCancelId, setConfirmCancelId] = useState<string | null>(null);
+  const [rescheduleTarget, setRescheduleTarget] = useState<Appointment | null>(null);
   const [remarkDrafts, setRemarkDrafts] = useState<Record<string, string>>({});
 
   const weekDates = getWeekDates(weekOffset);
@@ -1306,6 +1530,7 @@ export default function AppointmentsCalendarPage() {
     // Clear any pending edits
     setEditingRemarkId(null);
     setConfirmCancelId(null);
+    setRescheduleTarget(null);
   }
 
   function saveEdit() {
@@ -1313,6 +1538,7 @@ export default function AppointmentsCalendarPage() {
     setEditMode(false);
     setEditingRemarkId(null);
     setConfirmCancelId(null);
+    setRescheduleTarget(null);
     toast.success('档期已保存');
   }
 
@@ -1321,6 +1547,7 @@ export default function AppointmentsCalendarPage() {
     setEditMode(false);
     setEditingRemarkId(null);
     setConfirmCancelId(null);
+    setRescheduleTarget(null);
   }
 
   function handleSlotSelectChange(tId: string, date: string, slot: SlotLabel, value: ScheduleState) {
@@ -1446,6 +1673,21 @@ export default function AppointmentsCalendarPage() {
         setLocalAppts(prev => prev.map(item => item.id === apptId ? previous : item));
       }
       toast.error(error?.message || '备注保存失败');
+    }
+  }
+
+  async function handleRescheduleAppt(appointment: Appointment, date: string, timeSlot: string) {
+    const previous = appointment;
+    const next = { ...appointment, date, timeSlot };
+    setLocalAppts(items => items.map(item => item.id === appointment.id ? next : item));
+    try {
+      await apptMutations.update({ id: appointment.id, body: { date, timeSlot } });
+      setRescheduleTarget(null);
+      toast.success(`已改约至 ${date} ${timeSlot}，预约列表已同步更新`);
+    } catch (error: any) {
+      setLocalAppts(items => items.map(item => item.id === appointment.id ? previous : item));
+      toast.error(error?.message || '预约时间调整失败');
+      throw error;
     }
   }
 
@@ -1705,6 +1947,11 @@ export default function AppointmentsCalendarPage() {
                                 remarkDraft={remarkDrafts[appt.id] ?? appt.remark ?? ''}
                                 onRemarkChange={v => setRemarkDrafts(prev => ({ ...prev, [appt.id]: v }))}
                                 onRemarkSave={() => handleSaveRemark(appt.id)}
+                                onReschedule={() => {
+                                  setRescheduleTarget(appt);
+                                  setEditingRemarkId(null);
+                                  setConfirmCancelId(null);
+                                }}
                                 onComplete={() => handleCompleteAppt(appt.id)}
                               />
                             );
@@ -1801,6 +2048,16 @@ export default function AppointmentsCalendarPage() {
           </div>
         </div>
       )}
+
+      <RescheduleModal
+        visible={Boolean(rescheduleTarget)}
+        appointment={rescheduleTarget}
+        baseWeekOffset={weekOffset}
+        localAppts={localAppts}
+        slotStatus={draftSlotStatus}
+        onClose={() => setRescheduleTarget(null)}
+        onSave={handleRescheduleAppt}
+      />
 
       {/* Create modal */}
       <CreateModal
