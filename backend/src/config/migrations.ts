@@ -531,6 +531,158 @@ const migrations: Migration[] = [
       );
     },
   },
+  {
+    id: '023_canonical_order_customers',
+    description: 'Restore ordered customers to the customer master and use one canonical customer code',
+    up: async db => {
+      const connection = await db.getConnection();
+      try {
+        await connection.beginTransaction();
+        const [maxRows] = await connection.query(
+          `SELECT MAX(CAST(customer_code AS UNSIGNED)) AS max_code
+           FROM customers WHERE customer_code REGEXP '^[0-9]+$'`
+        );
+        let nextCode = Math.max(
+          100000,
+          Number((maxRows as Array<{ max_code: number | null }>)[0]?.max_code || 100000)
+        );
+        const [orderRows] = await connection.query(
+          `SELECT o.id, o.customer_id, o.customer_snapshot, c.id AS canonical_id,
+                  c.customer_code AS canonical_code, c.name AS canonical_name
+           FROM orders o
+           LEFT JOIN customers c ON c.id = o.customer_id
+           ORDER BY o.created_at, o.id
+           FOR UPDATE`
+        );
+
+        for (const raw of orderRows as Array<Record<string, unknown>>) {
+          const snapshotValue = raw.customer_snapshot;
+          let snapshot: Record<string, unknown> = {};
+          try {
+            snapshot = typeof snapshotValue === 'string'
+              ? JSON.parse(snapshotValue)
+              : ((snapshotValue as Record<string, unknown>) || {});
+          } catch {
+            snapshot = {};
+          }
+          const oldCustomerId = String(raw.customer_id || snapshot.id || '');
+          let canonicalId = String(raw.canonical_id || '');
+          let canonicalCode = String(raw.canonical_code || '');
+          let canonicalName = String(raw.canonical_name || snapshot.name || '');
+
+          if (!canonicalId) {
+            const oldCode = String(snapshot.customerCode || '').trim();
+            const phone = String(snapshot.phone || '').trim();
+            const name = String(snapshot.name || '').trim();
+            const [matches] = await connection.query(
+              `SELECT id, customer_code, name,
+                      CASE
+                        WHEN customer_code IN (?, ?) THEN 1
+                        WHEN ? <> '' AND phone = ? THEN 2
+                        ELSE 3
+                      END AS match_rank
+               FROM customers
+               WHERE customer_code IN (?, ?)
+                  OR (? <> '' AND phone = ?)
+                  OR (? <> '' AND name = ?)
+               ORDER BY match_rank, created_at
+               LIMIT 2
+               FOR UPDATE`,
+              [oldCustomerId, oldCode, phone, phone, oldCustomerId, oldCode, phone, phone, name, name]
+            );
+            const candidates = matches as Array<{ id: string; customer_code: string; name: string; match_rank: number }>;
+            const bestRank = Number(candidates[0]?.match_rank || 0);
+            const bestMatches = candidates.filter(candidate => Number(candidate.match_rank) === bestRank);
+            if (bestMatches.length === 1) {
+              canonicalId = bestMatches[0].id;
+              canonicalCode = bestMatches[0].customer_code;
+              canonicalName = bestMatches[0].name;
+            } else {
+              canonicalId = String(await connection.query('SELECT UUID() AS id').then(
+                result => (result[0] as Array<{ id: string }>)[0].id
+              ));
+              canonicalCode = String(++nextCode);
+              canonicalName = name || canonicalCode;
+              const advisorCandidate = String(snapshot.advisorId || snapshot.advisor || '');
+              const [advisorRows] = advisorCandidate
+                ? await connection.query(
+                  'SELECT id FROM users WHERE id = ? OR name = ? LIMIT 1',
+                  [advisorCandidate, advisorCandidate]
+                )
+                : [[]];
+              const advisorId = (advisorRows as Array<{ id: string }>)[0]?.id || null;
+              await connection.execute(
+                `INSERT INTO customers
+                   (id, customer_code, name, wechat, phone, area, source, acquired_at,
+                    tag, follow_date, advisor_id, profile, situation, intended_product, remark)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+                [
+                  canonicalId, canonicalCode, canonicalName,
+                  String(snapshot.wechat || '') || null, phone, String(snapshot.area || '') || null,
+                  String(snapshot.source || '') || '订单历史迁移', String(snapshot.acquiredAt || '') || null,
+                  String(snapshot.tag || '') || 'D1', String(snapshot.followDate || '') || null, advisorId,
+                  JSON.stringify(snapshot.profile || {}), String(snapshot.situation || '') || null,
+                  String(snapshot.intendedProduct || '') || null, String(snapshot.remark || '') || null,
+                ]
+              );
+            }
+          }
+
+          if (oldCustomerId && oldCustomerId !== canonicalId) {
+            for (const table of [
+              'appointments', 'service_records', 'salary_settlement_entries',
+              'salary_customer_adjustments',
+            ]) {
+              await connection.execute(
+                `UPDATE \`${table}\` SET customer_id = ? WHERE customer_id = ?`,
+                [canonicalId, oldCustomerId]
+              );
+            }
+          }
+          await connection.execute(
+            `UPDATE orders
+             SET customer_id = ?,
+                 customer_snapshot = JSON_SET(
+                   COALESCE(customer_snapshot, JSON_OBJECT()),
+                   '$.id', ?, '$.customerCode', ?, '$.name', ?
+                 )
+             WHERE id = ?`,
+            [canonicalId, canonicalId, canonicalCode, canonicalName, String(raw.id)]
+          );
+          if (oldCustomerId !== canonicalId || String(snapshot.customerCode || '') !== canonicalCode) {
+            await connection.execute(
+              `INSERT INTO operation_logs
+                 (id, user_id, username, action, module, entity_id, request_id,
+                  description, request_payload, response_status, ip_address)
+               VALUES (UUID(), 'system', '数据一致性迁移', 'RELINK_CUSTOMER', 'orders', ?, ?,
+                       '订单客户已关联客户主档统一编号', ?, 200, 'internal')`,
+              [
+                String(raw.id),
+                `migration-023-${String(raw.id)}`,
+                JSON.stringify({
+                  beforeCustomerId: oldCustomerId,
+                  beforeCustomerCode: snapshot.customerCode || '',
+                  afterCustomerId: canonicalId,
+                  afterCustomerCode: canonicalCode,
+                }),
+              ]
+            );
+          }
+        }
+
+        await connection.execute(
+          `UPDATE customers c
+           SET total_orders = (SELECT COUNT(*) FROM orders o WHERE o.customer_id = c.id)`
+        );
+        await connection.commit();
+      } catch (error) {
+        await connection.rollback();
+        throw error;
+      } finally {
+        connection.release();
+      }
+    },
+  },
 ];
 
 export async function runMigrations(db: mysql.Pool) {

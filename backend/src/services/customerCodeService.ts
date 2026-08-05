@@ -1,5 +1,7 @@
 import type { Pool, RowDataPacket } from 'mysql2/promise';
 
+type CustomerCodeDb = Pick<Pool, 'execute' | 'query'>;
+
 interface CustomerCodeRow extends RowDataPacket {
   customer_code: string;
 }
@@ -8,7 +10,7 @@ interface MaxCustomerCodeRow extends RowDataPacket {
   max_code: number | null;
 }
 
-export async function generateCustomerCode(db: Pool, requested?: unknown): Promise<string> {
+export async function generateCustomerCode(db: CustomerCodeDb, requested?: unknown): Promise<string> {
   const preferred = typeof requested === 'string' ? requested.trim() : '';
   if (preferred) {
     const [rows] = await db.execute<CustomerCodeRow[]>(

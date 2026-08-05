@@ -4,6 +4,7 @@ import { getDb } from '../config/database';
 import { createError } from '../middleware/errorHandler';
 import { formatDateOnly, jsonOrNull, parseJson } from '../utils/serialization';
 import { mergeCustomerProfileFollowHistory, mergeOrderFollowHistory } from './followHistoryService';
+import { generateCustomerCode } from './customerCodeService';
 
 export interface OrderWriteBody {
   id?: string;
@@ -54,6 +55,20 @@ interface CustomerSnapshot extends Record<string, unknown> {
   id: string;
   customerCode: string;
   name: string;
+  wechat?: string;
+  phone?: string;
+  area?: string;
+  source?: string;
+  acquiredAt?: string;
+  tag?: string;
+  followStatus?: string;
+  followDate?: string;
+  advisorId?: string | null;
+  advisor?: string;
+  profile?: unknown;
+  situation?: string;
+  intendedProduct?: string;
+  remark?: string;
 }
 
 interface CustomerDbRow {
@@ -181,8 +196,17 @@ async function resolveOrderCustomerId(
     if (existingByPhone) return existingByPhone;
   }
 
+  if (customerName) {
+    const [nameRows] = await db.execute(
+      'SELECT id FROM customers WHERE name = ? ORDER BY created_at DESC LIMIT 2 FOR UPDATE',
+      [customerName]
+    );
+    const exactNameMatches = nameRows as Array<{ id: string }>;
+    if (exactNameMatches.length === 1) return exactNameMatches[0].id;
+  }
+
   const customerId = randomUUID();
-  const customerCode = 'C' + Date.now().toString().slice(-8);
+  const customerCode = await generateCustomerCode(db);
   const advisorId = await resolveAdvisorId(db, body.customerAdvisor || body.advisor);
   await db.execute(
     `INSERT INTO customers (id, customer_code, name, wechat, phone, area, source, acquired_at, tag, follow_status, advisor_id, profile, situation, intended_product, remark)
@@ -300,6 +324,29 @@ async function applyCustomerEdits(
   return next;
 }
 
+async function synchronizeCustomerMaster(
+  db: PoolConnection,
+  customerId: string,
+  snapshot: CustomerSnapshot
+) {
+  if (!customerId) return;
+  await db.execute(
+    `UPDATE customers
+     SET name=?, wechat=?, phone=?, area=?, source=?, acquired_at=?, tag=?,
+         follow_status=COALESCE(NULLIF(?, ''), follow_status), follow_date=?,
+         advisor_id=?, profile=?, situation=?, intended_product=?, remark=?
+     WHERE id=?`,
+    [
+      snapshot.name || '', snapshot.wechat || null, snapshot.phone || '',
+      snapshot.area || null, snapshot.source || null, snapshot.acquiredAt || null,
+      snapshot.tag || null, snapshot.followStatus || '', snapshot.followDate || null,
+      snapshot.advisorId || null, jsonOrNull(snapshot.profile || {}),
+      snapshot.situation || null, snapshot.intendedProduct || null,
+      snapshot.remark || null, customerId,
+    ]
+  );
+}
+
 export function applyCanonicalCustomerTag<T extends Record<string, unknown>>(
   value: T,
   tag: string
@@ -361,6 +408,7 @@ export async function createOrder(body: OrderWriteBody) {
     const customerId = await resolveOrderCustomerId(connection, body, leadCustomer?.id);
     const sourceSnapshot = await getCustomerSnapshot(connection, customerId, body);
     const customerSnapshot = await applyCustomerEdits(connection, sourceSnapshot, body);
+    await synchronizeCustomerMaster(connection, customerId, customerSnapshot);
     await assertCustomerHasNoOtherOrder(connection, {
       requestedId,
       customerId,
@@ -393,7 +441,12 @@ export async function createOrder(body: OrderWriteBody) {
         body.customerTag
       );
     }
-    if (customerId) await connection.execute('DELETE FROM customers WHERE id = ?', [customerId]);
+    if (customerId) {
+      await connection.execute(
+        'UPDATE customers SET total_orders = total_orders + 1 WHERE id = ?',
+        [customerId]
+      );
+    }
     await connection.commit();
     return { id, orderNo };
   } catch (error) {
@@ -445,7 +498,11 @@ export async function updateOrder(orderId: string, body: OrderWriteBody, actor: 
       selectedSnapshot = await getCustomerSnapshot(connection, customerId, body);
     }
 
+    const canonicalSnapshot = await getCustomerSnapshot(connection, customerId, body);
+    if (canonicalSnapshot.customerCode) selectedSnapshot = canonicalSnapshot;
+
     const customerSnapshot = await applyCustomerEdits(connection, selectedSnapshot, body);
+    await synchronizeCustomerMaster(connection, customerId, customerSnapshot);
     const payStatus = normalizePayStatus(body.payStatus);
     const orderType = body.type || existing.type;
     const totalTimes = orderType === '体验卡' && !body.isUpgrade
@@ -499,7 +556,14 @@ export async function updateOrder(orderId: string, body: OrderWriteBody, actor: 
       );
     }
     if (customerId && customerId !== existing.customer_id) {
-      await connection.execute('DELETE FROM customers WHERE id = ?', [customerId]);
+      await connection.execute(
+        'UPDATE customers SET total_orders = total_orders + 1 WHERE id = ?',
+        [customerId]
+      );
+      await connection.execute(
+        'UPDATE customers SET total_orders = GREATEST(total_orders - 1, 0) WHERE id = ?',
+        [existing.customer_id]
+      );
     }
     await connection.commit();
   } catch (error) {

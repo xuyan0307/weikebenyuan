@@ -3581,7 +3581,7 @@ export default function OrdersListPage() {
       customerPhone: o.customerPhone || cust?.phone || '',
       advisor: o.advisor || cust?.advisor || '—',
       tag: (o.tag || cust?.tag || null) as CustomerTag | null,
-      resolvedCustomerId: o.customerCode || cust?.id || o.customerId || '—',
+      resolvedCustomerId: cust?.id || o.customerCode || o.customerId || '—',
       internalCustomerId: o.customerId || cust?._id || '',
     };
   });
