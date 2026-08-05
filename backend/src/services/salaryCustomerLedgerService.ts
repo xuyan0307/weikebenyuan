@@ -56,6 +56,7 @@ interface AdjustmentRow {
   customer_id: string;
   coupon_fee: number | string;
   other_fee?: number | string;
+  commission_rate?: number | string | null;
   paid_amount: number | string;
   adjustment_note?: string | null;
 }
@@ -225,6 +226,9 @@ export function buildSalaryCustomerLedger(input: SalaryCustomerLedgerInput) {
       ...adjustment,
       coupon_fee: money(current?.coupon_fee) + money(adjustment.coupon_fee),
       other_fee: money(current?.other_fee) + money(adjustment.other_fee),
+      commission_rate: adjustment.commission_rate === null || adjustment.commission_rate === undefined
+        ? current?.commission_rate ?? null
+        : adjustment.commission_rate,
       paid_amount: money(current?.paid_amount) + money(adjustment.paid_amount),
       adjustment_note: [current?.adjustment_note, adjustment.adjustment_note].filter(Boolean).join('；'),
     });
@@ -331,6 +335,9 @@ export function buildSalaryCustomerLedger(input: SalaryCustomerLedgerInput) {
         laborUnitFee,
         otherFee,
         manualOtherFee,
+        commissionRateOverride: adjustment?.commission_rate === null || adjustment?.commission_rate === undefined
+          ? null
+          : Math.min(100, Math.max(0, money(adjustment.commission_rate))),
         commission: 0,
         totalFee: 0,
         paidSubtotal,
@@ -356,12 +363,14 @@ export function buildSalaryCustomerLedger(input: SalaryCustomerLedgerInput) {
     const calculatedCustomers = customers.map(customer => {
       // 提成是客户套餐应付工资的一部分，不因当前查看月份而清零。
       // 月份筛选只影响当月完成凭证与周结算，不改变套餐本身的提成金额。
-      const commission = money(customer.packageAmount * commissionRate / 100);
+      const customerCommissionRate = customer.commissionRateOverride ?? commissionRate;
+      const commission = money(customer.packageAmount * customerCommissionRate / 100);
       const totalFee = money(
         customer.couponFee + customer.laborFee + commission + customer.otherFee
       );
       return {
         ...customer,
+        commissionRate: customerCommissionRate,
         commission,
         totalFee,
         unpaidSubtotal: money(Math.max(0, totalFee - customer.paidSubtotal)),

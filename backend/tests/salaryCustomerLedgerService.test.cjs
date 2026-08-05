@@ -124,6 +124,22 @@ test('uses the editable therapist commission rate as the global salary source', 
   assert.equal(ledger.therapists[0].customers[0].commission, 570);
 });
 
+test('allows a customer settlement commission rate to override the therapist profile default', () => {
+  const ledger = buildSalaryCustomerLedger({
+    month: '2026-08',
+    therapists: [{ id: 't1', name: '徐老师', upgrade_rate: 50, commission_rate: 8 }],
+    customers: [{ id: 'c1', customer_code: '100001', name: '客户级提成纠偏' }],
+    orders: [{ customer_id: 'c1', type: '套餐', amount: 6000, pay_status: '已付款', purchase_date: '2026-08-01', created_date: '2026-08-01', used_times: 0, total_times: 5, is_upgrade: 1, service_item_count: 2, service_items: '一、二', service_people: { sp1: { assign: '徐老师' } } }],
+    appointments: [], entries: [],
+    adjustments: [{ therapist_id: 't1', customer_id: 'c1', coupon_fee: 300, other_fee: 0, commission_rate: 10.5, paid_amount: 0 }],
+  });
+  const customer = ledger.therapists[0].customers[0];
+  assert.equal(ledger.therapists[0].commissionRate, 8);
+  assert.equal(customer.commissionRate, 10.5);
+  assert.equal(customer.commission, 630);
+  assert.equal(customer.totalFee, 2430);
+});
+
 test('keeps the experience-card status embedded in an upgraded package snapshot', () => {
   const result = buildSalaryCustomerLedger({
     month: '2026-08',

@@ -27,6 +27,7 @@ type EntryDraft = Pick<
 interface AdjustmentDraft {
   couponFee: number;
   otherFee: number;
+  commissionRate: number;
   adjustmentNote: string;
 }
 
@@ -105,8 +106,8 @@ function summaryFromCustomers(customers: SalaryCustomerLedger[], weekKey: string
 
 const therapistTypes = ['产康师', '调理师', '运动康复师'];
 const FROZEN_COLUMN_COUNT = 5;
-const SALARY_COLUMN_WIDTHS_KEY = 'salary-column-widths-v6';
-const defaultColumnWidths = [64, 56, 58, 72, 46, 78, 76, 66, 66, 66, 70, 70, 66, 66, 46, 78, 78, 78, 78, 78, 78, 78, 86];
+const SALARY_COLUMN_WIDTHS_KEY = 'salary-column-widths-v7';
+const defaultColumnWidths = [64, 56, 58, 72, 46, 78, 76, 66, 66, 58, 66, 70, 70, 66, 66, 46, 78, 78, 78, 78, 78, 78, 78, 86];
 
 function initialColumnWidths(): number[] {
   try {
@@ -328,6 +329,7 @@ export default function FinanceSalaryPage() {
     setAdjustmentDraft({
       couponFee: customer.couponFee,
       otherFee: customer.manualOtherFee,
+      commissionRate: customer.commissionRate,
       adjustmentNote: customer.adjustmentNote,
     });
   }
@@ -347,6 +349,10 @@ export default function FinanceSalaryPage() {
 
   async function saveAdjustment() {
     if (!editingCustomer || !adjustmentDraft) return;
+    if (!Number.isFinite(adjustmentDraft.commissionRate) || adjustmentDraft.commissionRate < 0 || adjustmentDraft.commissionRate > 100) {
+      toast.error('提成比例须在0至100之间');
+      return;
+    }
     setSaving(true);
     try {
       await mutations.updateCustomerAdjustment({
@@ -389,7 +395,7 @@ export default function FinanceSalaryPage() {
       customer.therapistName,
       visibleRows.find(row => row.therapistId === customer.therapistId)?.therapistType || '产康师',
       visibleRows.find(row => row.therapistId === customer.therapistId)?.tier || '',
-      visibleRows.find(row => row.therapistId === customer.therapistId)?.commissionRate || 0,
+      customer.commissionRate,
       visibleRows.find(row => row.therapistId === customer.therapistId)?.upgradeRate || 0,
       customer.customerId, customer.customerName, customer.experienceStatus, customer.experienceServiceDate,
       customer.upgradeDate, customer.itemCount, customer.packageAmount,
@@ -426,7 +432,7 @@ export default function FinanceSalaryPage() {
             <div>客户、套餐金额、项目数及总次数来自客户订单；已服务次数和每日完成记录来自排期管理。</div>
             <div>抵扣券默认 ¥300，可手动调整；其他费用默认 ¥0，可手动填写。</div>
             <div>产康师单次手工费：2项 ¥300、3项 ¥400、4项 ¥500、5项及以上 ¥600；总手工费＝单次手工费×订单总次数。</div>
-            <div>提成＝套餐金额×技师档案当前定档比例（观察池0%、A档6%、B档8%、S档12%、王牌15%）；档案更新后工资全局重算。</div>
+            <div>提成比例初始读取技师档案（观察池0%、A档6%、B档8%、S档12%、王牌15%），支持客户级手动纠偏；提成＝套餐金额×提成比例。</div>
             <div>总费用＝抵扣券＋手工费＋提成＋其他费用。</div>
             <div>每日费用由排期“已完成”服务生成并可纠偏；确认本周结算后，才累计到已付金额。</div>
           </div>
@@ -466,7 +472,7 @@ export default function FinanceSalaryPage() {
             </colgroup>
             <thead className="sticky top-0 z-30 bg-muted text-muted-foreground shadow-sm">
               <tr>
-                {['客户ID', '客户姓名', '体验卡', '升单时间', '项目', '套餐金额', '已服务/总数', '抵扣券', '手工费', '提成', '其他费用', '总费用', '已付', '未付'].map((label, index) => (
+                {['客户ID', '客户姓名', '体验卡', '升单时间', '项目', '套餐金额', '已服务/总数', '抵扣券', '手工费', '提成比例', '提成', '其他费用', '总费用', '已付', '未付'].map((label, index) => (
                   <ResizableHeader
                     key={label}
                     index={index}
@@ -476,19 +482,19 @@ export default function FinanceSalaryPage() {
                     className="whitespace-nowrap text-center"
                   >{label}</ResizableHeader>
                 ))}
-                <ResizableHeader index={14} width={columnWidths[14]} onResize={resizeColumn}>行别</ResizableHeader>
+                <ResizableHeader index={15} width={columnWidths[15]} onResize={resizeColumn}>行别</ResizableHeader>
                 {(selectedWeek?.days || []).map((date, index) => (
-                  <ResizableHeader key={date} index={15 + index} width={columnWidths[15 + index]} onResize={resizeColumn}>
+                  <ResizableHeader key={date} index={16 + index} width={columnWidths[16 + index]} onResize={resizeColumn}>
                     <div>{weekdays[index]}</div><div className="mt-0.5 text-foreground">{date.slice(5).replace('-', '/')}</div>
                   </ResizableHeader>
                 ))}
-                <ResizableHeader index={22} width={columnWidths[22]} onResize={resizeColumn}>{weekStart === mondayOfCurrentWeek() ? '本周' : '当周'}结算</ResizableHeader>
+                <ResizableHeader index={23} width={columnWidths[23]} onResize={resizeColumn}>{weekStart === mondayOfCurrentWeek() ? '本周' : '当周'}结算</ResizableHeader>
               </tr>
             </thead>
             {salaryQ.isLoading ? (
-              <tbody><tr><td colSpan={23} className="p-12 text-center text-muted-foreground">正在同步结算台账…</td></tr></tbody>
+              <tbody><tr><td colSpan={24} className="p-12 text-center text-muted-foreground">正在同步结算台账…</td></tr></tbody>
             ) : visibleRows.length === 0 ? (
-              <tbody><tr><td colSpan={23} className="p-12 text-center text-muted-foreground">当前暂无技师客户数据</td></tr></tbody>
+              <tbody><tr><td colSpan={24} className="p-12 text-center text-muted-foreground">当前暂无技师客户数据</td></tr></tbody>
             ) : visibleRows.map(row => (
               <tbody key={row.therapistId}>
                 <tr className="bg-primary/10 font-semibold">
@@ -504,6 +510,7 @@ export default function FinanceSalaryPage() {
                   <td className="border-y border-r border-border px-2 py-3 text-emerald-700">{row.customers.reduce((sum, item) => sum + item.servedTimes, 0)}/{row.customers.reduce((sum, item) => sum + item.totalTimes, 0)}</td>
                   <td className="border-y border-r border-border px-2 py-3">{money(row.customers.reduce((sum, item) => sum + item.couponFee, 0))}</td>
                   <td className="border-y border-r border-border px-2 py-3 text-blue-700">{money(row.customers.reduce((sum, item) => sum + item.laborFee, 0))}</td>
+                  <td className="border-y border-r border-border px-2 py-3 text-purple-700">{row.commissionRate}%</td>
                   <td className="border-y border-r border-border px-2 py-3 text-purple-700">{money(row.customers.reduce((sum, item) => sum + item.commission, 0))}</td>
                   <td className="border-y border-r border-border px-2 py-3 text-amber-700">{money(row.customers.reduce((sum, item) => sum + item.otherFee, 0))}</td>
                   <td className="border-y border-r border-border px-2 py-3">{money(row.customers.reduce((sum, item) => sum + item.totalFee, 0))}</td>
@@ -534,6 +541,7 @@ export default function FinanceSalaryPage() {
                       <td rowSpan={3} className="border-b border-r border-border px-2 py-3 text-center font-semibold text-emerald-600">{customer.servedTimes}/{customer.totalTimes}</td>
                       <td rowSpan={3} className="border-b border-r border-border px-3 py-3"><button onClick={() => openCustomer(customer)} className={editable ? 'text-primary hover:underline' : ''}>{money(customer.couponFee)}</button></td>
                       <td rowSpan={3} className="border-b border-r border-border px-2 py-3 font-semibold text-blue-700">{money(customer.laborFee)}</td>
+                      <td rowSpan={3} className="border-b border-r border-border px-2 py-3 font-semibold text-purple-700"><button onClick={() => openCustomer(customer)} className={editable ? 'hover:underline' : ''}>{customer.commissionRate}%</button></td>
                       <td rowSpan={3} className="border-b border-r border-border px-2 py-3 font-semibold text-purple-700">{money(customer.commission)}</td>
                       <td rowSpan={3} title="路补、耗材等其他费用，默认0元，支持手动调整" className="border-b border-r border-border px-2 py-3 font-semibold text-amber-700"><button onClick={() => openCustomer(customer)} className={editable ? 'text-amber-700 hover:underline' : ''}>{money(customer.otherFee)}</button></td>
                       <td rowSpan={3} className="border-b border-r border-border px-3 py-3 font-semibold">{money(customer.totalFee)}</td>
@@ -602,6 +610,7 @@ export default function FinanceSalaryPage() {
         <div className="space-y-4">
           <div className="rounded-lg bg-muted p-3 text-sm leading-6">当前总费用：<b>{money(editingCustomer.totalFee)}</b>，已付：<b className="text-emerald-700">{money(editingCustomer.paidSubtotal)}</b>，未付：<b className="text-orange-600">{money(editingCustomer.unpaidSubtotal)}</b><br /><span className="text-xs text-muted-foreground">手工费 {money(editingCustomer.laborUnitFee)} × {editingCustomer.totalTimes}次＝{money(editingCustomer.laborFee)}；已付金额仅由每周已确认费用累计。</span></div>
           <label className="block space-y-1.5 text-sm"><span>抵扣券（默认 ¥300，计入总费用）</span><input type="number" min="0" value={adjustmentDraft.couponFee} onChange={event => setAdjustmentDraft({ ...adjustmentDraft, couponFee: Number(event.target.value) })} className={inputClass} /></label>
+          <label className="block space-y-1.5 text-sm"><span>提成比例（初始读取技师档案，支持单独纠偏）</span><input type="number" min="0" max="100" step="0.01" value={adjustmentDraft.commissionRate} onChange={event => setAdjustmentDraft({ ...adjustmentDraft, commissionRate: Number(event.target.value) })} className={inputClass} /><span className="text-xs text-muted-foreground">提成＝{money(editingCustomer.packageAmount)} × {adjustmentDraft.commissionRate}% ＝ {money(editingCustomer.packageAmount * adjustmentDraft.commissionRate / 100)}</span></label>
           <label className="block space-y-1.5 text-sm"><span>其他费用（默认 ¥0，路补/耗材等）</span><input type="number" min="0" value={adjustmentDraft.otherFee} onChange={event => setAdjustmentDraft({ ...adjustmentDraft, otherFee: Number(event.target.value) })} className={inputClass} /></label>
           <label className="block space-y-1.5 text-sm"><span>月度结算备注</span><textarea rows={3} value={adjustmentDraft.adjustmentNote} onChange={event => setAdjustmentDraft({ ...adjustmentDraft, adjustmentNote: event.target.value })} className={inputClass} /></label>
         </div>

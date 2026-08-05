@@ -250,6 +250,7 @@ export interface SalaryCustomerLedger {
   laborUnitFee: number;
   otherFee: number;
   manualOtherFee: number;
+  commissionRate: number;
   commission: number;
   totalFee: number;
   paidSubtotal: number;
@@ -324,6 +325,7 @@ export const financeApi = {
     month: string;
     couponFee: number;
     otherFee: number;
+    commissionRate: number;
     paidAmount: number;
     adjustmentNote: string;
   }) => api.patch<{ message: string }>('/finance/salary/customer-adjustments', body),

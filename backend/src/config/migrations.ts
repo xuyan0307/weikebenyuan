@@ -683,6 +683,18 @@ const migrations: Migration[] = [
       }
     },
   },
+  {
+    id: '024_salary_customer_commission_rate',
+    description: 'Allow customer salary commission rates to override the therapist profile default',
+    up: async db => {
+      await addColumn(
+        db,
+        'salary_customer_adjustments',
+        'commission_rate',
+        'decimal(5,2) DEFAULT NULL AFTER other_fee'
+      );
+    },
+  },
 ];
 
 export async function runMigrations(db: mysql.Pool) {

@@ -185,7 +185,8 @@ router.get('/salary', authenticateToken, async (req, res, next) => {
        FROM appointments WHERE status <> '已取消'`
     );
     const [adjustmentRows] = await db.query(
-      `SELECT * FROM salary_customer_adjustments ${scope === 'all' ? '' : 'WHERE month = ?'}`,
+      `SELECT * FROM salary_customer_adjustments ${scope === 'all' ? '' : 'WHERE month = ?'}
+       ORDER BY COALESCE(adjusted_at, updated_at), created_at`,
       scope === 'all' ? [] : [month]
     );
     const ledger = buildSalaryCustomerLedger({
@@ -240,7 +241,7 @@ router.get('/salary', authenticateToken, async (req, res, next) => {
       weekStart,
       weekEnd,
       editable: ADMIN_ROLES.includes(req.userRole as typeof ADMIN_ROLES[number]),
-      source: '客户与套餐数据来自订单；已服务次数、每天服务项目和费用凭证来自排期管理“已完成”服务；抵扣券默认300元；手工费按项目单价×订单总次数；提成按套餐金额×技师档案当前定档比例并随档案更新全局重算；其他费用默认0元；每周凭证确认后才累计到已付金额',
+      source: '客户与套餐数据来自订单；已服务次数、每天服务项目和费用凭证来自排期管理“已完成”服务；抵扣券默认300元；手工费按项目单价×订单总次数；提成比例初始读取技师档案并支持客户级手动纠偏，提成按套餐金额×提成比例计算；其他费用默认0元；每周凭证确认后才累计到已付金额',
       weeks: ledger.weeks,
       summary: ledger.summary,
       data,
@@ -266,19 +267,24 @@ router.patch(
       }
       const couponFee = money(req.body?.couponFee);
       const otherFee = money(req.body?.otherFee);
+      const commissionRate = Number(req.body?.commissionRate);
+      if (!Number.isFinite(commissionRate) || commissionRate < 0 || commissionRate > 100) {
+        throw Object.assign(new Error('提成比例须在0至100之间'), { statusCode: 400 });
+      }
       const paidAmount = money(req.body?.paidAmount);
       const note = String(req.body?.adjustmentNote || '').slice(0, 500);
       await db.execute(
         `INSERT INTO salary_customer_adjustments (
-           id, therapist_id, customer_id, month, coupon_fee, other_fee, paid_amount,
+           id, therapist_id, customer_id, month, coupon_fee, other_fee, commission_rate, paid_amount,
            adjustment_note, adjusted_by, adjusted_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
          ON DUPLICATE KEY UPDATE
            coupon_fee = VALUES(coupon_fee), other_fee = VALUES(other_fee),
+           commission_rate = VALUES(commission_rate),
            paid_amount = VALUES(paid_amount),
            adjustment_note = VALUES(adjustment_note), adjusted_by = VALUES(adjusted_by),
            adjusted_at = NOW()`,
-        [randomUUID(), therapistId, customerId, month, couponFee, otherFee, paidAmount, note, req.userId || null]
+        [randomUUID(), therapistId, customerId, month, couponFee, otherFee, commissionRate, paidAmount, note, req.userId || null]
       );
       res.json({ message: '客户结算调整已保存' });
     } catch (err) {
