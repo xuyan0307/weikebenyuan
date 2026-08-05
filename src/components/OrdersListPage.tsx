@@ -278,14 +278,16 @@ const FOLLOW_STATUS_COLORS: Record<string, string> = {
 const SERVICE_PRESETS = ['腹直肌', '骨盆', '盆底肌', '通乳'] as const;
 
 /* ─── Freeze pane helpers ─────────────────────────────── */
-const COL_W = [82, 64, 72, 54];
+const COL_W = [82, 110];
 const COL_LEFT = COL_W.reduce<number[]>((acc, w, i) => {
   if (i === 0) return [0];
   return [...acc, acc[i - 1] + COL_W[i - 1]];
 }, []);
-const FREEZE_TOTAL = COL_W.reduce((s, w) => s + w, 0); // 272
+const FREEZE_TOTAL = COL_W.reduce((s, w) => s + w, 0);
+const ACTION_COL_W = 96;
 
 const FREEZE_SHADOW = '4px 0 8px -2px rgba(0,0,0,0.14)';
+const RIGHT_FREEZE_SHADOW = '-4px 0 8px -2px rgba(0,0,0,0.14)';
 
 function STICKY_TH_STYLE(colIdx: number): React.CSSProperties {
   const isLast = colIdx === COL_W.length - 1;
@@ -380,6 +382,36 @@ function matchesFollowTimeFilter(value: string, selected: string[]) {
     emptyMeansAll: true,
     noneValue: FILTER_NONE,
   });
+}
+
+const STICKY_RIGHT_TH_STYLE: React.CSSProperties = {
+  position: 'sticky',
+  right: 0,
+  width: ACTION_COL_W,
+  minWidth: ACTION_COL_W,
+  maxWidth: ACTION_COL_W,
+  zIndex: 4,
+  background: 'var(--muted)',
+  borderLeft: '2px solid var(--border)',
+  boxShadow: RIGHT_FREEZE_SHADOW,
+  textAlign: 'center',
+  whiteSpace: 'nowrap',
+};
+
+function STICKY_RIGHT_TD_STYLE(bg: string): React.CSSProperties {
+  return {
+    position: 'sticky',
+    right: 0,
+    width: ACTION_COL_W,
+    minWidth: ACTION_COL_W,
+    maxWidth: ACTION_COL_W,
+    zIndex: 3,
+    background: bg,
+    borderLeft: '2px solid var(--border)',
+    boxShadow: RIGHT_FREEZE_SHADOW,
+    textAlign: 'center',
+    whiteSpace: 'nowrap',
+  };
 }
 
 /* ─── Multi-Select Dropdown ──────────────────────────── */
@@ -3685,17 +3717,17 @@ export default function OrdersListPage() {
   }
 
   /* ── Column widths for non-frozen cols ── */
-  // 区域 | 订单类型 | 服务项目 | 跟进状态 | 跟进时间 | 跟进事项 | 付款状态
-  const NORMAL_COLS_BEFORE_AMOUNT = [92, 80, 160, 76, 82, 120, 76];
-  // 合同状态 | 归属客服 | 技师 | 服务情况 | 操作
-  const NORMAL_COLS_AFTER_AMOUNT = [76, 76, 88, 82, 96];
+  // 标签 | 区域 | 订单类型 | 服务项目 | 跟进状态 | 跟进时间 | 跟进事项 | 付款状态
+  const NORMAL_COLS_BEFORE_AMOUNT = [54, 92, 80, 160, 76, 82, 120, 76];
+  // 合同状态 | 归属客服 | 客户ID | 技师 | 服务情况
+  const NORMAL_COLS_AFTER_AMOUNT = [76, 76, 92, 88, 82];
   const NORMAL_COLS = [
     ...NORMAL_COLS_BEFORE_AMOUNT,
     ...amountColumns.map(() => 108),
     ...NORMAL_COLS_AFTER_AMOUNT,
   ];
   const totalNormal = NORMAL_COLS.reduce((s, w) => s + w, 0);
-  const tableMinW = FREEZE_TOTAL + totalNormal;
+  const tableMinW = FREEZE_TOTAL + totalNormal + ACTION_COL_W;
 
   return (
     <>
@@ -3879,15 +3911,15 @@ export default function OrdersListPage() {
               <colgroup>
                 {COL_W.map((w, i) => <col key={`f${i}`} style={{ width: w }} />)}
                 {NORMAL_COLS.map((w, i) => <col key={`n${i}`} style={{ width: w }} />)}
+                <col style={{ width: ACTION_COL_W }} />
               </colgroup>
               <thead>
                 <tr>
-                  {/* Frozen cols */}
+                  {/* Only purchase time and customer name are frozen on the left. */}
                   <th style={STICKY_TH_STYLE(0)}>购卡时间</th>
-                  <th style={STICKY_TH_STYLE(1)}>客户ID</th>
-                  <th style={STICKY_TH_STYLE(2)}>客户姓名</th>
-                  <th style={STICKY_TH_STYLE(3)}>标签</th>
+                  <th style={STICKY_TH_STYLE(1)}>客户姓名</th>
                   {/* Normal cols */}
+                  <th style={{ textAlign: 'center' }}>标签</th>
                   <th>区域</th>
                   <th style={{ textAlign: 'center' }}>订单类型</th>
                   <th>服务项目</th>
@@ -3900,9 +3932,10 @@ export default function OrdersListPage() {
                   ))}
                   <th style={{ textAlign: 'center' }}>合同状态</th>
                   <th>归属客服</th>
+                  <th style={{ textAlign: 'center' }}>客户ID</th>
                   <th>技师</th>
                   <th style={{ textAlign: 'center' }}>服务情况</th>
-                  <th style={{ textAlign: 'center' }}>操作</th>
+                  <th style={STICKY_RIGHT_TH_STYLE}>操作</th>
                 </tr>
               </thead>
               <tbody>
@@ -3911,8 +3944,6 @@ export default function OrdersListPage() {
                     <span className="text-xs font-semibold" style={{ color: 'var(--brand)' }}>销售总额</span>
                   </td>
                   <td style={STICKY_TD_STYLE(1, 'rgba(30,136,229,0.06)')} />
-                  <td style={STICKY_TD_STYLE(2, 'rgba(30,136,229,0.06)')} />
-                  <td style={STICKY_TD_STYLE(3, 'rgba(30,136,229,0.06)')} />
                   {NORMAL_COLS_BEFORE_AMOUNT.map((_, index) => <td key={`summary-before-${index}`} />)}
                   {amountColumns.map(column => (
                     <td
@@ -3926,6 +3957,7 @@ export default function OrdersListPage() {
                     </td>
                   ))}
                   {NORMAL_COLS_AFTER_AMOUNT.map((_, index) => <td key={`summary-after-${index}`} />)}
+                  <td style={STICKY_RIGHT_TD_STYLE('rgba(30,136,229,0.06)')} />
                 </tr>
                 {paginated.map(o => {
                   const bgColor = 'var(--card)';
@@ -3955,15 +3987,8 @@ export default function OrdersListPage() {
                         </span>
                       </td>
 
-                      {/* Frozen: 客户ID */}
-                      <td style={STICKY_TD_STYLE(1, bgColor)}>
-                        <span className="font-mono text-xs" style={{ color: 'var(--brand)', letterSpacing: '-0.02em' }}>
-                          {o.resolvedCustomerId}
-                        </span>
-                      </td>
-
                       {/* Frozen: 客户姓名 */}
-                      <td style={STICKY_TD_STYLE(2, bgColor)}>
+                      <td style={STICKY_TD_STYLE(1, bgColor)}>
                         <span
                           className="font-medium text-sm"
                           style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
@@ -3973,8 +3998,8 @@ export default function OrdersListPage() {
                         </span>
                       </td>
 
-                      {/* Frozen: 标签 */}
-                      <td style={STICKY_TD_STYLE(3, bgColor)}>
+                      {/* Scrollable: 标签 */}
+                      <td style={{ textAlign: 'center' }}>
                         {o.tag ? (
                           <span className={`badge ${TAG_CLS[o.tag] ?? 'badge-gray'}`}>{o.tag}</span>
                         ) : (
@@ -4109,6 +4134,13 @@ export default function OrdersListPage() {
                         <span className="text-sm">{o.advisor}</span>
                       </td>
 
+                      {/* 客户ID follows the owning advisor and scrolls with middle columns. */}
+                      <td style={{ textAlign: 'center' }}>
+                        <span className="font-mono text-xs" style={{ color: 'var(--brand)', letterSpacing: '-0.02em' }}>
+                          {o.resolvedCustomerId}
+                        </span>
+                      </td>
+
                       {/* 技师 */}
                       <td>
                         <span
@@ -4129,7 +4161,7 @@ export default function OrdersListPage() {
                       </td>
 
                       {/* 操作 */}
-                      <td style={{ textAlign: 'center' }}>
+                      <td style={STICKY_RIGHT_TD_STYLE(bgColor)}>
                         <RecordActionButtons
                           onView={() => { setModalMode('view'); setEditOrderId(o.id); setSelectedOrder(o); setShowModal(true); }}
                           onEdit={isReadOnly ? undefined : () => { setModalMode('edit'); setEditOrderId(o.id); setSelectedOrder(o); setShowModal(true); }}

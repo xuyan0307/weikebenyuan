@@ -660,17 +660,14 @@ function CustomerModalWrap({ show, title, onClose, onConfirm, onDelete, confirmL
 }
 
 // ─────────────────────────── Freeze-pane sticky styles ───────────────────────────
-// Compact widths for the first four frozen columns
-const COL_W = [82, 64, 96, 54] as const; // 获客时间 | 客户ID | 客户姓名 | 标签
-const COL_LEFT: [number, number, number, number] = [
-  0,
-  COL_W[0],
-  COL_W[0] + COL_W[1],
-  COL_W[0] + COL_W[1] + COL_W[2],
-];
+// Only acquisition time and customer name stay frozen on the left.
+const COL_W = [82, 110] as const;
+const COL_LEFT: [number, number] = [0, COL_W[0]];
+const ACTION_COL_W = 96;
 const FREEZE_SHADOW = '4px 0 8px -2px rgba(0,0,0,0.14)';
+const RIGHT_FREEZE_SHADOW = '-4px 0 8px -2px rgba(0,0,0,0.14)';
 
-const STICKY_TH_STYLE = (i: 0 | 1 | 2 | 3): React.CSSProperties => ({
+const STICKY_TH_STYLE = (i: 0 | 1): React.CSSProperties => ({
   position: 'sticky',
   left: COL_LEFT[i],
   zIndex: 3,
@@ -680,14 +677,14 @@ const STICKY_TH_STYLE = (i: 0 | 1 | 2 | 3): React.CSSProperties => ({
   textAlign: 'center',
   whiteSpace: 'nowrap',
   padding: '6px 4px',
-  ...(i === 3 ? {
+  ...(i === 1 ? {
     borderRight: '2px solid var(--border)',
     boxShadow: FREEZE_SHADOW,
     clipPath: 'inset(0 -12px 0 0)',
   } : {}),
 });
 
-const STICKY_TD_STYLE = (i: 0 | 1 | 2 | 3, bg: string): React.CSSProperties => ({
+const STICKY_TD_STYLE = (i: 0 | 1, bg: string): React.CSSProperties => ({
   position: 'sticky',
   left: COL_LEFT[i],
   zIndex: 2,
@@ -697,11 +694,39 @@ const STICKY_TD_STYLE = (i: 0 | 1 | 2 | 3, bg: string): React.CSSProperties => (
   textAlign: 'center',
   whiteSpace: 'nowrap',
   padding: '6px 4px',
-  ...(i === 3 ? {
+  ...(i === 1 ? {
     borderRight: '2px solid var(--border)',
     boxShadow: FREEZE_SHADOW,
     clipPath: 'inset(0 -12px 0 0)',
   } : {}),
+});
+
+const STICKY_RIGHT_TH_STYLE: React.CSSProperties = {
+  position: 'sticky',
+  right: 0,
+  zIndex: 4,
+  minWidth: ACTION_COL_W,
+  width: ACTION_COL_W,
+  maxWidth: ACTION_COL_W,
+  background: 'var(--muted)',
+  textAlign: 'center',
+  whiteSpace: 'nowrap',
+  borderLeft: '2px solid var(--border)',
+  boxShadow: RIGHT_FREEZE_SHADOW,
+};
+
+const STICKY_RIGHT_TD_STYLE = (bg: string): React.CSSProperties => ({
+  position: 'sticky',
+  right: 0,
+  zIndex: 3,
+  minWidth: ACTION_COL_W,
+  width: ACTION_COL_W,
+  maxWidth: ACTION_COL_W,
+  background: bg,
+  textAlign: 'center',
+  whiteSpace: 'nowrap',
+  borderLeft: '2px solid var(--border)',
+  boxShadow: RIGHT_FREEZE_SHADOW,
 });
 
 // ─────────────────────────── Main component ───────────────────────────
@@ -1598,18 +1623,17 @@ export default function CustomersListPage() {
       {/* ══ Data table ══ */}
       <div className="bg-card rounded-xl shadow-custom overflow-hidden">
         <div style={{ maxHeight: 'calc(100vh - 310px)', overflow: 'auto' }}>
-          <table className="data-table w-full" style={{ borderCollapse: 'collapse', minWidth: 1496, tableLayout: 'fixed' }}>
+          <table className="data-table w-full" style={{ borderCollapse: 'separate', borderSpacing: 0, minWidth: 1550, tableLayout: 'fixed' }}>
             <colgroup>
-              {[82, 64, 96, 54, 90, 100, 160, 130, 100, 96, 160, 180, 96, 88].map((width, index) => <col key={index} style={{ width }} />)}
+              {[82, 110, 54, 90, 100, 160, 130, 100, 96, 160, 180, 96, 88, ACTION_COL_W].map((width, index) => <col key={index} style={{ width }} />)}
             </colgroup>
             <thead>
               <tr>
-                {/* Frozen columns 1-4 (sticky) */}
+                {/* Only acquisition time and customer name are frozen on the left. */}
                 <th style={STICKY_TH_STYLE(0)}>获客时间</th>
-                <th style={STICKY_TH_STYLE(1)}>客户ID</th>
-                <th style={STICKY_TH_STYLE(2)}>客户姓名</th>
-                <th style={STICKY_TH_STYLE(3)}>标签</th>
+                <th style={STICKY_TH_STYLE(1)}>客户姓名</th>
                 {/* Scrollable columns */}
+                <th style={{ width: 54, textAlign: 'center' }}>标签</th>
                 <th style={{ width: 90, textAlign: 'center' }}>跟进状态</th>
                 <th style={{ width: 100, textAlign: 'center' }}>跟进时间</th>
                 <th style={{ width: 160, textAlign: 'center' }}>跟进事项</th>
@@ -1619,7 +1643,8 @@ export default function CustomersListPage() {
                 <th style={{ width: 160, textAlign: 'center' }}>客户画像</th>
                 <th style={{ width: 180, textAlign: 'center' }}>需求情况</th>
                 <th style={{ width: 96, textAlign: 'center' }}>归属客服</th>
-                <th style={{ minWidth: 88, textAlign: 'center' }}>操作</th>
+                <th style={{ width: 88, textAlign: 'center' }}>客户ID</th>
+                <th style={STICKY_RIGHT_TH_STYLE}>操作</th>
               </tr>
             </thead>
             <tbody>
@@ -1638,12 +1663,8 @@ export default function CustomersListPage() {
                     <td style={STICKY_TD_STYLE(0, frozenBg)}>
                       <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>{c.acquiredAt}</span>
                     </td>
-                    {/* Frozen col 2: 客户ID */}
+                    {/* Frozen col 2: 客户姓名 */}
                     <td style={STICKY_TD_STYLE(1, frozenBg)}>
-                      <span className="text-xs" style={{ color: 'var(--muted-foreground)', fontFamily: 'monospace' }}>{c.id}</span>
-                    </td>
-                    {/* Frozen col 3: 客户姓名 */}
-                    <td style={STICKY_TD_STYLE(2, frozenBg)}>
                       <span
                         className="font-medium text-sm"
                         style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
@@ -1652,8 +1673,8 @@ export default function CustomersListPage() {
                         {c.name}
                       </span>
                     </td>
-                    {/* Frozen col 4: 标签 — badge only, no desc */}
-                    <td style={STICKY_TD_STYLE(3, frozenBg)}>
+                    {/* Scrollable: 标签 */}
+                    <td className="text-center">
                       <span className={`badge ${def.badgeCls} text-xs`}>{c.tag}</span>
                     </td>
 
@@ -1712,6 +1733,9 @@ export default function CustomersListPage() {
                     </td>
                     <td className="text-sm text-center" style={{ color: 'var(--muted-foreground)' }}><span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={c.advisor}>{c.advisor}</span></td>
                     <td className="text-center">
+                      <span className="text-xs" style={{ color: 'var(--brand)', fontFamily: 'monospace' }}>{c.id}</span>
+                    </td>
+                    <td style={STICKY_RIGHT_TD_STYLE(frozenBg)}>
                       <RecordActionButtons
                         onView={() => { setDetailId(c.id); setDetailTab('basic'); }}
                         onEdit={canEdit ? () => {
