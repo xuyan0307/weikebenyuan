@@ -284,7 +284,7 @@ const COL_LEFT = COL_W.reduce<number[]>((acc, w, i) => {
   return [...acc, acc[i - 1] + COL_W[i - 1]];
 }, []);
 const FREEZE_TOTAL = COL_W.reduce((s, w) => s + w, 0);
-const ACTION_COL_W = 96;
+const ACTION_COL_W = 136;
 
 const FREEZE_SHADOW = '4px 0 8px -2px rgba(0,0,0,0.14)';
 const RIGHT_FREEZE_SHADOW = '-4px 0 8px -2px rgba(0,0,0,0.14)';
@@ -396,6 +396,7 @@ const STICKY_RIGHT_TH_STYLE: React.CSSProperties = {
   boxShadow: RIGHT_FREEZE_SHADOW,
   textAlign: 'center',
   whiteSpace: 'nowrap',
+  padding: '6px 4px',
 };
 
 function STICKY_RIGHT_TD_STYLE(bg: string): React.CSSProperties {
@@ -411,6 +412,8 @@ function STICKY_RIGHT_TD_STYLE(bg: string): React.CSSProperties {
     boxShadow: RIGHT_FREEZE_SHADOW,
     textAlign: 'center',
     whiteSpace: 'nowrap',
+    padding: '6px 4px',
+    overflow: 'hidden',
   };
 }
 
@@ -4163,6 +4166,7 @@ export default function OrdersListPage() {
                       {/* 操作 */}
                       <td style={STICKY_RIGHT_TD_STYLE(bgColor)}>
                         <RecordActionButtons
+                          className="w-full"
                           onView={() => { setModalMode('view'); setEditOrderId(o.id); setSelectedOrder(o); setShowModal(true); }}
                           onEdit={isReadOnly ? undefined : () => { setModalMode('edit'); setEditOrderId(o.id); setSelectedOrder(o); setShowModal(true); }}
                         />

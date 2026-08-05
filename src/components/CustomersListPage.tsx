@@ -663,7 +663,7 @@ function CustomerModalWrap({ show, title, onClose, onConfirm, onDelete, confirmL
 // Only acquisition time and customer name stay frozen on the left.
 const COL_W = [82, 110] as const;
 const COL_LEFT: [number, number] = [0, COL_W[0]];
-const ACTION_COL_W = 96;
+const ACTION_COL_W = 136;
 const FREEZE_SHADOW = '4px 0 8px -2px rgba(0,0,0,0.14)';
 const RIGHT_FREEZE_SHADOW = '-4px 0 8px -2px rgba(0,0,0,0.14)';
 
@@ -711,6 +711,7 @@ const STICKY_RIGHT_TH_STYLE: React.CSSProperties = {
   background: 'var(--muted)',
   textAlign: 'center',
   whiteSpace: 'nowrap',
+  padding: '6px 4px',
   borderLeft: '2px solid var(--border)',
   boxShadow: RIGHT_FREEZE_SHADOW,
 };
@@ -725,6 +726,8 @@ const STICKY_RIGHT_TD_STYLE = (bg: string): React.CSSProperties => ({
   background: bg,
   textAlign: 'center',
   whiteSpace: 'nowrap',
+  padding: '6px 4px',
+  overflow: 'hidden',
   borderLeft: '2px solid var(--border)',
   boxShadow: RIGHT_FREEZE_SHADOW,
 });
@@ -1737,6 +1740,7 @@ export default function CustomersListPage() {
                     </td>
                     <td style={STICKY_RIGHT_TD_STYLE(frozenBg)}>
                       <RecordActionButtons
+                        className="w-full"
                         onView={() => { setDetailId(c.id); setDetailTab('basic'); }}
                         onEdit={canEdit ? () => {
                               const nextForm = customerToForm(c, defaultAdvisorName);
