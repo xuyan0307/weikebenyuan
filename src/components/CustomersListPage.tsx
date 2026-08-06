@@ -779,7 +779,11 @@ export default function CustomersListPage() {
     return [...FOLLOW_TIME_VALUES];
   });
   const [tagFilter, setTagFilter] = useState<CustomerTag[]>([...ALL_TAGS]);
-  const [advisorFilter, setAdvisorFilter] = useState<string[]>([]);
+  const [advisorFilter, setAdvisorFilter] = useState<string[]>(() =>
+    currentUser.role === 'service' && textOf(currentUser.name).trim()
+      ? [textOf(currentUser.name).trim()]
+      : []
+  );
   const [dueFollowUp, setDueFollowUp] = useState(() => {
     try {
       const raw = sessionStorage.getItem('weikebenyuan:dashboard-filter');

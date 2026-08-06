@@ -6,7 +6,7 @@ import { getDb } from '../config/database';
 import { ossFileUrl } from '../utils/oss';
 import { formatDateOnly, parseJson } from '../utils/serialization';
 import { createOrder, deleteOrder, normalizePayStatus, updateOrder } from '../services/orderService';
-import { dashboardOrderScope } from '../services/dashboardDataScope';
+import { advisorOrderRecordScope } from '../services/advisorRecordScope';
 import { projectOrderPurchaseRange } from '../services/orderPurchaseRangeService';
 
 const router: Router = Router();
@@ -116,7 +116,7 @@ router.get('/', authenticateToken, async (req: AuthRequest, res, next) => {
 
     const where: string[] = [];
     const params: unknown[] = [];
-    const dataScope = dashboardOrderScope(
+    const dataScope = advisorOrderRecordScope(
       { role: req.userRole, userId: req.userId },
       'o'
     );
@@ -189,7 +189,7 @@ router.post('/', authenticateToken, auditLog('orders'), async (req: AuthRequest,
 router.get('/:id', authenticateToken, async (req: AuthRequest, res, next) => {
   try {
     const db = getDb();
-    const dataScope = dashboardOrderScope(
+    const dataScope = advisorOrderRecordScope(
       { role: req.userRole, userId: req.userId },
       'o'
     );

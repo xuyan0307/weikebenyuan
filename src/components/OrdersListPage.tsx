@@ -11,7 +11,7 @@ import type { OrderType, PayStatus, Customer, CustomerTag } from '../data/mockDa
 import { useApp } from '../hooks/useApp';
 import {
   useOrders, useOrderMutations, useCustomers, useCustomer, useTherapists, useSystemUsers,
-  useAppointments, useServiceRecords, useServiceRecordMutations,
+  useAppointments, useServiceRecords, useServiceRecordMutations, useCustomerFilterOptions,
 } from '../api/hooks';
 import { uploadsApi } from '../api/endpoints';
 import { toast } from 'sonner';
@@ -3524,7 +3524,11 @@ export default function OrdersListPage() {
     }
     return [];
   });
-  const [fAdvisor, setFAdvisor] = useState<string[]>([]);
+  const [fAdvisor, setFAdvisor] = useState<string[]>(() =>
+    currentUser.role === 'service' && String(currentUser.name || '').trim()
+      ? [String(currentUser.name).trim()]
+      : []
+  );
   const [fTherapist, setFTherapist] = useState<string[]>([]);
 
   const isReadOnly = currentUser.role === 'finance';
@@ -3532,6 +3536,7 @@ export default function OrdersListPage() {
 
   // Build option lists from data
   const customersQ = useCustomers({ page: 1, pageSize: 1000, includeOrdered: 1 });
+  const customerFilterOptionsQ = useCustomerFilterOptions();
   const therapistsQ = useTherapists({ page: 1, pageSize: 1000 });
   const ordersQ = useOrders({
     page: 1,
@@ -3594,6 +3599,7 @@ export default function OrdersListPage() {
   const TAG_OPTIONS = TAG_DEFS.map(d => ({ value: d.tag, label: d.tag }));
   const AREA_OPTIONS = CITY_OPTIONS;
   const ADVISOR_OPTIONS = toOptions([
+    ...(customerFilterOptionsQ.data?.advisors ?? []),
     ...CUSTOMERS.map(c => c.advisor),
     ...enrichedOrders.map(o => o.advisor),
   ]);

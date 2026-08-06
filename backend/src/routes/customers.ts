@@ -7,6 +7,7 @@ import { getDb } from '../config/database';
 import { createError } from '../middleware/errorHandler';
 import { generateCustomerCode } from '../services/customerCodeService';
 import { mergeCustomerProfileFollowHistory } from '../services/followHistoryService';
+import { canBrowseAllAdvisorRecords } from '../services/advisorRecordScope';
 import {
   CustomerDateRange,
   CustomerFollowTime,
@@ -81,7 +82,7 @@ router.get('/', authenticateToken, async (req: AuthRequest, res, next) => {
     const filters = customerFiltersFromQuery(req.query);
     const result = await listCustomers(db, {
       ...filters,
-      advisorId: req.userRole === 'superadmin' || req.userRole === 'admin'
+      advisorId: canBrowseAllAdvisorRecords(req.userRole)
         ? undefined
         : req.userId,
       page,
