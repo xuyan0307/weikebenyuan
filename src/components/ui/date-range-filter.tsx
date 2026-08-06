@@ -91,7 +91,7 @@ export function DateRangeFilter({
         type="button"
         aria-label={label}
         aria-expanded={open}
-        className="flex h-9 w-[232px] min-w-0 items-center gap-1.5 rounded-lg border border-border bg-card px-2 text-foreground hover:border-primary"
+        className="date-range-trigger flex h-9 w-[232px] min-w-0 items-center gap-1.5 rounded-lg border border-border bg-card px-2 text-foreground hover:border-primary"
         onClick={() => setOpen(current => {
           if (!current) setSelectingStart(true);
           return !current;

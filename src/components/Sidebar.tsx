@@ -44,7 +44,13 @@ const NAV_ITEMS = [
 ];
 
 export default function Sidebar() {
-  const { sidebarCollapsed, setSidebarCollapsed, activePage, setActivePage } = useApp();
+  const {
+    sidebarCollapsed,
+    setSidebarCollapsed,
+    activePage,
+    setActivePage,
+    setMobileSidebarOpen,
+  } = useApp();
   const { currentUser } = useApp();
   const [expandedKeys, setExpandedKeys] = useState<string[]>(['dashboard']);
 
@@ -59,6 +65,7 @@ export default function Sidebar() {
   function handleNavClick(item: typeof NAV_ITEMS[0]) {
     if (item.children.length === 0) {
       setActivePage(item.key);
+      setMobileSidebarOpen(false);
     } else {
       toggleExpand(item.key);
       if (!expandedKeys.includes(item.key) && item.children.length > 0) {
@@ -69,12 +76,13 @@ export default function Sidebar() {
 
   function handleSubClick(key: string) {
     setActivePage(key);
+    setMobileSidebarOpen(false);
   }
 
   return (
     <aside
       data-cmp="Sidebar"
-      className="flex flex-col h-screen transition-all duration-200 relative"
+      className="app-sidebar flex flex-col h-screen transition-all duration-200 relative"
       style={{
         width: sidebarCollapsed ? 64 : 220,
         background: 'var(--sidebar)',

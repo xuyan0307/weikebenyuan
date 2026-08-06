@@ -15,3 +15,15 @@
 .date-range-picker .rdp-day_button {
   margin: auto;
 }
+
+@media (max-width: 767px) {
+  .date-range-picker .rdp-months {
+    flex-flow: column nowrap;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .date-range-picker .rdp-month {
+    width: min(292px, calc(100vw - 36px));
+  }
+}

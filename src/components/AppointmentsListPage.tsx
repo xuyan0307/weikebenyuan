@@ -466,8 +466,8 @@ export function AppointmentsListPage() {
   };
 
   return (
-    <div className="space-y-5">
-      <div className="grid grid-cols-5 gap-4">
+    <div data-cmp="AppointmentsListPage" className="space-y-5">
+      <div className="mobile-summary-grid grid grid-cols-5 gap-4">
         {summaryCards.map(card => (
           <div key={card.label} className="rounded-lg bg-white p-5 shadow-sm">
             <div className="flex items-start justify-between">
@@ -480,7 +480,7 @@ export function AppointmentsListPage() {
       </div>
 
       <div className="rounded-lg bg-white p-4 shadow-sm">
-        <div className="flex flex-nowrap items-center justify-start gap-3">
+        <div className="mobile-filter-row flex flex-nowrap items-center justify-start gap-3">
           <DateRangeFilter
             label="预约时间范围"
             value={appointmentDateRange}
@@ -539,7 +539,7 @@ export function AppointmentsListPage() {
       </div>
 
       <div className="overflow-hidden rounded-lg bg-white shadow-sm">
-        <div className="w-full overflow-hidden">
+        <div className="mobile-business-table w-full overflow-hidden">
           <table ref={tableRef} className="w-full table-fixed text-[13px]">
             <colgroup>
               {appointmentColumns.map((column, index) => (

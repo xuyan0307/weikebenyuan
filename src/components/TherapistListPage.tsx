@@ -1021,7 +1021,7 @@ export default function TherapistListPage() {
   return (
     <div data-cmp="TherapistListPage" className="flex flex-col gap-4 h-full">
       {/* ── Summary Cards ── */}
-      <div className="flex gap-4">
+      <div className="mobile-summary-grid flex gap-4">
         {[
           { label: '技师总数', value: total, color: 'text-blue-600', bg: 'bg-blue-50' },
           { label: '在职技师', value: onJob, color: 'text-green-600', bg: 'bg-green-50' },
@@ -1036,7 +1036,7 @@ export default function TherapistListPage() {
       </div>
 
       {/* ── Toolbar ── */}
-      <div className="bg-white rounded-xl shadow-custom px-5 py-3 flex items-center gap-3 flex-wrap">
+      <div className="mobile-page-toolbar bg-white rounded-xl shadow-custom px-5 py-3 flex items-center gap-3 flex-wrap">
         {/* 搜索框 */}
         <div className="flex items-center gap-2 border border-gray-200 rounded-lg px-3 py-1.5" style={{ minWidth: 180, maxWidth: 260 }}>
           <SearchIcon size={15} className="text-gray-400 shrink-0" />
@@ -1077,7 +1077,7 @@ export default function TherapistListPage() {
       </div>
 
       {/* ── Table ── */}
-      <div className="bg-white rounded-xl shadow-custom overflow-y-auto overflow-x-hidden flex-1">
+      <div className="mobile-business-table bg-white rounded-xl shadow-custom overflow-y-auto overflow-x-hidden flex-1">
         <table ref={tableRef} className="w-full text-sm" style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse' }}>
           <colgroup>
             {columnWidths.map((width, index) => <col key={index} style={{ width: `${width}%` }} />)}

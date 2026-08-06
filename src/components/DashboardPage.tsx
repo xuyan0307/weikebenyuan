@@ -109,7 +109,7 @@ export default function DashboardPage() {
   return (
     <div data-cmp="DashboardPage" className="flex flex-col gap-5">
       {/* Time filter */}
-      <div className="flex items-start justify-between gap-4">
+      <div className="dashboard-toolbar flex items-start justify-between gap-4">
         <div className="text-sm" style={{ color: 'var(--muted-foreground)' }}>经营概览 · 实时数据</div>
         <div className="flex items-center gap-2">
           <DateRangeFilter
@@ -143,13 +143,13 @@ export default function DashboardPage() {
       </div>
 
       {/* KPI Cards */}
-      <div className="flex gap-4 flex-wrap">
+      <div className="dashboard-kpi-grid flex gap-4 flex-wrap">
         {KPI_CARDS.map(card => {
           const Icon = card.icon;
           return (
             <div
               key={card.key}
-              className="flex-1 rounded-xl p-4 bg-card shadow-custom"
+              className="dashboard-kpi-card flex-1 rounded-xl p-4 bg-card shadow-custom"
               style={{ minWidth: 160 }}
             >
               <div className="flex items-center justify-between mb-2">
@@ -169,12 +169,12 @@ export default function DashboardPage() {
       </div>
 
       {/* Chart + Todo */}
-      <div className="flex gap-5">
+      <div className="dashboard-lower-grid flex gap-5">
         {/* Chart */}
-        <div className="flex-1 bg-card rounded-xl p-5 shadow-custom" style={{ minWidth: 0 }}>
-          <div className="flex items-center justify-between mb-4">
+        <div className="dashboard-chart-card flex-1 bg-card rounded-xl p-5 shadow-custom" style={{ minWidth: 0 }}>
+          <div className="dashboard-chart-toolbar flex items-center justify-between mb-4">
             <span className="font-semibold text-foreground">数据趋势</span>
-            <div className="flex items-center gap-3">
+            <div className="dashboard-chart-controls flex items-center gap-3">
               <div className="flex gap-1 rounded-md p-0.5" style={{ background: 'var(--muted)' }}>
                 {([
                   { key: 'day', label: '按天' },
@@ -239,7 +239,7 @@ export default function DashboardPage() {
         </div>
 
         {/* Todo */}
-        <div className="bg-card rounded-xl p-5 shadow-custom flex flex-col" style={{ width: 300, flexShrink: 0 }}>
+        <div className="dashboard-todo-card bg-card rounded-xl p-5 shadow-custom flex flex-col" style={{ width: 300, flexShrink: 0 }}>
           <div className="flex items-center justify-between mb-4">
             <span className="font-semibold text-foreground">待办中心</span>
             <span className="badge badge-warning">{todos.reduce((sum, todo) => sum + Number(todo.count || 0), 0)} 项待处理</span>

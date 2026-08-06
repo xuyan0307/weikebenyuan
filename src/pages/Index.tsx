@@ -86,7 +86,7 @@ class PageErrorBoundary extends React.Component<
 }
 
 function AppShell() {
-  const { activePage, sidebarCollapsed } = useApp();
+  const { activePage, sidebarCollapsed, mobileSidebarOpen, setMobileSidebarOpen } = useApp();
 
   const sidebarW = sidebarCollapsed ? 64 : 220;
 
@@ -127,19 +127,27 @@ function AppShell() {
     >
       {/* Sidebar */}
       <div
-        className="flex-shrink-0 h-full overflow-hidden transition-all duration-200"
+        className={`app-sidebar-shell flex-shrink-0 h-full overflow-hidden transition-all duration-200 ${mobileSidebarOpen ? 'mobile-open' : ''}`}
         style={{ width: sidebarW }}
       >
         <Sidebar />
       </div>
+      {mobileSidebarOpen && (
+        <button
+          type="button"
+          className="app-sidebar-overlay"
+          aria-label="关闭导航菜单"
+          onClick={() => setMobileSidebarOpen(false)}
+        />
+      )}
 
       {/* Main area */}
-      <div className="flex flex-col flex-1 min-w-0 h-full overflow-hidden">
+      <div className="app-main-shell flex flex-col flex-1 min-w-0 h-full overflow-hidden">
         {/* Top bar */}
         <TopBar />
 
         {/* Page content */}
-        <main className="flex flex-1 flex-col overflow-y-auto px-6 py-5">
+        <main className="app-main-content flex flex-1 flex-col overflow-y-auto px-6 py-5">
           <div className="flex-1">
             <PageErrorBoundary pageKey={activePage} key={activePage}>
               <Suspense fallback={<PageLoading />}>

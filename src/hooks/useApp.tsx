@@ -12,6 +12,8 @@ interface AppContextValue {
   setCurrentUser: (u: UserInfo | null) => void;
   sidebarCollapsed: boolean;
   setSidebarCollapsed: (v: boolean) => void;
+  mobileSidebarOpen: boolean;
+  setMobileSidebarOpen: (v: boolean) => void;
   activePage: string;
   setActivePage: (p: string) => void;
   notifications: number;
@@ -24,6 +26,8 @@ const AppContext = createContext<AppContextValue>({
   setCurrentUser: () => {},
   sidebarCollapsed: false,
   setSidebarCollapsed: () => {},
+  mobileSidebarOpen: false,
+  setMobileSidebarOpen: () => {},
   activePage: 'dashboard',
   setActivePage: () => {},
   notifications: 0,
@@ -34,6 +38,7 @@ const AppContext = createContext<AppContextValue>({
 export function AppProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<UserInfo | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [activePage, setActivePage] = useState('dashboard');
   const [loading, setLoading] = useState(true);
   const todosQ = useDashboardTodos(Boolean(getToken()));
@@ -75,6 +80,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setCurrentUser,
       sidebarCollapsed,
       setSidebarCollapsed,
+      mobileSidebarOpen,
+      setMobileSidebarOpen,
       activePage,
       setActivePage,
       notifications,

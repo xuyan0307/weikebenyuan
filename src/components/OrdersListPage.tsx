@@ -3800,7 +3800,7 @@ export default function OrdersListPage() {
               onChange={value => { setPurchaseCustomRange(value); setPurchaseDateRange('custom'); }}
             />
             <div
-              className="order-2 basis-full flex flex-nowrap items-center gap-2 pt-3 [&>.w-px]:hidden"
+              className="mobile-filter-row order-2 basis-full flex flex-nowrap items-center gap-2 pt-3 [&>.w-px]:hidden"
               style={{ borderTop: '1px solid var(--border)' }}
             >
             <DateRangeFilter

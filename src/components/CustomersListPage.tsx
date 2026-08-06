@@ -1465,7 +1465,7 @@ export default function CustomersListPage() {
         />
 
         {/* row 2: filter pills */}
-        <div className="flex flex-nowrap items-center gap-2">
+        <div className="mobile-filter-row flex flex-nowrap items-center gap-2">
           <DateRangeFilter
             label="获客时间范围"
             value={acquiredDateRange}

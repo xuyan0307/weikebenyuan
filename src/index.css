@@ -207,3 +207,433 @@
 .sidebar-no-scrollbar::-webkit-scrollbar {
   display: none;
 }
+
+/* Application shell */
+.app-mobile-menu-button {
+  display: none;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+  color: var(--foreground);
+  background: var(--muted);
+}
+
+.app-sidebar-overlay {
+  display: none;
+}
+
+/*
+ * Mobile baseline: optimized for the Huawei Pura 80 browser viewport
+ * (about 412 CSS px wide), while remaining usable from 360px to 767px.
+ * Complex business tables retain their complete data model and use touch
+ * horizontal scrolling instead of hiding columns.
+ */
+@media (max-width: 767px) {
+  html,
+  body,
+  #root {
+    width: 100%;
+    min-width: 0;
+    height: 100%;
+    overflow: hidden;
+  }
+
+  body {
+    font-size: 13px;
+    overscroll-behavior: none;
+  }
+
+  .app-sidebar-shell {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 210;
+    width: min(280px, 82vw) !important;
+    transform: translateX(-102%);
+    box-shadow: 14px 0 36px rgba(12, 35, 64, 0.22);
+  }
+
+  .app-sidebar-shell.mobile-open {
+    transform: translateX(0);
+  }
+
+  .app-sidebar {
+    width: min(280px, 82vw) !important;
+  }
+
+  .app-sidebar > button:first-child {
+    display: none;
+  }
+
+  .app-sidebar-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 205;
+    display: block;
+    border: 0;
+    background: rgba(9, 26, 48, 0.48);
+    backdrop-filter: blur(2px);
+  }
+
+  .app-main-shell {
+    width: 100%;
+  }
+
+  .app-topbar {
+    height: calc(56px + env(safe-area-inset-top)) !important;
+    min-height: calc(56px + env(safe-area-inset-top));
+    padding: env(safe-area-inset-top) 10px 0 !important;
+    gap: 8px !important;
+  }
+
+  .app-mobile-menu-button {
+    display: inline-flex;
+  }
+
+  .app-topbar-heading {
+    max-width: min(48vw, 210px);
+  }
+
+  .app-topbar-breadcrumb,
+  .app-topbar-refresh,
+  .app-topbar-account-copy,
+  .app-topbar [data-mobile-hide='true'] {
+    display: none !important;
+  }
+
+  .app-topbar-title {
+    font-size: 15px;
+  }
+
+  .app-topbar .relative > button {
+    padding-left: 5px;
+    padding-right: 5px;
+  }
+
+  .app-main-content {
+    padding: 12px 10px calc(14px + env(safe-area-inset-bottom)) !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .app-main-content > div:first-child {
+    min-width: 0;
+  }
+
+  [data-cmp$='Page'] {
+    min-width: 0;
+    gap: 12px !important;
+  }
+
+  [data-cmp$='Page'] .rounded-xl {
+    border-radius: 10px;
+  }
+
+  [data-cmp='DateRangeFilter'] {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .date-range-trigger {
+    width: 100% !important;
+    min-width: 0;
+  }
+
+  .date-range-picker {
+    position: fixed !important;
+    top: calc(64px + env(safe-area-inset-top)) !important;
+    right: 8px !important;
+    bottom: auto !important;
+    left: 8px !important;
+    width: auto;
+    max-height: calc(100dvh - 78px - env(safe-area-inset-top));
+    margin-top: 0 !important;
+    overflow: auto;
+    padding: 10px !important;
+  }
+
+  .date-range-picker .rdp-months {
+    flex-flow: column nowrap;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .date-range-picker .rdp-month {
+    width: min(292px, calc(100vw - 36px));
+  }
+
+  .date-range-picker > .mt-2 {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .date-range-picker > .mt-2 button {
+    flex: 1 0 auto;
+    min-height: 34px;
+    padding: 5px 10px;
+  }
+
+  .data-table {
+    min-width: max-content;
+  }
+
+  .data-table th,
+  .data-table td {
+    padding: 8px 9px;
+    font-size: 12px;
+  }
+
+  /* Desktop freeze panes occupy most of a phone screen; unfreeze them on mobile. */
+  .data-table th[style*='left'],
+  .data-table td[style*='left'],
+  .data-table th[style*='right'],
+  .data-table td[style*='right'] {
+    position: static !important;
+    left: auto !important;
+    right: auto !important;
+    box-shadow: none !important;
+  }
+
+  .data-table thead th {
+    position: sticky !important;
+    top: 0 !important;
+    z-index: 3 !important;
+  }
+
+  .app-main-content [class*='overflow-x-auto'],
+  .app-main-content [class*='overflow-auto'] {
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .app-main-content input,
+  .app-main-content textarea,
+  .app-main-content select {
+    font-size: 16px; /* Prevents automatic zoom on mobile browsers. */
+  }
+
+  .app-main-content textarea {
+    max-width: 100%;
+  }
+
+  .app-main-content .fixed.rounded-xl,
+  .app-main-content .fixed.rounded-2xl {
+    max-width: calc(100vw - 20px) !important;
+    max-height: calc(100dvh - 20px) !important;
+  }
+
+  /* Business filters remain fully reachable without introducing a second page row. */
+  .mobile-filter-row {
+    width: 100%;
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+  }
+
+  .mobile-filter-row > [data-cmp='DateRangeFilter'] {
+    flex: 1 0 100%;
+  }
+
+  .mobile-filter-row > :not([data-cmp='DateRangeFilter']):not(.w-px) {
+    flex: 1 1 calc(50% - 4px);
+    width: auto !important;
+    min-width: 0 !important;
+  }
+
+  .mobile-filter-row > :not([data-cmp='DateRangeFilter']) > button,
+  .mobile-filter-row > button {
+    width: 100%;
+    min-width: 0 !important;
+    justify-content: space-between;
+  }
+
+  .mobile-page-toolbar {
+    width: 100%;
+    align-items: stretch !important;
+    padding: 12px !important;
+  }
+
+  .mobile-page-toolbar > * {
+    min-width: 0 !important;
+  }
+
+  .mobile-page-toolbar > .ml-auto {
+    width: 100%;
+    margin-left: 0 !important;
+  }
+
+  .mobile-page-toolbar > .ml-auto > button {
+    flex: 1 1 0;
+    justify-content: center;
+  }
+
+  .mobile-summary-grid {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 8px !important;
+  }
+
+  .mobile-summary-grid > * {
+    width: auto !important;
+    min-width: 0 !important;
+  }
+
+  [data-cmp='FinanceSalaryPage'] {
+    height: auto !important;
+    min-height: 100%;
+    overflow: visible !important;
+    padding: 0 !important;
+  }
+
+  [data-cmp='FinanceSalaryPage'] > .flex-1 {
+    min-height: 58dvh;
+  }
+
+  [data-cmp='FinanceSalaryPage'] details > div {
+    position: fixed !important;
+    top: 68px !important;
+    right: 10px !important;
+    left: 10px !important;
+    width: auto !important;
+    max-height: calc(100dvh - 80px);
+    overflow-y: auto;
+  }
+
+  [data-cmp='AppointmentsCalendarPage'] {
+    height: auto !important;
+    min-height: 100%;
+  }
+
+  [data-cmp='AppointmentsCalendarPage'] > .flex-1 {
+    min-height: 68dvh;
+  }
+
+  [data-cmp='AppointmentsListPage'] .mobile-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  [data-cmp='AppointmentsListPage'] .mobile-summary-grid > div:first-child {
+    grid-column: 1 / -1;
+  }
+
+  [data-cmp='AppointmentsListPage'] .mobile-summary-grid > div {
+    padding: 12px !important;
+  }
+
+  [data-cmp='AppointmentsListPage'] .mobile-summary-grid .text-3xl {
+    font-size: 22px;
+    line-height: 28px;
+  }
+
+  .mobile-business-table {
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  [data-cmp='AppointmentsListPage'] .mobile-business-table table {
+    width: 1060px !important;
+    min-width: 1060px !important;
+  }
+
+  [data-cmp='TherapistListPage'] {
+    height: auto !important;
+  }
+
+  [data-cmp='TherapistListPage'] .mobile-page-toolbar > div:first-child {
+    width: 100%;
+    max-width: none !important;
+  }
+
+  [data-cmp='TherapistListPage'] .mobile-business-table table {
+    width: 1100px !important;
+    min-width: 1100px !important;
+  }
+
+  /* Modal cards use the phone viewport and keep their own content scrollable. */
+  .app-main-content .fixed.inset-0 > .bg-card,
+  .app-main-content .fixed.inset-0 > .bg-white,
+  .app-main-content .fixed.inset-0 > [class*='rounded-2xl'],
+  .app-main-content .fixed.inset-0 > [class*='rounded-xl'] {
+    width: calc(100vw - 20px) !important;
+    max-width: calc(100vw - 20px) !important;
+    max-height: calc(100dvh - 20px) !important;
+    overflow-y: auto;
+  }
+
+  .dashboard-toolbar {
+    align-items: stretch !important;
+    flex-direction: column;
+  }
+
+  .dashboard-toolbar > div:last-child {
+    width: 100%;
+  }
+
+  .dashboard-kpi-grid {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px !important;
+  }
+
+  .dashboard-kpi-card {
+    min-width: 0 !important;
+    padding: 12px !important;
+  }
+
+  .dashboard-kpi-card:first-child {
+    grid-column: 1 / -1;
+  }
+
+  .dashboard-kpi-card .text-2xl {
+    font-size: 21px;
+  }
+
+  .dashboard-lower-grid {
+    flex-direction: column;
+    gap: 12px !important;
+  }
+
+  .dashboard-chart-card,
+  .dashboard-todo-card {
+    width: 100% !important;
+    min-width: 0 !important;
+    padding: 13px !important;
+  }
+
+  .dashboard-chart-toolbar {
+    align-items: flex-start !important;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .dashboard-chart-controls {
+    width: 100%;
+    align-items: flex-start !important;
+    flex-direction: column;
+    gap: 8px !important;
+  }
+
+  .dashboard-chart-controls > div:last-child {
+    width: 100%;
+    overflow-x: auto;
+    padding-bottom: 3px;
+  }
+
+  .dashboard-chart-controls button {
+    flex: 0 0 auto;
+  }
+
+  .shadow-custom {
+    box-shadow: 0 2px 9px rgba(30, 136, 229, 0.07);
+  }
+}
+
+@media (max-width: 374px) {
+  .dashboard-kpi-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-kpi-card:first-child {
+    grid-column: auto;
+  }
+}

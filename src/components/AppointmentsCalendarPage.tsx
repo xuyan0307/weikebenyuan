@@ -1723,7 +1723,7 @@ export default function AppointmentsCalendarPage() {
       )}
 
       {/* Controls bar */}
-      <div className="bg-card rounded-xl px-4 py-3 shadow-custom flex flex-wrap items-center gap-3 flex-shrink-0">
+      <div className="mobile-page-toolbar bg-card rounded-xl px-4 py-3 shadow-custom flex flex-wrap items-center gap-3 flex-shrink-0">
         {!isTherapist && (
           <TherapistMultiSelect
             therapists={calendarTherapists}

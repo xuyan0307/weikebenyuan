@@ -413,8 +413,8 @@ export default function FinanceSalaryPage() {
 
   const inputClass = 'w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary';
   return (
-    <div className="flex h-[calc(100vh-86px)] min-h-0 flex-col gap-2 overflow-hidden p-3">
-      <div className="flex flex-shrink-0 flex-wrap items-center gap-2">
+    <div data-cmp="FinanceSalaryPage" className="flex h-[calc(100vh-86px)] min-h-0 flex-col gap-2 overflow-hidden p-3">
+      <div className="mobile-page-toolbar flex flex-shrink-0 flex-wrap items-center gap-2">
         <div className="flex rounded-xl border border-border bg-card p-1 shadow-sm">
           <button onClick={() => setScope('all')} className={`rounded-lg px-4 py-2 text-sm ${scope === 'all' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'}`}>全部</button>
           <button onClick={() => setScope('month')} className={`rounded-lg px-4 py-2 text-sm ${scope === 'month' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'}`}>本月</button>
@@ -443,7 +443,7 @@ export default function FinanceSalaryPage() {
         </div>
       </div>
 
-      <div className="grid flex-shrink-0 grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-8">
+      <div className="mobile-summary-grid grid flex-shrink-0 grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-8">
         <SummaryCard label="客户总数" value={`${summary.customerCount}人`} note="当前技师累计关联客户" />
         <SummaryCard label="服务总次数" value={`${summary.totalServiceTimes}次`} note="客户订单累计总次数" />
         <SummaryCard label="已服务总次数" value={`${summary.servedTimes}次`} note="排期已完成累计" />

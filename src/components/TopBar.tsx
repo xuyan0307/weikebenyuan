@@ -3,6 +3,7 @@ import {
   BellIcon, RefreshCwIcon, ChevronDownIcon,
   UserIcon, KeyIcon, LogOutIcon, ShieldIcon,
   WalletIcon, HeadphonesIcon, UserCheckIcon,
+  MenuIcon,
 } from 'lucide-react';
 import { useApp } from '../hooks/useApp';
 import type { UserInfo } from '../api/endpoints';
@@ -96,7 +97,7 @@ function ProfileModal({
         style={{
           top: '50%', left: '50%',
           transform: 'translate(-50%, -50%)',
-          width: 420,
+          width: 'min(420px, calc(100vw - 24px))',
           background: 'var(--card)',
           border: '1px solid var(--border)',
         }}
@@ -247,7 +248,15 @@ function ProfileModal({
 }
 
 export default function TopBar() {
-  const { activePage, notifications, currentUser, setCurrentUser, setActivePage, logout } = useApp();
+  const {
+    activePage,
+    notifications,
+    currentUser,
+    setCurrentUser,
+    setActivePage,
+    setMobileSidebarOpen,
+    logout,
+  } = useApp();
   const title = PAGE_TITLES[activePage] ?? '产康管理系统';
   const crumbs = BREADCRUMBS[activePage] ?? [title];
   const today = new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' });
@@ -283,16 +292,25 @@ export default function TopBar() {
   return (
     <header
       data-cmp="TopBar"
-      className="flex items-center px-6 gap-4 bg-card"
+      className="app-topbar flex items-center px-6 gap-4 bg-card"
       style={{
         height: 60,
         borderBottom: '1px solid var(--border)',
         flexShrink: 0,
       }}
     >
+      <button
+        type="button"
+        className="app-mobile-menu-button"
+        aria-label="打开导航菜单"
+        onClick={() => setMobileSidebarOpen(true)}
+      >
+        <MenuIcon size={21} />
+      </button>
+
       {/* Breadcrumb + Title */}
-      <div className="flex flex-col justify-center">
-        <div className="flex items-center gap-1 text-xs" style={{ color: 'var(--muted-foreground)' }}>
+      <div className="app-topbar-heading flex flex-col justify-center min-w-0">
+        <div className="app-topbar-breadcrumb flex items-center gap-1 text-xs" style={{ color: 'var(--muted-foreground)' }}>
           <span>首页</span>
           {crumbs.map((c, i) => (
             <span key={i} className="flex items-center gap-1">
@@ -301,7 +319,7 @@ export default function TopBar() {
             </span>
           ))}
         </div>
-        <h1 className="text-base font-bold text-foreground leading-tight">{title}</h1>
+        <h1 className="app-topbar-title text-base font-bold text-foreground leading-tight truncate">{title}</h1>
       </div>
 
       <div className="flex-1" />
@@ -310,7 +328,7 @@ export default function TopBar() {
       <span className="text-sm hidden xl:block" style={{ color: 'var(--muted-foreground)' }}>{today}</span>
 
       {/* Refresh */}
-      <button className="p-2 rounded-lg hover:bg-muted transition-colors" style={{ color: 'var(--muted-foreground)' }}>
+      <button className="app-topbar-refresh p-2 rounded-lg hover:bg-muted transition-colors" style={{ color: 'var(--muted-foreground)' }}>
         <RefreshCwIcon size={16} />
       </button>
 
@@ -340,7 +358,7 @@ export default function TopBar() {
           >
             {currentUser.avatar}
           </div>
-          <div className="flex flex-col items-start leading-none">
+          <div className="app-topbar-account-copy flex flex-col items-start leading-none">
             <span className="text-sm font-medium text-foreground">{currentUser.name}</span>
             <span className="text-xs mt-0.5" style={{ color: 'var(--muted-foreground)' }}>{roleLabel}</span>
           </div>
@@ -489,7 +507,7 @@ export default function TopBar() {
               top: '50%',
               left: '50%',
               transform: 'translate(-50%, -50%)',
-              width: 360,
+              width: 'min(360px, calc(100vw - 24px))',
               background: 'var(--card)',
               border: '1px solid var(--border)',
             }}
