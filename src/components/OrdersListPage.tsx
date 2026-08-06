@@ -1,17 +1,40 @@
 import { useState, useRef, useEffect } from 'react';
 import {
-  SearchIcon, PlusIcon, EyeIcon, PencilIcon,
+  SearchIcon, PlusIcon,
   ChevronLeftIcon, ChevronRightIcon, XIcon, CheckIcon,
   UserIcon, FileTextIcon, UsersIcon, MessageSquareIcon,
-  ImageIcon, ChevronDownIcon, TagIcon, ZapIcon,
+  ImageIcon, ChevronDownIcon, TagIcon,
   UploadIcon, DownloadIcon, Trash2Icon,
 } from 'lucide-react';
+import { RecordActionButtons } from './ui/record-action-buttons';
 import type { OrderType, PayStatus, Customer, CustomerTag } from '../data/mockData';
 import { useApp } from '../hooks/useApp';
-import { useOrders, useOrderMutations, useCustomers, useCustomer, useTherapists, useSystemUsers } from '../api/hooks';
+import {
+  useOrders, useOrderMutations, useCustomers, useCustomer, useTherapists, useSystemUsers,
+  useAppointments, useServiceRecords, useServiceRecordMutations, useCustomerFilterOptions,
+} from '../api/hooks';
 import { uploadsApi } from '../api/endpoints';
 import { toast } from 'sonner';
+import { matchesFollowTime } from '../utils/followTimeFilter';
+import {
+  clearDashboardFilter,
+  readDashboardFilter,
+} from '../utils/dashboardTodoNavigation';
+import {
+  matchesOrderContractStatus,
+  ORDER_CONTRACT_FILTER_VALUES,
+  resolveOrderContractStatus,
+} from '../utils/orderContractFilter';
 import { downloadXlsx, readSpreadsheet, rowsToObjects } from '../utils/spreadsheet';
+import { DateRangeFilter } from './ui/date-range-filter';
+import { GLOBAL_DATE_RANGE_QUICK_OPTIONS, dateInRange, quickDateRange, type DateRangeValue } from '../utils/dateRange';
+import { useGlobalDateRange } from '../utils/useGlobalDateRange';
+import { sumOrderAmountStages } from '../utils/orderAmountSummary';
+import {
+  clearOrderAppointmentDraft,
+  readOrderAppointmentDraft,
+  saveOrderAppointmentDraft,
+} from '../utils/orderAppointmentFlow';
 
 /* ─── Types ─────────────────────────────────────────── */
 type NewPayStatus = '已支付' | '待支付' | '已付定金' | '已退款';
@@ -19,9 +42,9 @@ type TherapistType = '产康师' | '运动康复师' | '调理师';
 type TherapistAssign = '待分配' | '无' | string;
 type ContractStatus = '无' | '未回签' | '已回签';
 type OrderModalMode = 'create' | 'view' | 'edit';
-type PurchaseDateRange = 'all' | 'today' | 'week' | 'month';
+type PurchaseDateRange = 'all' | 'today' | 'week' | 'month' | 'custom';
 
-function purchaseDateLabel(range: PurchaseDateRange): string {
+function purchaseDateLabel(range: Exclude<PurchaseDateRange, 'custom'>): string {
   return { all: '全部', today: '今日', week: '本周', month: '本月' }[range];
 }
 
@@ -103,15 +126,43 @@ interface ExperienceSnapshot {
     sp2: ServicePerson;
     sp3: ServicePerson;
   };
+  followRecords?: FollowRecord[];
+  totalTimes?: string;
+  usedTimes?: number;
+  contractStatus?: ContractStatus;
+  contractAttachments?: OrderAttachment[];
+  servicePhotoRecords?: ServicePhotoRecord[];
+}
+
+interface OrderStageSnapshot extends ExperienceSnapshot {
+  id: string;
+  label: string;
+  type: OrderType;
+  frozenAt: string;
 }
 
 interface OrderForm {
   customerId: string;
   customerName: string;
+  customerWechat: string;
   customerPhone: string;
   customerArea: string;
+  customerSource: string;
+  customerAcquiredAt: string;
   customerTag: CustomerTag | '';
   customerAdvisor: string;
+  customerFollowStatus: string;
+  customerFollowDate: string;
+  customerIntendedProduct: string;
+  customerSituation: string;
+  customerRemark: string;
+  customerBirthYear: string;
+  customerDeliveryDate: string;
+  customerBabyCount: string;
+  customerDeliveryType: '未知' | '顺产' | '剖腹产';
+  customerFeedingType: '未知' | '母乳' | '奶粉' | '混合喂养';
+  customerFollowTask: string;
+  customerProfile: Record<string, unknown>;
   orderType: OrderType | '';
   amount: string;
   payStatus: NewPayStatus;
@@ -120,6 +171,9 @@ interface OrderForm {
   usedTimes: number;
   experienceUpgradeStatus: '' | '未升单' | '已升单';
   experienceSnapshot: ExperienceSnapshot | null;
+  upgradeCustomerTag: CustomerTag | '';
+  packageHistory: OrderStageSnapshot[];
+  activePackageNumber: number;
   contractStatus: ContractStatus;
   servicePerson1: ServicePerson;
   servicePerson2: ServicePerson;
@@ -210,7 +264,7 @@ const TAG_CLS: Partial<Record<CustomerTag, string>> = {
 };
 
 const ORDER_TYPE_AMOUNTS: Record<string, number[]> = {
-  '体验卡阶段': [288, 298],
+  '体验卡阶段': [288, 398],
   '套餐阶段': [3800, 5800, 6800, 9800, 12800, 15800],
 };
 
@@ -221,30 +275,19 @@ const FOLLOW_STATUS_COLORS: Record<string, string> = {
   '延迟': 'badge-danger',
 };
 
-/* ─── 常用服务品项 ─────────────────────────────────────── */
-interface ServiceGroup {
-  group: string;
-  items: string[];
-}
-
-const SERVICE_PRESETS: ServiceGroup[] = [
-  { group: '骨盆修复', items: ['骨盆修复', '骶髂关节复位', '耻骨联合修复', '髋关节松解'] },
-  { group: '腹部修复', items: ['腹直肌修复', '腹部紧致塑形', '剖腹产疤痕修复'] },
-  { group: '盆底康复', items: ['盆底肌修复', '盆底电刺激治疗', '阴道紧致'] },
-  { group: '乳房护理', items: ['乳房疏通', '催乳', '乳腺疏通', '断奶回奶'] },
-  { group: '身体调理', items: ['产后催乳按摩', '月子发汗', '全身经络疏通', '脊柱调整', '肩颈舒缓'] },
-  { group: '运动康复', items: ['核心肌群激活', '产后瑜伽指导', '体态矫正训练'] },
-];
+const SERVICE_PRESETS = ['腹直肌', '骨盆', '盆底肌', '通乳'] as const;
 
 /* ─── Freeze pane helpers ─────────────────────────────── */
-const COL_W = [82, 64, 72, 54];
+const COL_W = [82, 110];
 const COL_LEFT = COL_W.reduce<number[]>((acc, w, i) => {
   if (i === 0) return [0];
   return [...acc, acc[i - 1] + COL_W[i - 1]];
 }, []);
-const FREEZE_TOTAL = COL_W.reduce((s, w) => s + w, 0); // 272
+const FREEZE_TOTAL = COL_W.reduce((s, w) => s + w, 0);
+const ACTION_COL_W = 136;
 
 const FREEZE_SHADOW = '4px 0 8px -2px rgba(0,0,0,0.14)';
+const RIGHT_FREEZE_SHADOW = '-4px 0 8px -2px rgba(0,0,0,0.14)';
 
 function STICKY_TH_STYLE(colIdx: number): React.CSSProperties {
   const isLast = colIdx === COL_W.length - 1;
@@ -308,6 +351,10 @@ const TAG_DEFS: TagDef[] = [
   { tag: 'S2', label: 'S2', desc: '流失客户（无效）',              badgeCls: 'badge-gray',    groupKey: 'S', groupLabel: 'S 流失客户' },
 ];
 
+const UPGRADE_TAGS = new Set<CustomerTag>(['V1', 'V2', 'A1', 'A2']);
+const PRE_UPGRADE_TAG_DEFS = TAG_DEFS.filter(definition => !UPGRADE_TAGS.has(definition.tag));
+const UPGRADE_TAG_DEFS = TAG_DEFS.filter(definition => UPGRADE_TAGS.has(definition.tag));
+
 /* ─── Filter option constants ────────────────────────── */
 const CITY_OPTIONS = [
   { value: '厦门', label: '厦门' },
@@ -322,6 +369,53 @@ interface FilterOption {
 }
 
 const FILTER_NONE = '__FILTER_NONE__';
+const FOLLOW_TIME_FILTER_OPTIONS: FilterOption[] = [
+  { value: 'today', label: '今日' },
+  { value: 'overdue', label: '已过期' },
+  { value: 'pending', label: '未开始' },
+];
+const CONTRACT_STATUS_FILTER_OPTIONS: FilterOption[] =
+  ORDER_CONTRACT_FILTER_VALUES.map(value => ({ value, label: value }));
+
+function matchesFollowTimeFilter(value: string, selected: string[]) {
+  return matchesFollowTime(value, selected, {
+    emptyMeansAll: true,
+    noneValue: FILTER_NONE,
+  });
+}
+
+const STICKY_RIGHT_TH_STYLE: React.CSSProperties = {
+  position: 'sticky',
+  right: 0,
+  width: ACTION_COL_W,
+  minWidth: ACTION_COL_W,
+  maxWidth: ACTION_COL_W,
+  zIndex: 12,
+  background: 'var(--muted)',
+  borderLeft: '2px solid var(--border)',
+  boxShadow: RIGHT_FREEZE_SHADOW,
+  textAlign: 'center',
+  whiteSpace: 'nowrap',
+  padding: '6px 4px',
+};
+
+function STICKY_RIGHT_TD_STYLE(bg: string): React.CSSProperties {
+  return {
+    position: 'sticky',
+    right: 0,
+    width: ACTION_COL_W,
+    minWidth: ACTION_COL_W,
+    maxWidth: ACTION_COL_W,
+    zIndex: 10,
+    background: bg,
+    borderLeft: '2px solid var(--border)',
+    boxShadow: RIGHT_FREEZE_SHADOW,
+    textAlign: 'center',
+    whiteSpace: 'nowrap',
+    padding: '6px 4px',
+    overflow: 'hidden',
+  };
+}
 
 /* ─── Multi-Select Dropdown ──────────────────────────── */
 interface MultiSelectDropdownProps {
@@ -331,10 +425,13 @@ interface MultiSelectDropdownProps {
   onChange: (v: string[]) => void;
   renderOption?: (opt: FilterOption) => React.ReactNode;
   grouped?: boolean;
+  allSelectedLabel?: string;
+  fixedSelectAllLabel?: boolean;
 }
 
 function MultiSelectDropdown({
   label, options, selected, onChange, renderOption, grouped = false,
+  allSelectedLabel, fixedSelectAllLabel = false,
 }: MultiSelectDropdownProps) {
   const [open, setOpen] = useState(false);
   const [menuPos, setMenuPos] = useState({ top: 0, left: 0, width: 140 });
@@ -380,9 +477,9 @@ function MultiSelectDropdown({
   const allSelected = !noneSelected && (selected.length === 0 || effectiveSelected.length === options.length);
   const displayLabel =
     noneSelected
-      ? '未选择'
+      ? '全不选'
       : selected.length === 0 || effectiveSelected.length === options.length
-      ? label
+      ? allSelectedLabel ?? label
       : effectiveSelected.length === 1
       ? options.find(o => o.value === effectiveSelected[0])?.label ?? label
       : `${label} (${effectiveSelected.length})`;
@@ -499,7 +596,7 @@ function MultiSelectDropdown({
           >
             {allSelected && <CheckIcon size={10} className="text-white" />}
           </div>
-          全部
+          {fixedSelectAllLabel ? '全选' : allSelected ? '全不选' : '全选'}
         </div>
         <div style={{ borderTop: '1px solid var(--border)', margin: '4px 0' }} />
         {grouped ? (
@@ -736,70 +833,35 @@ function ServiceItemsPicker({ value, onChange }: ServiceItemsPickerProps) {
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="rounded-xl p-3" style={{ background: 'var(--muted)', border: '1px solid var(--border)' }}>
-        <div className="flex items-center gap-1.5 mb-2.5">
-          <ZapIcon size={12} style={{ color: 'var(--brand)' }} />
-          <span className="text-xs font-semibold" style={{ color: 'var(--brand)' }}>快速选择常用品项</span>
-        </div>
-        <div className="flex flex-col gap-2.5">
-          {SERVICE_PRESETS.map(group => (
-            <div key={group.group}>
-              <div className="text-xs font-medium mb-1.5" style={{ color: 'var(--muted-foreground)' }}>
-                {group.group}
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                {group.items.map(item => {
-                  const active = selectedItems.includes(item);
-                  return (
-                    <button
-                      key={item}
-                      type="button"
-                      onClick={() => togglePreset(item)}
-                      className="px-2.5 py-1 rounded-lg text-xs font-medium border transition-all"
-                      style={{
-                        borderColor: active ? 'var(--brand)' : 'var(--border)',
-                        background: active ? 'var(--accent)' : 'var(--card)',
-                        color: active ? 'var(--brand)' : 'var(--foreground)',
-                      }}
-                    >
-                      {active && <span className="mr-1">✓</span>}
-                      {item}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
       <div>
-        <div className="flex items-center gap-1.5 mb-1">
-          <TagIcon size={12} style={{ color: 'var(--muted-foreground)' }} />
-          <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>手动输入 / 编辑已选品项</span>
-        </div>
         <textarea
           className="w-full px-3 py-2 rounded-lg text-sm outline-none resize-none"
           style={{ background: 'var(--muted)', border: '1px solid var(--border)', minHeight: 60 }}
           value={value}
           onChange={e => onChange(e.target.value)}
-          placeholder="可直接输入，多个品项用顿号、逗号或换行分隔"
+          placeholder="请输入服务项目，多个项目用顿号、逗号或换行分隔"
         />
-        {selectedItems.length > 0 && (
-          <div className="flex flex-wrap gap-1 mt-1.5">
-            {selectedItems.map(item => (
-              <span
+        <div className="flex flex-wrap gap-2 mt-2">
+          {SERVICE_PRESETS.map(item => {
+            const active = selectedItems.includes(item);
+            return (
+              <button
                 key={item}
-                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs"
-                style={{ background: 'var(--accent)', color: 'var(--brand)', border: '1px solid var(--brand)' }}
+                type="button"
+                onClick={() => togglePreset(item)}
+                className="px-3 py-1 rounded-lg text-xs font-medium border transition-all"
+                style={{
+                  borderColor: active ? 'var(--brand)' : 'var(--border)',
+                  background: active ? 'var(--accent)' : 'var(--card)',
+                  color: active ? 'var(--brand)' : 'var(--foreground)',
+                }}
               >
+                {active && <span className="mr-1">✓</span>}
                 {item}
-                <button type="button" onClick={() => togglePreset(item)} className="hover:opacity-70">
-                  <XIcon size={10} />
-                </button>
-              </span>
-            ))}
-          </div>
-        )}
+              </button>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
@@ -824,7 +886,27 @@ function isAssignedServicePerson(person?: ServicePerson) {
 }
 
 function experienceOverallUsedTimes(...people: ServicePerson[]) {
-  return people.some(person => isAssignedServicePerson(person) && Number(person.usedTimes) > 0) ? 1 : 0;
+  const assignedPeople = people.filter(isAssignedServicePerson);
+  return assignedPeople.length > 0 && assignedPeople.every(person => Number(person.usedTimes) > 0) ? 1 : 0;
+}
+
+function isExperienceServiceComplete(form: Pick<OrderForm, 'servicePerson1' | 'servicePerson2' | 'servicePerson3' | 'usedTimes' | 'totalTimes'>) {
+  const assignedPeople = [form.servicePerson1, form.servicePerson2, form.servicePerson3].filter(isAssignedServicePerson);
+  if (assignedPeople.length > 0) {
+    return assignedPeople.every(person => Number(person.usedTimes) > 0);
+  }
+  return Number(form.usedTimes) >= Math.max(1, Number(form.totalTimes) || 1);
+}
+
+function isPackageServiceComplete(form: Pick<OrderForm, 'servicePerson1' | 'servicePerson2' | 'servicePerson3' | 'usedTimes' | 'totalTimes'>) {
+  const assignedPeople = [form.servicePerson1, form.servicePerson2, form.servicePerson3].filter(isAssignedServicePerson);
+  if (assignedPeople.length > 0) {
+    return assignedPeople.every(person => {
+      const total = Math.max(1, Number(person.totalTimes) || Number(form.totalTimes) || 1);
+      return Number(person.usedTimes) >= total;
+    });
+  }
+  return Number(form.usedTimes) >= Math.max(1, Number(form.totalTimes) || 1);
 }
 
 function ServicePersonRow({
@@ -916,11 +998,11 @@ interface OrderModalProps {
   editOrderId?: string;
 }
 
-const TABS = [
+type OrderModalTab = 'customer' | 'experience' | 'package';
+
+const TABS: Array<{ key: OrderModalTab; label: string; icon: typeof UserIcon }> = [
   { key: 'customer', label: '客户信息', icon: UserIcon },
-  { key: 'order', label: '订单维护', icon: FileTextIcon },
-  { key: 'service', label: '服务人员', icon: UsersIcon },
-  { key: 'follow', label: '跟进情况', icon: MessageSquareIcon },
+  { key: 'experience', label: '体验卡阶段', icon: TagIcon },
 ];
 
 function payStatusToForm(status: string | undefined): NewPayStatus {
@@ -934,13 +1016,50 @@ function splitServiceItems(value: string | undefined): string[] {
   return (value || '').split(/[，,、\n]/).map(s => s.trim()).filter(Boolean);
 }
 
-function getCustomerFollowTask(customer: any): string {
-  return customer?.profile?.followTask || '';
-}
-
 function getCustomerFollowRecords(customer: any): CustomerFollowRecord[] {
   const records = customer?.profile?.followRecords;
   return Array.isArray(records) ? sortFollowRecords(records) : [];
+}
+
+function HistoricalFollowRecords({ records }: { records: CustomerFollowRecord[] }) {
+  return (
+    <div className="rounded-xl p-4" style={{ background: 'var(--muted)', border: '1px solid var(--border)' }}>
+      <div className="flex items-center gap-2 mb-3">
+        <MessageSquareIcon size={14} style={{ color: 'var(--brand)' }} />
+        <span className="text-sm font-semibold text-foreground">客户池跟进记录</span>
+        <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>只读，共 {records.length} 条</span>
+      </div>
+      {records.length === 0 ? (
+        <div className="text-center py-6" style={{ color: 'var(--muted-foreground)' }}>
+          <MessageSquareIcon size={26} className="mx-auto mb-2 opacity-30" />
+          <div className="text-sm">暂无历史跟进记录</div>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {records.map((record, index) => (
+            <div
+              key={record.id || index}
+              className="grid grid-cols-[150px_120px_minmax(0,1fr)] gap-3 items-start rounded-lg px-3 py-2.5"
+              style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
+            >
+              <div>
+                <div className="text-xs mb-0.5" style={{ color: 'var(--muted-foreground)' }}>记录时间</div>
+                <div className="text-sm text-foreground">{displayDateTime(record.createdAt || record.date) || '—'}</div>
+              </div>
+              <div>
+                <div className="text-xs mb-0.5" style={{ color: 'var(--muted-foreground)' }}>跟进人</div>
+                <div className="text-sm text-foreground">{record.followerName || record.operator || '—'}</div>
+              </div>
+              <div className="min-w-0">
+                <div className="text-xs mb-0.5" style={{ color: 'var(--muted-foreground)' }}>跟进事项</div>
+                <div className="text-sm text-foreground whitespace-pre-wrap break-words">{record.content || '—'}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function profileValue(value: unknown, fallback = '—') {
@@ -959,7 +1078,11 @@ function nowLocalDateTime() {
 }
 
 function displayDateTime(value: string | undefined) {
-  return value ? value.replace('T', ' ') : '-';
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value.replace('T', ' ');
+  const pad = (number: number) => String(number).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 function nowRecordTime() {
@@ -987,6 +1110,154 @@ function sortFollowRecords<T extends { createdAt?: string; date?: string }>(reco
   });
 }
 
+function snapshotOrderStage(
+  form: OrderForm,
+  id: string,
+  label: string,
+  type: OrderType,
+  frozen = true,
+): OrderStageSnapshot {
+  return {
+    id,
+    label,
+    type,
+    frozenAt: frozen ? nowRecordTime() : '',
+    amount: form.amount,
+    payStatus: form.payStatus,
+    purchaseDate: form.purchaseDate,
+    serviceItems: form.serviceItems,
+    serviceNote: form.serviceNote,
+    servicePeople: {
+      sp1: { ...form.servicePerson1 },
+      sp2: { ...form.servicePerson2 },
+      sp3: { ...form.servicePerson3 },
+    },
+    followRecords: sortFollowRecords(form.followRecords),
+    totalTimes: form.totalTimes,
+    usedTimes: form.usedTimes,
+    contractStatus: form.contractStatus,
+    contractAttachments: [...form.contractAttachments],
+    servicePhotoRecords: [...form.servicePhotoRecords],
+  };
+}
+
+function StageSummary({ stage }: { stage: ExperienceSnapshot | OrderStageSnapshot }) {
+  const people = stage.servicePeople;
+  const servicePeople = [people?.sp1, people?.sp2, people?.sp3].filter(Boolean) as ServicePerson[];
+  const records = sortFollowRecords(stage.followRecords || []);
+  return (
+    <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs" style={{ color: 'var(--muted-foreground)' }}>
+      <span>金额：¥{stage.amount || '—'}</span>
+      <span>购买时间：{stage.purchaseDate || '—'}</span>
+      <span>付款状态：{payStatusDisplay(stage.payStatus)}</span>
+      <span>服务进度：{stage.usedTimes ?? 0} / {stage.totalTimes || 1}</span>
+      <span className="col-span-2">服务项目：{stage.serviceItems || '—'}</span>
+      <span className="col-span-2">服务备注：{stage.serviceNote || '—'}</span>
+      <div className="col-span-2 flex flex-col gap-1">
+        <span>服务人员：</span>
+        {servicePeople.map(person => (
+          <span key={person.type} className="pl-3">
+            {person.type}：{person.assign || '无'}
+            {person.assign && person.assign !== '待分配' && person.assign !== '无'
+              ? `（${person.usedTimes || 0} / ${person.totalTimes || stage.totalTimes || 1}）`
+              : ''}
+          </span>
+        ))}
+      </div>
+      <span>合同附件：{stage.contractAttachments?.length || 0} 个</span>
+      <span>历史照片记录：{stage.servicePhotoRecords?.length || 0} 次</span>
+      <div className="col-span-2 flex flex-col gap-2">
+        <span>跟进记录：{records.length} 条</span>
+        {records.map((record, index) => (
+          <div
+            key={record.id || `${record.createdAt || record.date}-${index}`}
+            className="rounded-lg p-3"
+            style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <span style={{ color: 'var(--brand)' }}>{record.createdAt || record.date || '—'}</span>
+              <span className={`badge ${FOLLOW_STATUS_COLORS[record.status] ?? 'badge-gray'}`}>{record.status}</span>
+              <span>跟进人员：{record.followerName || record.operator || '—'}</span>
+            </div>
+            <div className="mt-1">事项：{record.content || '—'}</div>
+            {record.feedback && <div className="mt-1">反馈：{record.feedback}</div>}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+interface AmountStage {
+  key: string;
+  label: string;
+  amount: number;
+  purchaseDate: string;
+}
+
+function getOrderAmountStages(order: any): AmountStage[] {
+  const people = order?.servicePeople && typeof order.servicePeople === 'object'
+    ? order.servicePeople as Record<string, any>
+    : {};
+  const result: AmountStage[] = [];
+  const experienceSnapshot = people.experienceSnapshot as ExperienceSnapshot | undefined;
+  const packageHistory = ensureArray<OrderStageSnapshot>(people.packageHistory);
+
+  if (experienceSnapshot) {
+    result.push({
+      key: 'experience',
+      label: '体验卡',
+      amount: Number(experienceSnapshot.amount) || 0,
+      purchaseDate: experienceSnapshot.purchaseDate || '',
+    });
+  } else if (order?.type === '体验卡') {
+    result.push({
+      key: 'experience',
+      label: '体验卡',
+      amount: Number(order.amount) || 0,
+      purchaseDate: order.purchaseDate || order.createdAt || '',
+    });
+  }
+
+  packageHistory
+    .map((stage, index) => {
+      const matchedNumber = Number(String(stage.id || stage.label || '').match(/\d+/)?.[0]);
+      const packageNumber = matchedNumber > 0 ? matchedNumber : index + 1;
+      return { stage, packageNumber };
+    })
+    .sort((a, b) => a.packageNumber - b.packageNumber)
+    .forEach(({ stage, packageNumber }) => {
+      result.push({
+        key: `package-${packageNumber}`,
+        label: `套餐${packageNumber}`,
+        amount: Number(stage.amount) || 0,
+        purchaseDate: stage.purchaseDate || '',
+      });
+    });
+
+  if (order?.type === '套餐') {
+    const activePackageNumber = Math.max(1, Number(people.activePackageNumber) || packageHistory.length + 1);
+    const currentKey = `package-${activePackageNumber}`;
+    const currentStage: AmountStage = {
+      key: currentKey,
+      label: `套餐${activePackageNumber}`,
+      amount: Number(order.amount) || 0,
+      purchaseDate: order.purchaseDate || order.createdAt || '',
+    };
+    const existingIndex = result.findIndex(stage => stage.key === currentKey);
+    if (existingIndex >= 0) result[existingIndex] = currentStage;
+    else result.push(currentStage);
+  }
+
+  const stages = result.length > 0
+    ? result
+    : [{ key: 'current', label: '金额', amount: Number(order?.amount) || 0, purchaseDate: order?.purchaseDate || order?.createdAt || '' }];
+  const projection = order?.purchaseRangeProjection;
+  if (!projection?.active) return stages;
+  const visibleKeys = new Set(ensureArray<string>(projection.visibleStageKeys));
+  return stages.filter(stage => visibleKeys.has(stage.key));
+}
+
 function openAttachment(att: OrderAttachment) {
   const src = attachmentSrc(att);
   if (!src) return;
@@ -1008,10 +1279,17 @@ function attachmentSrc(att: OrderAttachment | undefined) {
 
 function formFromOrder(order: any): OrderForm {
   const orderId = order?.id || '';
+  const customer = order?.customerSnapshot || {};
+  const customerProfile = customer?.profile && typeof customer.profile === 'object'
+    ? customer.profile as Record<string, unknown>
+    : {};
+  const customerAge = Number(customerProfile.age) || 0;
   const orderPeople = order?.servicePeople || {};
   const savedTherapists = orderTherapistMap.get(orderId) || (orderPeople?.sp1 || orderPeople?.sp2 || orderPeople?.sp3 ? orderPeople : null);
   const persistedFollowRecords = Array.isArray(orderPeople?.followRecords) ? orderPeople.followRecords : getFollowRecords(orderId);
   const experienceSnapshot = orderPeople?.experienceSnapshot || null;
+  const packageHistory = ensureArray<OrderStageSnapshot>(orderPeople?.packageHistory);
+  const canonicalCustomerTag = customer.tag || order?.tag || orderPeople?.upgradeCustomerTag || '';
   const savedFollowRecords: FollowRecord[] = sortFollowRecords<FollowRecord>(persistedFollowRecords.map((r: any) => ({
     id: r.id,
     date: r.date,
@@ -1026,11 +1304,28 @@ function formFromOrder(order: any): OrderForm {
   const latestOpenRecord = savedFollowRecords.find((r: any) => r.status !== '已完成');
   return {
     customerId: order?.internalCustomerId || order?.customerId || order?.resolvedCustomerId || order?.customerCode || '',
-    customerName: order?.customerName || '',
-    customerPhone: order?.customerPhone || '',
-    customerArea: order?.area && order.area !== '—' ? order.area : '',
-    customerTag: order?.tag || '',
-    customerAdvisor: order?.advisor && order.advisor !== '—' ? order.advisor : '',
+    customerName: customer.name || order?.customerName || '',
+    customerWechat: customer.wechat || '',
+    customerPhone: customer.phone || order?.customerPhone || '',
+    customerArea: (customer.area || order?.area) && (customer.area || order?.area) !== '—' ? (customer.area || order?.area) : '',
+    customerSource: customer.source || '',
+    customerAcquiredAt: customer.acquiredAt || order?.createdAt || '',
+    customerTag: TAG_DEFS.some(definition => definition.tag === canonicalCustomerTag)
+      ? canonicalCustomerTag as CustomerTag
+      : '',
+    customerAdvisor: (customer.advisor || order?.advisor) && (customer.advisor || order?.advisor) !== '—' ? (customer.advisor || order?.advisor) : '',
+    customerFollowStatus: customer.followStatus || '待跟进',
+    customerFollowDate: customer.followDate || '',
+    customerIntendedProduct: customer.intendedProduct || '',
+    customerSituation: customer.situation || '',
+    customerRemark: customer.remark || '',
+    customerBirthYear: customerAge > 0 ? String(new Date().getFullYear() - customerAge) : '',
+    customerDeliveryDate: String(customerProfile.deliveryDate || ''),
+    customerBabyCount: Number(customerProfile.babyCount) > 0 ? String(customerProfile.babyCount) : '',
+    customerDeliveryType: (customerProfile.deliveryType || '未知') as OrderForm['customerDeliveryType'],
+    customerFeedingType: (customerProfile.feedingType || '未知') as OrderForm['customerFeedingType'],
+    customerFollowTask: String(customerProfile.followTask || ''),
+    customerProfile,
     orderType: order?.type || '',
     amount: order?.amount != null ? String(order.amount) : '',
     payStatus: payStatusToForm(effectiveOrderPayStatus(order)),
@@ -1039,7 +1334,12 @@ function formFromOrder(order: any): OrderForm {
     usedTimes: Number(order?.usedTimes || 0),
     experienceUpgradeStatus: order?.isUpgrade ? '已升单' : (order?.type === '体验卡' && Number(order?.usedTimes || 0) >= Number(order?.totalTimes || 1) ? '未升单' : ''),
     experienceSnapshot,
-    contractStatus: getContractStatus(orderId, order?.type || '体验卡'),
+    upgradeCustomerTag: TAG_DEFS.some(definition => definition.tag === canonicalCustomerTag)
+      ? canonicalCustomerTag as CustomerTag
+      : '',
+    packageHistory,
+    activePackageNumber: Math.max(1, Number(orderPeople?.activePackageNumber) || (packageHistory.length + 1)),
+    contractStatus: getContractStatus(order),
     servicePerson1: savedTherapists?.sp1 || { type: '产康师', assign: '待分配' },
     servicePerson2: savedTherapists?.sp2 || { type: '运动康复师', assign: '待分配' },
     servicePerson3: savedTherapists?.sp3 || { type: '调理师', assign: '待分配' },
@@ -1057,7 +1357,7 @@ function formFromOrder(order: any): OrderForm {
     newFollowDate: latestOpenRecord?.date || '',
     newFollowStatus: latestOpenRecord?.status || '待跟进',
     newFollowContent: latestOpenRecord?.content || '',
-    newFollowFeedback: latestOpenRecord?.feedback || '',
+    newFollowFeedback: '',
     newFollowFollowerId: latestOpenRecord?.followerId || '',
     newFollowFollowerName: latestOpenRecord?.followerName || latestOpenRecord?.operator || '',
   };
@@ -1077,12 +1377,6 @@ function CustomerArchiveView({ customer, form }: { customer: any; form: OrderFor
     ['获客时间', profileValue(c.acquiredAt)],
     ['客户标签', profileValue(c.tag || form.customerTag)],
     ['归属客服', profileValue(c.advisor || form.customerAdvisor)],
-    ['跟进状态', profileValue(c.followStatus)],
-    ['下次跟进', profileValue(c.followDate)],
-    ['意向产品', profileValue(c.intendedProduct)],
-    ['客户需求', profileValue(c.situation)],
-    ['备注', profileValue(c.remark)],
-    ['跟进事项', profileValue(getCustomerFollowTask(c))],
   ];
   const profileRows: [string, string][] = [
     ['年龄', profileValue(profile.age ? `${profile.age}岁` : '')],
@@ -1107,6 +1401,22 @@ function CustomerArchiveView({ customer, form }: { customer: any; form: OrderFor
       </div>
 
       <div className="rounded-xl p-4" style={{ background: 'var(--muted)', border: '1px solid var(--border)' }}>
+        <div className="text-sm font-semibold text-foreground mb-3">客户需求</div>
+        <div className="grid grid-cols-2 gap-x-6 gap-y-3">
+          {([
+            ['意向产品', profileValue(c.intendedProduct || form.customerIntendedProduct)],
+            ['客户需求及痛点', profileValue(c.situation || form.customerSituation)],
+            ['备注', profileValue(c.remark || form.customerRemark)],
+          ] as [string, string][]).map(([key, value]) => (
+            <div key={key} className={key === '意向产品' ? 'flex items-start gap-3' : 'col-span-2 flex items-start gap-3'}>
+              <span className="text-xs w-24 flex-shrink-0 mt-0.5" style={{ color: 'var(--muted-foreground)' }}>{key}</span>
+              <span className="text-sm font-medium text-foreground whitespace-pre-wrap break-words">{value}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="rounded-xl p-4" style={{ background: 'var(--muted)', border: '1px solid var(--border)' }}>
         <div className="flex items-center gap-2 mb-3">
           <UserIcon size={14} style={{ color: 'var(--brand)' }} />
           <span className="text-sm font-semibold text-foreground">客户画像</span>
@@ -1122,41 +1432,16 @@ function CustomerArchiveView({ customer, form }: { customer: any; form: OrderFor
         </div>
       </div>
 
-      <div className="rounded-xl p-4" style={{ background: 'var(--muted)', border: '1px solid var(--border)' }}>
-        <div className="flex items-center gap-2 mb-3">
-          <MessageSquareIcon size={14} style={{ color: 'var(--brand)' }} />
-          <span className="text-sm font-semibold text-foreground">跟进记录</span>
-          <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>共 {followRecords.length} 条</span>
-        </div>
-        {followRecords.length === 0 ? (
-          <div className="text-center py-8" style={{ color: 'var(--muted-foreground)' }}>
-            <MessageSquareIcon size={28} className="mx-auto mb-2 opacity-30" />
-            <div className="text-sm">暂无跟进记录</div>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-3">
-            {followRecords.map((rec, idx) => (
-              <div key={rec.id || idx} className="rounded-lg p-3" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-semibold" style={{ color: 'var(--brand)' }}>计划跟进：{rec.date || '—'}</span>
-                  <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>跟进人员：{rec.followerName || rec.operator || '—'}</span>
-                </div>
-                {rec.content && <div className="text-sm text-foreground mb-1">事项：{rec.content}</div>}
-                {rec.feedback && <div className="text-sm text-foreground mb-1">反馈：{rec.feedback}</div>}
-                <div className="text-xs" style={{ color: 'var(--muted-foreground)' }}>记录时间：{rec.createdAt || '—'}</div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+      <HistoricalFollowRecords records={followRecords} />
     </div>
   );
 }
 
 function OrderModal({ visible, onClose, mode = 'create', order = null, editOrderId = '' }: OrderModalProps) {
   const orderMutations = useOrderMutations();
-  const { currentUser } = useApp();
+  const { currentUser, setActivePage } = useApp();
   const canChooseFollower = currentUser.role === 'superadmin' || currentUser.role === 'admin';
+  const canChooseAdvisor = canChooseFollower;
   const canDeleteOrder = canChooseFollower && mode === 'edit';
   const canEditServiceProgress = canChooseFollower && mode !== 'view';
   const usersQuery = useSystemUsers(canChooseFollower);
@@ -1165,17 +1450,92 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
       .filter(u => u.status === 'active' && (u.role === 'superadmin' || u.role === 'admin' || u.role === 'service'))
       .map(u => ({ id: u.id, name: u.name }))
     : [{ id: currentUser.id, name: currentUser.name }];
+  const advisorOptions = canChooseAdvisor
+    ? (usersQuery.data?.data ?? [])
+      .filter(u => u.status === 'active' && (u.role === 'superadmin' || u.role === 'admin' || u.role === 'service'))
+      .map(u => ({ id: u.id, name: u.name }))
+    : [{ id: currentUser.id, name: currentUser.name }];
   const defaultFollower = followerOptions.find(u => u.id === currentUser.id) ?? followerOptions[0] ?? { id: currentUser.id, name: currentUser.name };
-  const [activeTab, setActiveTab] = useState('customer');
+  const [activeTab, setActiveTab] = useState<OrderModalTab>('customer');
   const [form, setForm] = useState<OrderForm>(initForm());
   const [isManualProgressDirty, setIsManualProgressDirty] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
+  const [showUpgradeConfirmation, setShowUpgradeConfirmation] = useState(false);
+  const [showPackageUpgradeConfirmation, setShowPackageUpgradeConfirmation] = useState(false);
+  const [packageStageToDelete, setPackageStageToDelete] = useState<number | null>(null);
+  const [isDeletingPackageStage, setIsDeletingPackageStage] = useState(false);
+  const [pendingUpgradeTag, setPendingUpgradeTag] = useState<CustomerTag | ''>('');
+  const [isEditingExperienceSnapshot, setIsEditingExperienceSnapshot] = useState(false);
   const contractFileRef = useRef<HTMLInputElement>(null);
   const servicePhotoFileRef = useRef<HTMLInputElement>(null);
   const isEdit = mode === 'edit';
   const isView = mode === 'view';
-  const customerQuery = useCustomer(form.customerId || null);
+  const customerQuery = useCustomer(mode === 'create' ? (form.customerId || null) : null);
   const fullCustomer = customerQuery.data as any;
+  const appointmentsQuery = useAppointments({
+    page: 1,
+    pageSize: 1000,
+    customerId: form.customerId || '__none__',
+  });
+  const serviceRecordsQuery = useServiceRecords({
+    page: 1,
+    pageSize: 1000,
+    customerId: form.customerId || '__none__',
+  });
+  const serviceRecordMutations = useServiceRecordMutations();
+  const [uploadingRecordId, setUploadingRecordId] = useState('');
+  const customerAppointments = appointmentsQuery.data?.data ?? [];
+  const serviceRecords = serviceRecordsQuery.data?.data ?? [];
+  const nextAppointment = [...customerAppointments]
+    .filter(item => item.status !== '已完成' && item.status !== '已取消')
+    .sort((a, b) => `${a.date} ${a.timeSlot}`.localeCompare(`${b.date} ${b.timeSlot}`))[0];
+
+  function goToAppointmentCalendar() {
+    if (mode !== 'edit' || !editOrderId) {
+      toast.error('请先保存订单，再为客户预约');
+      return;
+    }
+    saveOrderAppointmentDraft(sessionStorage, {
+      orderId: editOrderId,
+      mode: 'edit',
+      activeTab,
+      form,
+      orderSnapshot: order,
+      isManualProgressDirty,
+    });
+    sessionStorage.setItem('weikebenyuan:appointment-prefill', JSON.stringify({
+      customerId: form.customerId,
+      customerName: form.customerName,
+      returnToOrderEditor: true,
+      therapistNames: [form.servicePerson1.assign, form.servicePerson2.assign, form.servicePerson3.assign]
+        .filter(name => name && name !== '待分配' && name !== '无'),
+    }));
+    onClose();
+    setActivePage('appointments-calendar');
+  }
+
+  async function uploadServiceRecordPhotos(recordId: string, currentPhotos: unknown[], files: FileList | null) {
+    if (!files?.length) return;
+    const valid = Array.from(files).filter(file => file.type === 'image/png' || file.type === 'image/jpeg');
+    const remaining = Math.max(0, 10 - currentPhotos.length);
+    if (valid.length === 0 || remaining === 0) {
+      toast.error(remaining === 0 ? '本次服务最多保留 10 张照片' : '仅支持 PNG/JPG 图片');
+      return;
+    }
+    setUploadingRecordId(recordId);
+    try {
+      const uploaded = await uploadsApi.files(valid.slice(0, remaining), 'service-records');
+      await serviceRecordMutations.update({
+        id: recordId,
+        body: { photos: [...currentPhotos, ...uploaded.data] },
+      });
+      toast.success('服务照片已保存');
+    } catch (error: any) {
+      toast.error(error?.message || '服务照片上传失败');
+    } finally {
+      setUploadingRecordId('');
+    }
+  }
 
   useEffect(() => {
     if (!visible) {
@@ -1183,10 +1543,28 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
       setForm(initForm());
       setIsManualProgressDirty(false);
       setShowPicker(false);
+      setShowUpgradeConfirmation(false);
+      setShowPackageUpgradeConfirmation(false);
+      setPendingUpgradeTag('');
+      setIsEditingExperienceSnapshot(false);
       return;
     }
     setActiveTab('customer');
     setShowPicker(false);
+    setShowUpgradeConfirmation(false);
+    setShowPackageUpgradeConfirmation(false);
+    setPendingUpgradeTag('');
+    setIsEditingExperienceSnapshot(false);
+    const suspendedDraft = mode === 'edit' && editOrderId
+      ? readOrderAppointmentDraft<OrderForm, any>(sessionStorage)
+      : null;
+    if (suspendedDraft?.orderId === editOrderId) {
+      setActiveTab(suspendedDraft.activeTab as OrderModalTab);
+      setForm(suspendedDraft.form);
+      setIsManualProgressDirty(suspendedDraft.isManualProgressDirty);
+      clearOrderAppointmentDraft(sessionStorage);
+      return;
+    }
     const nextForm = order && mode !== 'create' ? formFromOrder(order) : initForm();
     nextForm.newFollowFollowerId = nextForm.newFollowFollowerId || defaultFollower.id;
     nextForm.newFollowFollowerName = nextForm.newFollowFollowerName || defaultFollower.name;
@@ -1198,26 +1576,54 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
     setForm(prev => ({ ...prev, [key]: val }));
   }
 
+  function setCustomerTag(tag: CustomerTag | '') {
+    setForm(prev => ({
+      ...prev,
+      customerTag: tag,
+      // Keep the legacy stage field synchronized while persisted old orders still contain it.
+      upgradeCustomerTag: tag,
+    }));
+    setShowUpgradeConfirmation(false);
+  }
+
   function handleCustomerSelect(c: Customer) {
+    const customer = c as any;
+    const profile = customer.profile && typeof customer.profile === 'object'
+      ? customer.profile as Record<string, unknown>
+      : {};
+    const age = Number(profile.age) || 0;
     setForm(prev => ({
       ...prev,
       customerId: c.id,
       customerName: c.name,
+      customerWechat: c.wechat || '',
       customerPhone: c.phone,
       customerArea: c.area,
+      customerSource: c.source || '',
+      customerAcquiredAt: c.acquiredAt || '',
       customerTag: c.tag,
+      upgradeCustomerTag: c.tag,
       customerAdvisor: c.advisor,
+      customerFollowStatus: c.followStatus || '待跟进',
+      customerFollowDate: c.followDate || '',
+      customerIntendedProduct: c.intendedProduct || '',
+      customerSituation: c.situation || '',
+      customerRemark: c.remark || '',
+      customerBirthYear: age > 0 ? String(new Date().getFullYear() - age) : '',
+      customerDeliveryDate: String(profile.deliveryDate || ''),
+      customerBabyCount: Number(profile.babyCount) > 0 ? String(profile.babyCount) : '',
+      customerDeliveryType: (profile.deliveryType || '未知') as OrderForm['customerDeliveryType'],
+      customerFeedingType: (profile.feedingType || '未知') as OrderForm['customerFeedingType'],
+      customerFollowTask: String(profile.followTask || ''),
+      customerProfile: profile,
     }));
   }
 
   function handleAddFollow() {
     if (!form.newFollowContent.trim() && !form.newFollowFeedback.trim()) return;
-    const sortedRecords = sortFollowRecords(form.followRecords);
-    const latestRecord = sortedRecords[0];
-    const shouldUpdateLatest = Boolean(latestRecord && latestRecord.status !== '已完成');
     const follower = followerOptions.find(u => u.id === form.newFollowFollowerId) ?? defaultFollower;
     const rec: FollowRecord = {
-      id: shouldUpdateLatest ? latestRecord?.id : `fr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      id: `fr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       date: form.newFollowDate || new Date().toISOString().slice(0, 10),
       content: form.newFollowContent.trim(),
       feedback: form.newFollowFeedback.trim(),
@@ -1227,48 +1633,323 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
       followerName: follower.name,
       createdAt: nowRecordTime(),
     };
-    const nextRecords = shouldUpdateLatest
-      ? sortFollowRecords(form.followRecords.map((r, idx) => idx === form.followRecords.indexOf(latestRecord!) ? rec : r))
-      : sortFollowRecords([rec, ...form.followRecords]);
-    const keepDraft = rec.status !== '已完成';
+    const nextRecords = sortFollowRecords([rec, ...form.followRecords]);
     setForm(prev => ({
       ...prev,
       followRecords: nextRecords,
-      newFollowDate: keepDraft ? rec.date : '',
-      newFollowStatus: keepDraft ? rec.status : '待跟进',
-      newFollowContent: keepDraft ? rec.content : '',
-      newFollowFeedback: keepDraft ? rec.feedback : '',
-      newFollowFollowerId: keepDraft ? follower.id : defaultFollower.id,
-      newFollowFollowerName: keepDraft ? follower.name : defaultFollower.name,
+      // Keep the current task as the next draft, but clear one-off feedback so every save
+      // creates a new immutable interaction record.
+      newFollowDate: rec.status === '已完成' ? '' : rec.date,
+      newFollowStatus: rec.status === '已完成' ? '待跟进' : rec.status,
+      newFollowContent: rec.status === '已完成' ? '' : rec.content,
+      newFollowFeedback: '',
+      newFollowFollowerId: follower.id,
+      newFollowFollowerName: follower.name,
     }));
   }
 
-  const isExperienceOrder = order?.type === '体验卡' || Boolean(form.experienceSnapshot) || Boolean(order?.isUpgrade);
+  const isExperienceOrder = form.orderType === '体验卡' || order?.type === '体验卡' || Boolean(form.experienceSnapshot) || Boolean(order?.isUpgrade);
+  const currentExperienceServiceComplete = form.orderType === '体验卡' && isExperienceServiceComplete(form);
   const isCompletedExperience = isExperienceOrder && (
     Boolean(form.experienceSnapshot) ||
+    currentExperienceServiceComplete ||
     (order?.type === '体验卡' && Number(order?.usedTimes || 0) >= Number(order?.totalTimes || 1))
   );
   const canChoosePackage = !isExperienceOrder || form.experienceUpgradeStatus === '已升单';
-  const isExperienceFrozen = isCompletedExperience && form.experienceUpgradeStatus === '已升单' && form.orderType === '体验卡';
+  const isExperienceFrozen = isCompletedExperience
+    && form.experienceUpgradeStatus === '已升单'
+    && form.orderType === '体验卡'
+    && !canChooseFollower;
+  const selectableCustomerTagDefs = form.experienceUpgradeStatus === '已升单' || form.orderType === '套餐'
+    ? TAG_DEFS
+    : PRE_UPGRADE_TAG_DEFS;
+  const isActiveStageTab = (
+    activeTab === 'experience' && form.orderType === '体验卡'
+  ) || (
+    activeTab === 'package' && form.orderType === '套餐'
+  );
+  const packageStageNumbers = Array.from(new Set([
+    ...form.packageHistory.map(stage => (
+      Math.max(1, Number(String(stage.id || stage.label).match(/\d+/)?.[0]) || 1)
+    )),
+    ...(form.orderType === '套餐' ? [Math.max(1, form.activePackageNumber)] : [1]),
+  ])).sort((a, b) => a - b);
+  const latestPackageNumber = Math.max(...packageStageNumbers);
+  const canAddNextPackage = isEdit
+    && !isView
+    && form.orderType === '套餐'
+    && form.activePackageNumber === latestPackageNumber
+    && (Boolean(form.experienceSnapshot) || Boolean(order?.isUpgrade));
+  const visibleTabs: Array<{
+    id: string;
+    key: OrderModalTab;
+    label: string;
+    icon: typeof UserIcon;
+    packageNumber?: number;
+    disabled?: boolean;
+  }> = [
+    ...TABS.map(tab => ({ id: tab.key, ...tab })),
+    ...packageStageNumbers.map(packageNumber => ({
+      id: `package-${packageNumber}`,
+      key: 'package' as const,
+      label: `套餐${packageNumber}阶段`,
+      icon: FileTextIcon,
+      packageNumber,
+      disabled: !canChoosePackage,
+    })),
+  ];
+  const activeVisibleTabId = activeTab === 'package'
+    ? `package-${Math.max(1, form.activePackageNumber)}`
+    : activeTab;
 
-  function setExperienceUpgradeStatus(status: '' | '未升单' | '已升单') {
+  function openVisibleTab(tab: typeof visibleTabs[number]) {
+    if (tab.disabled) return;
+    if (tab.key !== 'package' || !tab.packageNumber) {
+      setActiveTab(tab.key);
+      return;
+    }
+    const targetStage = form.packageHistory.find(stage => (
+      Math.max(1, Number(String(stage.id || stage.label).match(/\d+/)?.[0]) || 1) === tab.packageNumber
+    ));
+    if (tab.packageNumber !== form.activePackageNumber && targetStage && !targetStage.frozenAt) {
+      switchToPackageStage(targetStage);
+    }
+    setActiveTab('package');
+  }
+
+  function setExperienceUpgradeStatus(status: '' | '未升单' | '已升单', targetTag: CustomerTag | '' = '') {
     setForm(prev => {
+      const nextTag = status === '已升单' ? targetTag : prev.customerTag;
       const snapshot = status === '已升单' && !prev.experienceSnapshot
-        ? {
-            amount: prev.amount,
-            payStatus: prev.payStatus,
-            purchaseDate: prev.purchaseDate,
-            serviceItems: prev.serviceItems,
-            serviceNote: prev.serviceNote,
-            servicePeople: {
-              sp1: prev.servicePerson1,
-              sp2: prev.servicePerson2,
-              sp3: prev.servicePerson3,
-            },
-          }
+        ? snapshotOrderStage(prev, 'experience', '体验卡阶段', '体验卡')
         : prev.experienceSnapshot;
-      return { ...prev, experienceUpgradeStatus: status, experienceSnapshot: snapshot };
+      if (status !== '已升单') {
+        return { ...prev, experienceUpgradeStatus: status, experienceSnapshot: snapshot };
+      }
+      return {
+        ...prev,
+        experienceUpgradeStatus: status,
+        experienceSnapshot: snapshot,
+        customerTag: nextTag,
+        upgradeCustomerTag: nextTag,
+        orderType: '套餐',
+        amount: '',
+        payStatus: '待支付',
+        purchaseDate: new Date().toISOString().slice(0, 10),
+        totalTimes: '1',
+        usedTimes: 0,
+        contractStatus: '未回签',
+        serviceItems: '',
+        serviceNote: '',
+        contractAttachments: [],
+        servicePhotoRecords: [],
+        servicePerson1: { type: '产康师', assign: '待分配' },
+        servicePerson2: { type: '运动康复师', assign: '待分配' },
+        servicePerson3: { type: '调理师', assign: '待分配' },
+        followRecords: [],
+        newFollowDate: '',
+        newFollowStatus: '待跟进',
+        newFollowContent: '',
+        newFollowFeedback: '',
+      };
     });
+    if (status === '已升单') {
+      setIsManualProgressDirty(false);
+      setShowUpgradeConfirmation(false);
+      setPendingUpgradeTag('');
+      toast.success('体验卡阶段已固化，套餐1阶段已开启');
+    }
+  }
+
+  function updateExperienceSnapshot(patch: Partial<ExperienceSnapshot>) {
+    setForm(prev => prev.experienceSnapshot
+      ? { ...prev, experienceSnapshot: { ...prev.experienceSnapshot, ...patch } }
+      : prev);
+  }
+
+  function updateExperienceSnapshotPerson(key: 'sp1' | 'sp2' | 'sp3', person: ServicePerson) {
+    setForm(prev => {
+      if (!prev.experienceSnapshot) return prev;
+      const people = {
+        ...prev.experienceSnapshot.servicePeople,
+        [key]: person,
+      };
+      return {
+        ...prev,
+        experienceSnapshot: {
+          ...prev.experienceSnapshot,
+          servicePeople: people,
+          usedTimes: experienceOverallUsedTimes(people.sp1, people.sp2, people.sp3),
+        },
+      };
+    });
+  }
+
+  function confirmNextPackage() {
+    const completedPackageNumber = form.activePackageNumber;
+    const currentPackageComplete = isPackageServiceComplete(form);
+    setForm(prev => {
+      if (prev.orderType !== '套餐') return prev;
+      const currentPackageNumber = Math.max(1, prev.activePackageNumber);
+      const currentPackageId = `package-${currentPackageNumber}`;
+      const currentPackage = snapshotOrderStage(
+        prev,
+        currentPackageId,
+        `套餐${currentPackageNumber}`,
+        '套餐',
+        isPackageServiceComplete(prev),
+      );
+      return {
+        ...prev,
+        packageHistory: [
+          ...prev.packageHistory.filter(stage => stage.id !== currentPackageId),
+          currentPackage,
+        ],
+        activePackageNumber: currentPackageNumber + 1,
+        amount: '',
+        payStatus: '待支付',
+        purchaseDate: new Date().toISOString().slice(0, 10),
+        totalTimes: '1',
+        usedTimes: 0,
+        contractStatus: '未回签',
+        serviceItems: '',
+        serviceNote: '',
+        contractAttachments: [],
+        servicePhotoRecords: [],
+        servicePerson1: { type: '产康师', assign: '待分配' },
+        servicePerson2: { type: '运动康复师', assign: '待分配' },
+        servicePerson3: { type: '调理师', assign: '待分配' },
+        followRecords: [],
+        newFollowDate: '',
+        newFollowStatus: '待跟进',
+        newFollowContent: '',
+        newFollowFeedback: '',
+      };
+    });
+    setShowPackageUpgradeConfirmation(false);
+    setIsManualProgressDirty(false);
+    toast.success(currentPackageComplete
+      ? `套餐${completedPackageNumber}已固化为记录，套餐${completedPackageNumber + 1}已生成`
+      : `套餐${completedPackageNumber + 1}已生成，套餐${completedPackageNumber}保留为进行中`);
+  }
+
+  function switchToPackageStage(stage: OrderStageSnapshot) {
+    if (stage.frozenAt) return;
+    setForm(prev => {
+      const currentPackageNumber = Math.max(1, prev.activePackageNumber);
+      const currentPackageId = `package-${currentPackageNumber}`;
+      const currentPackage = snapshotOrderStage(
+        prev,
+        currentPackageId,
+        `套餐${currentPackageNumber}`,
+        '套餐',
+        isPackageServiceComplete(prev),
+      );
+      const nextHistory = [
+        ...prev.packageHistory.filter(item => item.id !== stage.id && item.id !== currentPackageId),
+        currentPackage,
+      ];
+      const targetNumber = Math.max(1, Number(String(stage.id || stage.label).match(/\d+/)?.[0]) || 1);
+      return {
+        ...prev,
+        packageHistory: nextHistory,
+        activePackageNumber: targetNumber,
+        amount: stage.amount,
+        payStatus: stage.payStatus,
+        purchaseDate: stage.purchaseDate,
+        totalTimes: String(stage.totalTimes || 1),
+        usedTimes: Number(stage.usedTimes || 0),
+        contractStatus: stage.contractStatus || '未回签',
+        serviceItems: stage.serviceItems,
+        serviceNote: stage.serviceNote,
+        contractAttachments: [...(stage.contractAttachments || [])],
+        servicePhotoRecords: [...(stage.servicePhotoRecords || [])],
+        servicePerson1: { ...stage.servicePeople.sp1 },
+        servicePerson2: { ...stage.servicePeople.sp2 },
+        servicePerson3: { ...stage.servicePeople.sp3 },
+        followRecords: sortFollowRecords(stage.followRecords || []),
+        newFollowDate: '',
+        newFollowStatus: '待跟进',
+        newFollowContent: '',
+        newFollowFeedback: '',
+      };
+    });
+    setShowPackageUpgradeConfirmation(false);
+    setIsManualProgressDirty(false);
+  }
+
+  function packageNumberForStage(stage: OrderStageSnapshot): number {
+    return Math.max(1, Number(String(stage.id || stage.label).match(/\d+/)?.[0]) || 1);
+  }
+
+  function restorePackageStage(
+    sourceForm: OrderForm,
+    stage: OrderStageSnapshot,
+    packageHistory: OrderStageSnapshot[],
+  ): OrderForm {
+    return {
+      ...sourceForm,
+      packageHistory,
+      activePackageNumber: packageNumberForStage(stage),
+      amount: stage.amount,
+      payStatus: stage.payStatus,
+      purchaseDate: stage.purchaseDate,
+      totalTimes: String(stage.totalTimes || 1),
+      usedTimes: Number(stage.usedTimes || 0),
+      contractStatus: stage.contractStatus || '未回签',
+      serviceItems: stage.serviceItems,
+      serviceNote: stage.serviceNote,
+      contractAttachments: [...(stage.contractAttachments || [])],
+      servicePhotoRecords: [...(stage.servicePhotoRecords || [])],
+      servicePerson1: { ...stage.servicePeople.sp1 },
+      servicePerson2: { ...stage.servicePeople.sp2 },
+      servicePerson3: { ...stage.servicePeople.sp3 },
+      followRecords: sortFollowRecords(stage.followRecords || []),
+      newFollowDate: '',
+      newFollowStatus: '待跟进',
+      newFollowContent: '',
+      newFollowFeedback: '',
+    };
+  }
+
+  async function confirmDeletePackageStage() {
+    const packageNumber = packageStageToDelete;
+    if (!canDeleteOrder || !editOrderId || !packageNumber || packageNumber <= 1) return;
+
+    setIsDeletingPackageStage(true);
+    try {
+      const retainedHistory = form.packageHistory.filter(
+        stage => packageNumberForStage(stage) !== packageNumber,
+      );
+      let nextForm: OrderForm;
+
+      if (form.activePackageNumber !== packageNumber) {
+        nextForm = { ...form, packageHistory: retainedHistory };
+      } else {
+        const fallbackStage = [...retainedHistory]
+          .sort((a, b) => packageNumberForStage(b) - packageNumberForStage(a))[0];
+        if (!fallbackStage) {
+          throw new Error('套餐1为基础阶段，无法删除');
+        }
+        nextForm = restorePackageStage(
+          form,
+          fallbackStage,
+          retainedHistory.filter(stage => stage.id !== fallbackStage.id),
+        );
+      }
+
+      const { body } = buildOrderWritePayload(nextForm, true);
+      await orderMutations.update({ id: editOrderId, body });
+      setForm(nextForm);
+      setActiveTab('package');
+      setPackageStageToDelete(null);
+      setIsManualProgressDirty(false);
+      toast.success(`套餐${packageNumber}阶段已删除`);
+    } catch (error: any) {
+      toast.error(error?.message || `套餐${packageNumber}阶段删除失败`);
+    } finally {
+      setIsDeletingPackageStage(false);
+    }
   }
 
   async function handleContractFiles(files: FileList | null) {
@@ -1354,27 +2035,105 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
     }));
   }
 
+  function buildOrderWritePayload(sourceForm: OrderForm, manualProgressEdit: boolean) {
+    const oid = editOrderId || `ORDER-${Date.now()}`;
+    const followRecords: OrderFollowRecord[] = sortFollowRecords(sourceForm.followRecords).map((record, index) => ({
+      id: record.id || `fr-${oid}-${index}`,
+      date: record.date,
+      content: record.content,
+      feedback: record.feedback || '',
+      status: record.status || '待跟进',
+      operator: record.operator,
+      followerId: record.followerId,
+      followerName: record.followerName || record.operator,
+      createdAt: hasPreciseRecordTime(record.createdAt) ? record.createdAt : '',
+    }));
+    const payStatus = (
+      sourceForm.payStatus === '已支付'
+        ? '已付款'
+        : sourceForm.payStatus === '待支付'
+          ? '待付款'
+          : sourceForm.payStatus
+    ) as any;
+    const body: any = {
+      customerId: sourceForm.customerId,
+      customerName: sourceForm.customerName,
+      customerWechat: sourceForm.customerWechat,
+      customerPhone: sourceForm.customerPhone,
+      customerArea: sourceForm.customerArea,
+      customerSource: sourceForm.customerSource,
+      customerAcquiredAt: sourceForm.customerAcquiredAt,
+      customerTag: sourceForm.customerTag,
+      customerAdvisor: sourceForm.customerAdvisor,
+      customerFollowStatus: sourceForm.customerFollowStatus,
+      customerFollowDate: sourceForm.customerFollowDate,
+      customerIntendedProduct: sourceForm.customerIntendedProduct,
+      customerSituation: sourceForm.customerSituation,
+      customerRemark: sourceForm.customerRemark,
+      customerProfile: {
+        ...sourceForm.customerProfile,
+        age: Number(sourceForm.customerBirthYear) > 1900
+          ? Math.max(0, new Date().getFullYear() - Number(sourceForm.customerBirthYear))
+          : 0,
+        deliveryDate: sourceForm.customerDeliveryDate,
+        deliveryType: sourceForm.customerDeliveryType,
+        babyCount: Number(sourceForm.customerBabyCount) || 0,
+        feedingType: sourceForm.customerFeedingType,
+        followTask: sourceForm.customerFollowTask,
+      },
+      type: sourceForm.orderType || '体验卡',
+      amount: Number(sourceForm.amount) || 0,
+      payStatus,
+      purchaseDate: sourceForm.purchaseDate,
+      serviceItems: sourceForm.serviceItems,
+      totalTimes: sourceForm.orderType === '套餐' || order?.isUpgrade
+        ? Math.max(1, Number(sourceForm.totalTimes) || 1)
+        : 1,
+      usedTimes: sourceForm.usedTimes,
+      manualProgressEdit,
+      isUpgrade: sourceForm.experienceUpgradeStatus === '已升单',
+      contractSigned: sourceForm.contractStatus !== '无' && sourceForm.contractStatus !== '未回签',
+      serviceItemCount: Math.max(1, splitServiceItems(sourceForm.serviceItems).length),
+      servicePeople: {
+        sp1: sourceForm.servicePerson1,
+        sp2: sourceForm.servicePerson2,
+        sp3: sourceForm.servicePerson3,
+        followRecords,
+        experienceSnapshot: sourceForm.experienceSnapshot,
+        packageHistory: sourceForm.packageHistory,
+        activePackageNumber: sourceForm.activePackageNumber,
+        upgradeCustomerTag: sourceForm.customerTag,
+      },
+      appointmentTime: sourceForm.appointmentTime,
+      serviceNote: sourceForm.serviceNote,
+      contractAttachments: sourceForm.contractAttachments,
+      servicePhotoRecords: sourceForm.servicePhotoRecords,
+    };
+    return { body, followRecords, oid };
+  }
+
   async function handleSave() {
     if (isView) return;
-    // Persist to module-level maps
-    const oid = editOrderId || `ORDER-${Date.now()}`;
+    if (form.orderType === '体验卡' && form.experienceUpgradeStatus !== '已升单'
+      && form.customerTag && UPGRADE_TAGS.has(form.customerTag)) {
+      toast.error('未升单客户请选择 A2 以下（不含 A2）的客户标签');
+      setActiveTab('experience');
+      return;
+    }
+    if (form.experienceUpgradeStatus === '已升单' && !form.customerTag) {
+      toast.error('请选择客户标签');
+      setActiveTab('experience');
+      return;
+    }
+    const { body: orderBody, followRecords: newRecords, oid } = buildOrderWritePayload(
+      form,
+      isManualProgressDirty,
+    );
     orderTherapistMap.set(oid, {
       sp1: form.servicePerson1,
       sp2: form.servicePerson2,
       sp3: form.servicePerson3,
     });
-    // Convert follow records to OrderFollowRecord
-    const newRecords: OrderFollowRecord[] = sortFollowRecords(form.followRecords).map((r, i) => ({
-      id: r.id || `fr-${oid}-${i}`,
-      date: r.date,
-      content: r.content,
-      feedback: r.feedback || '',
-      status: r.status || '待跟进',
-      operator: r.operator,
-      followerId: r.followerId,
-      followerName: r.followerName || r.operator,
-      createdAt: hasPreciseRecordTime(r.createdAt) ? r.createdAt : '',
-    }));
     if (newRecords.length > 0) {
       orderFollowMap.set(oid, newRecords);
       orderFollowTaskMap.set(oid, newRecords[0].content);
@@ -1383,38 +2142,6 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
       orderContractMap.set(oid, form.contractStatus === '无' ? '未回签' : form.contractStatus);
     }
     orderServiceItemsMap.set(oid, form.serviceItems);
-
-    const payStatus = (form.payStatus === '已支付' ? '已付款' : form.payStatus === '待支付' ? '待付款' : form.payStatus) as any;
-    const orderBody: any = {
-      customerId: form.customerId,
-      customerName: form.customerName,
-    customerPhone: form.customerPhone,
-      customerArea: form.customerArea,
-      customerTag: form.customerTag,
-      customerAdvisor: form.customerAdvisor,
-      type: form.orderType || '体验卡',
-      amount: Number(form.amount) || 0,
-      payStatus,
-      purchaseDate: form.purchaseDate,
-      serviceItems: form.serviceItems,
-      totalTimes: form.orderType === '套餐' || order?.isUpgrade ? Math.max(1, Number(form.totalTimes) || 1) : 1,
-      usedTimes: form.usedTimes,
-      manualProgressEdit: isManualProgressDirty,
-      isUpgrade: form.experienceUpgradeStatus === '已升单',
-      contractSigned: form.contractStatus !== '无' && form.contractStatus !== '未回签',
-      serviceItemCount: Math.max(1, splitServiceItems(form.serviceItems).length),
-      servicePeople: {
-        sp1: form.servicePerson1,
-        sp2: form.servicePerson2,
-        sp3: form.servicePerson3,
-        followRecords: newRecords,
-        experienceSnapshot: form.experienceSnapshot,
-      },
-      appointmentTime: form.appointmentTime,
-      serviceNote: form.serviceNote,
-      contractAttachments: form.contractAttachments,
-      servicePhotoRecords: form.servicePhotoRecords,
-    };
     try {
       if (isEdit && editOrderId) {
         await orderMutations.update({ id: editOrderId, body: orderBody });
@@ -1452,7 +2179,7 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
       <CustomerPickerModal visible={showPicker} onClose={() => setShowPicker(false)} onSelect={handleCustomerSelect} />
       <div>
         <div className="fixed inset-0 z-40 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.45)' }}>
-          <div className="bg-card rounded-2xl shadow-custom flex flex-col" style={{ width: 700, maxHeight: '92vh' }}>
+          <div className="relative bg-card rounded-2xl shadow-custom flex flex-col" style={{ width: 700, maxHeight: '92vh' }}>
             {/* Header */}
             <div className="flex items-center justify-between px-6 py-4" style={{ borderBottom: '1px solid var(--border)' }}>
               <span className="font-semibold text-base text-foreground">{isView ? '查看订单' : isEdit ? '编辑订单' : '新建订单'}</span>
@@ -1460,15 +2187,16 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
             </div>
 
             {/* Tabs */}
-            <div className="flex px-6" style={{ borderBottom: '1px solid var(--border)' }}>
-              {TABS.map(tab => {
+            <div className="flex px-6 overflow-x-auto shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>
+              {visibleTabs.map(tab => {
                 const Icon = tab.icon;
-                const active = activeTab === tab.key;
-                return (
+                const active = activeVisibleTabId === tab.id;
+                const tabButton = (
                   <button
-                    key={tab.key}
-                    onClick={() => setActiveTab(tab.key)}
-                    className="flex items-center gap-1.5 px-4 py-3 text-sm font-medium transition-colors"
+                    key={tab.id}
+                    disabled={tab.disabled}
+                    onClick={() => openVisibleTab(tab)}
+                    className="flex items-center gap-1.5 px-4 py-3 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40"
                     style={{
                       color: active ? 'var(--brand)' : 'var(--muted-foreground)',
                       borderBottom: active ? '2px solid var(--brand)' : '2px solid transparent',
@@ -1479,8 +2207,125 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
                     {tab.label}
                   </button>
                 );
+                if (tab.key !== 'package' || !tab.packageNumber || tab.packageNumber <= 1 || !canDeleteOrder) {
+                  return tabButton;
+                }
+                return (
+                  <div key={tab.id} className="flex shrink-0 items-center">
+                    {tabButton}
+                    <button
+                      type="button"
+                      title={`删除套餐${tab.packageNumber}阶段`}
+                      aria-label={`删除套餐${tab.packageNumber}阶段`}
+                      onClick={() => setPackageStageToDelete(tab.packageNumber || null)}
+                      className="mr-1 flex h-8 w-8 items-center justify-center rounded-md transition-colors hover:bg-red-50"
+                      style={{ color: 'var(--danger)' }}
+                    >
+                      <Trash2Icon size={14} />
+                    </button>
+                  </div>
+                );
               })}
+              {canAddNextPackage && (
+                <button
+                  type="button"
+                  onClick={() => setShowPackageUpgradeConfirmation(true)}
+                  className="flex shrink-0 items-center gap-1.5 px-4 py-3 text-sm font-medium transition-colors hover:bg-muted"
+                  style={{
+                    color: 'var(--brand)',
+                    borderBottom: '2px solid transparent',
+                    marginBottom: -1,
+                  }}
+                >
+                  <PlusIcon size={14} />
+                  新增套餐{form.activePackageNumber + 1}阶段
+                </button>
+              )}
             </div>
+
+            {showPackageUpgradeConfirmation && form.orderType === '套餐' && !isView && (
+              <div
+                className="absolute inset-0 z-30 flex items-center justify-center rounded-2xl"
+                style={{ background: 'rgba(15, 23, 42, 0.36)' }}
+              >
+                <div
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="package-upgrade-dialog-title"
+                  className="w-[420px] max-w-[calc(100%-32px)] rounded-xl bg-card p-5 shadow-custom"
+                  style={{ border: '1px solid var(--border)' }}
+                >
+                  <div id="package-upgrade-dialog-title" className="text-base font-semibold text-foreground">
+                    确认新增套餐{form.activePackageNumber + 1}阶段
+                  </div>
+                  <div className="mt-2 text-sm leading-6" style={{ color: 'var(--muted-foreground)' }}>
+                    {isPackageServiceComplete(form)
+                      ? `套餐${form.activePackageNumber}服务已全部完成，新增套餐${form.activePackageNumber + 1}后，套餐${form.activePackageNumber}将作为已完成记录保留。`
+                      : `套餐${form.activePackageNumber}服务尚未全部完成。新增套餐${form.activePackageNumber + 1}不会结束当前套餐；两个套餐将作为独立阶段，可分别切换和维护。`}
+                  </div>
+                  <div className="mt-5 flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowPackageUpgradeConfirmation(false)}
+                      className="px-4 py-2 rounded-lg text-sm border"
+                      style={{ borderColor: 'var(--border)', color: 'var(--foreground)' }}
+                    >
+                      取消
+                    </button>
+                    <button
+                      type="button"
+                      onClick={confirmNextPackage}
+                      className="px-4 py-2 rounded-lg text-sm font-medium text-white"
+                      style={{ background: 'var(--brand)' }}
+                    >
+                      确认创建
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {packageStageToDelete !== null && form.orderType === '套餐' && canDeleteOrder && (
+              <div
+                className="absolute inset-0 z-30 flex items-center justify-center rounded-2xl"
+                style={{ background: 'rgba(15, 23, 42, 0.36)' }}
+              >
+                <div
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="package-delete-dialog-title"
+                  className="w-[420px] max-w-[calc(100%-32px)] rounded-xl bg-card p-5 shadow-custom"
+                  style={{ border: '1px solid var(--border)' }}
+                >
+                  <div id="package-delete-dialog-title" className="text-base font-semibold text-foreground">
+                    确认删除套餐{packageStageToDelete}阶段
+                  </div>
+                  <div className="mt-2 text-sm leading-6" style={{ color: 'var(--muted-foreground)' }}>
+                    删除后，该套餐的金额、服务人员、服务记录、合同附件和跟进记录都会从订单中移除，且无法恢复。其他套餐及体验卡阶段不受影响。
+                  </div>
+                  <div className="mt-5 flex justify-end gap-2">
+                    <button
+                      type="button"
+                      disabled={isDeletingPackageStage}
+                      onClick={() => setPackageStageToDelete(null)}
+                      className="px-4 py-2 rounded-lg text-sm border disabled:opacity-50"
+                      style={{ borderColor: 'var(--border)', color: 'var(--foreground)' }}
+                    >
+                      取消
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isDeletingPackageStage}
+                      onClick={confirmDeletePackageStage}
+                      className="px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50"
+                      style={{ background: 'var(--danger)' }}
+                    >
+                      {isDeletingPackageStage ? '正在删除...' : '确认删除'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Body */}
             <div className="overflow-y-auto flex-1 px-6 py-5">
@@ -1518,19 +2363,6 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
                       <span><span style={{ color: 'var(--muted-foreground)' }}>区域：</span>{form.customerArea}</span>
                       <span><span style={{ color: 'var(--muted-foreground)' }}>客服：</span>{form.customerAdvisor}</span>
                     </div>
-                    {isEdit && (order?.type === '体验卡' || form.orderType === '体验卡') && (
-                      <div className="mt-3 flex items-center gap-3">
-                        <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>客户标签</label>
-                        <select
-                          className="flex-1 px-3 py-2 rounded-lg text-sm outline-none"
-                          style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
-                          value={form.customerTag}
-                          onChange={e => set('customerTag', e.target.value as CustomerTag)}
-                        >
-                          {TAG_DEFS.map(tag => <option key={tag.tag} value={tag.tag}>{tag.label} — {tag.desc}</option>)}
-                        </select>
-                      </div>
-                    )}
                   </div>
                 ) : (
                   <div
@@ -1542,115 +2374,290 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
                     <div className="text-sm">点击从客户列表选择，或直接填写客户信息</div>
                   </div>
                 )}
-                {(isView || (isEdit && fullCustomer)) ? (
-                  <CustomerArchiveView customer={fullCustomer || order?.customerSnapshot} form={form} />
+                {isView ? (
+                  <CustomerArchiveView customer={order?.customerSnapshot || fullCustomer} form={form} />
                 ) : null}
                 {!isView && (
-                <div className="flex flex-col gap-3 mt-4">
-                  <div className="flex gap-3">
-                    <div className="flex-1 flex flex-col gap-1">
-                      <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>客户姓名</label>
-                      <input className="px-3 py-2 rounded-lg text-sm outline-none" style={{ background: 'var(--muted)', border: '1px solid var(--border)' }}
-                        value={form.customerName} onChange={e => set('customerName', e.target.value)} placeholder="请输入客户姓名" />
+                  <div className="flex flex-col gap-4 mt-4">
+                    <div className="rounded-xl p-4" style={{ background: 'var(--muted)', border: '1px solid var(--border)' }}>
+                      <div className="text-sm font-semibold text-foreground mb-3">基本资料</div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="flex flex-col gap-1">
+                          <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>客户姓名</label>
+                          <input className="px-3 py-2 rounded-lg text-sm outline-none" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
+                            value={form.customerName} onChange={e => set('customerName', e.target.value)} placeholder="请输入客户姓名" />
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>微信号</label>
+                          <input className="px-3 py-2 rounded-lg text-sm outline-none" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
+                            value={form.customerWechat} onChange={e => set('customerWechat', e.target.value)} placeholder="请输入微信号" />
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>联系电话</label>
+                          <input className="px-3 py-2 rounded-lg text-sm outline-none" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
+                            value={form.customerPhone} onChange={e => set('customerPhone', e.target.value)} placeholder="请输入手机号" />
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>所在区域</label>
+                          <input className="px-3 py-2 rounded-lg text-sm outline-none" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
+                            value={form.customerArea} onChange={e => set('customerArea', e.target.value)} placeholder="请输入所在区域" />
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>来源渠道</label>
+                          <input className="px-3 py-2 rounded-lg text-sm outline-none" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
+                            value={form.customerSource} onChange={e => set('customerSource', e.target.value)} placeholder="请输入来源渠道" />
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>获客时间</label>
+                          <input type="date" className="px-3 py-2 rounded-lg text-sm outline-none" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
+                            value={form.customerAcquiredAt} onChange={e => set('customerAcquiredAt', e.target.value)} />
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>客户标签</label>
+                          <select className="px-3 py-2 rounded-lg text-sm outline-none" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
+                            value={form.customerTag} onChange={e => setCustomerTag(e.target.value as CustomerTag | '')}>
+                            <option value="">请选择</option>
+                            {form.customerTag && !selectableCustomerTagDefs.some(tag => tag.tag === form.customerTag) && (
+                              <option value={form.customerTag} disabled>{form.customerTag}（当前标签，升单后可用）</option>
+                            )}
+                            {selectableCustomerTagDefs.map(tag => <option key={tag.tag} value={tag.tag}>{tag.label} — {tag.desc}</option>)}
+                          </select>
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>归属客服</label>
+                          <select
+                            className="px-3 py-2 rounded-lg text-sm outline-none"
+                            style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
+                            value={form.customerAdvisor}
+                            onChange={e => set('customerAdvisor', e.target.value)}
+                          >
+                            <option value="">请选择归属客服</option>
+                            {form.customerAdvisor && !advisorOptions.some(option => option.name === form.customerAdvisor) && (
+                              <option value={form.customerAdvisor}>{form.customerAdvisor}（历史绑定）</option>
+                            )}
+                            {advisorOptions.map(option => (
+                              <option key={option.id} value={option.name}>{option.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
                     </div>
-                    <div className="flex-1 flex flex-col gap-1">
-                      <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>联系电话</label>
-                      <input className="px-3 py-2 rounded-lg text-sm outline-none" style={{ background: 'var(--muted)', border: '1px solid var(--border)' }}
-                        value={form.customerPhone} onChange={e => set('customerPhone', e.target.value)} placeholder="请输入手机号" />
+
+                    <div className="rounded-xl p-4" style={{ background: 'var(--muted)', border: '1px solid var(--border)' }}>
+                      <div className="text-sm font-semibold text-foreground mb-3">客户画像</div>
+                      <div className="grid grid-cols-3 gap-3">
+                        <div className="flex flex-col gap-1">
+                          <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>出生年份</label>
+                          <input inputMode="numeric" className="px-3 py-2 rounded-lg text-sm outline-none" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
+                            value={form.customerBirthYear} onChange={e => set('customerBirthYear', e.target.value)} placeholder="例：1995" />
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>生产时间</label>
+                          <input type="date" className="px-3 py-2 rounded-lg text-sm outline-none" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
+                            value={form.customerDeliveryDate} onChange={e => set('customerDeliveryDate', e.target.value)} />
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>第几胎</label>
+                          <select className="px-3 py-2 rounded-lg text-sm outline-none" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
+                            value={form.customerBabyCount} onChange={e => set('customerBabyCount', e.target.value)}>
+                            <option value="">未知</option>
+                            {[1, 2, 3, 4, 5].map(value => <option key={value} value={value}>第{value}胎</option>)}
+                          </select>
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>分娩方式</label>
+                          <select className="px-3 py-2 rounded-lg text-sm outline-none" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
+                            value={form.customerDeliveryType} onChange={e => set('customerDeliveryType', e.target.value as OrderForm['customerDeliveryType'])}>
+                            {['未知', '顺产', '剖腹产'].map(value => <option key={value} value={value}>{value}</option>)}
+                          </select>
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>喂养方式</label>
+                          <select className="px-3 py-2 rounded-lg text-sm outline-none" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
+                            value={form.customerFeedingType} onChange={e => set('customerFeedingType', e.target.value as OrderForm['customerFeedingType'])}>
+                            {['未知', '母乳', '奶粉', '混合喂养'].map(value => <option key={value} value={value}>{value}</option>)}
+                          </select>
+                        </div>
+                      </div>
                     </div>
+
+                    <div className="rounded-xl p-4" style={{ background: 'var(--muted)', border: '1px solid var(--border)' }}>
+                      <div className="text-sm font-semibold text-foreground mb-3">客户需求</div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="col-span-2 flex flex-col gap-1">
+                          <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>意向产品</label>
+                          <input className="px-3 py-2 rounded-lg text-sm outline-none" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
+                            value={form.customerIntendedProduct} onChange={e => set('customerIntendedProduct', e.target.value)} placeholder="多个产品用逗号分隔" />
+                        </div>
+                        <div className="col-span-2 flex flex-col gap-1">
+                          <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>客户需求及痛点</label>
+                          <textarea rows={3} className="px-3 py-2 rounded-lg text-sm outline-none resize-none" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
+                            value={form.customerSituation} onChange={e => set('customerSituation', e.target.value)} placeholder="请输入客户需求及痛点" />
+                        </div>
+                        <div className="col-span-2 flex flex-col gap-1">
+                          <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>备注</label>
+                          <textarea rows={2} className="px-3 py-2 rounded-lg text-sm outline-none resize-none" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
+                            value={form.customerRemark} onChange={e => set('customerRemark', e.target.value)} placeholder="请输入客户备注" />
+                        </div>
+                      </div>
+                    </div>
+
+                    <HistoricalFollowRecords records={getCustomerFollowRecords({ profile: form.customerProfile })} />
                   </div>
-                  <div className="flex gap-3">
-                    <div className="flex-1 flex flex-col gap-1">
-                      <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>所在区域</label>
-                      <input className="px-3 py-2 rounded-lg text-sm outline-none" style={{ background: 'var(--muted)', border: '1px solid var(--border)' }}
-                        value={form.customerArea} onChange={e => set('customerArea', e.target.value)} placeholder="请输入所在区域" />
-                    </div>
-                    <div className="flex-1 flex flex-col gap-1">
-                      <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>归属客服</label>
-                      <input className="px-3 py-2 rounded-lg text-sm outline-none" style={{ background: 'var(--muted)', border: '1px solid var(--border)' }}
-                        value={form.customerAdvisor} onChange={e => set('customerAdvisor', e.target.value)} placeholder="请输入归属客服" />
-                    </div>
-                  </div>
-                </div>
                 )}
               </div>
 
-              {/* ── 订单维护 ── */}
-              <div className={activeTab === 'order' ? '' : 'hidden'}>
+              {/* ── 当前阶段订单内容 ── */}
+              <div className={isActiveStageTab ? '' : 'hidden'}>
                 <div className="flex flex-col gap-4">
-                  {isCompletedExperience && (
+                  {form.packageHistory.filter(stage => stage.frozenAt).map(stage => (
+                    <div key={stage.id} className="rounded-xl p-4" style={{ background: 'var(--muted)', border: '1px solid var(--border)' }}>
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="text-sm font-semibold text-foreground">
+                          {stage.label}（已固化）
+                        </div>
+                        <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>只读记录</span>
+                      </div>
+                      <StageSummary stage={stage} />
+                    </div>
+                  ))}
+
+                  {form.orderType === '体验卡' && (
                     <div className="rounded-xl p-3" style={{ background: 'var(--muted)', border: '1px solid var(--border)' }}>
                       <div className="text-sm font-semibold text-foreground mb-2">体验卡状态</div>
-                      <div className="flex gap-3">
-                        {(['未升单', '已升单'] as const).map(status => (
-                          <button
-                            key={status}
-                            type="button"
-                            disabled={isView}
-                            onClick={() => setExperienceUpgradeStatus(status)}
-                            className="flex-1 py-2 rounded-lg text-sm font-medium border-2 transition-all"
-                            style={{
-                              borderColor: form.experienceUpgradeStatus === status ? 'var(--brand)' : 'var(--border)',
-                              background: form.experienceUpgradeStatus === status ? 'var(--accent)' : 'var(--card)',
-                              color: form.experienceUpgradeStatus === status ? 'var(--brand)' : 'var(--foreground)',
-                            }}
-                          >
-                            {status}
-                          </button>
-                        ))}
-                      </div>
-                      <div className="text-xs mt-2" style={{ color: 'var(--muted-foreground)' }}>
-                        选择已升单后可新建套餐内容；体验卡阶段资料将保留为只读记录。
-                      </div>
-                    </div>
-                  )}
-                  {form.experienceSnapshot && form.orderType === '套餐' && (
-                    <div className="rounded-xl p-3" style={{ background: 'var(--muted)', border: '1px solid var(--border)' }}>
-                      <div className="text-sm font-semibold text-foreground mb-2">体验卡阶段（已固化）</div>
-                      <div className="grid grid-cols-2 gap-2 text-xs" style={{ color: 'var(--muted-foreground)' }}>
-                        <span>金额：¥{form.experienceSnapshot.amount || '—'}</span>
-                        <span>购买时间：{form.experienceSnapshot.purchaseDate || '—'}</span>
-                        <span>付款状态：{payStatusDisplay(form.experienceSnapshot.payStatus)}</span>
-                        <span>服务项目：{form.experienceSnapshot.serviceItems || '—'}</span>
-                      </div>
-                    </div>
-                  )}
-                  {/* 订单类型 */}
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>订单类型</label>
-                    <div className="flex gap-3">
-                      {(['体验卡', '套餐'] as OrderType[]).map(t => (
+                      <div className="grid grid-cols-2 gap-3 mb-3">
                         <button
-                          key={t}
                           type="button"
-                          disabled={isView || (t === '套餐' && !canChoosePackage)}
                           onClick={() => {
-                            if (t === '套餐' && !canChoosePackage) return;
-                            set('orderType', t);
-                            set('amount', '');
-                            set('contractStatus', t === '体验卡' ? '无' : '未回签');
+                            setShowUpgradeConfirmation(false);
+                            setPendingUpgradeTag('');
                           }}
-                          className="flex-1 py-3 rounded-xl text-sm font-semibold border-2 transition-all text-center"
+                          className="py-2 rounded-lg text-sm font-medium border-2"
                           style={{
-                            borderColor: form.orderType === t ? 'var(--brand)' : 'var(--border)',
-                            background: form.orderType === t ? 'var(--accent)' : (t === '套餐' && !canChoosePackage ? 'var(--muted)' : 'var(--card)'),
-                            color: form.orderType === t ? 'var(--brand)' : (t === '套餐' && !canChoosePackage ? 'var(--muted-foreground)' : 'var(--foreground)'),
-                            cursor: t === '套餐' && !canChoosePackage ? 'not-allowed' : 'pointer',
-                            opacity: t === '套餐' && !canChoosePackage ? 0.55 : 1,
+                            borderColor: showUpgradeConfirmation ? 'var(--border)' : 'var(--brand)',
+                            background: showUpgradeConfirmation ? 'var(--card)' : 'var(--accent)',
+                            color: showUpgradeConfirmation ? 'var(--foreground)' : 'var(--brand)',
                           }}
                         >
-                          {t}
+                          未升单
                         </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {isExperienceFrozen && (
-                    <div className="rounded-lg px-3 py-2 text-xs" style={{ background: 'var(--muted)', color: 'var(--muted-foreground)', border: '1px solid var(--border)' }}>
-                      已升单后，体验卡阶段的订单资料已固化。请切换至套餐后继续维护套餐内容。
+                        <button
+                          type="button"
+                          disabled={isView || !isCompletedExperience}
+                          onClick={() => {
+                            setPendingUpgradeTag(UPGRADE_TAGS.has(form.customerTag as CustomerTag) ? form.customerTag : '');
+                            setShowUpgradeConfirmation(true);
+                          }}
+                          className="py-2 rounded-lg text-sm font-medium border-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                          style={{
+                            borderColor: showUpgradeConfirmation ? 'var(--brand)' : 'var(--border)',
+                            background: showUpgradeConfirmation ? 'var(--accent)' : 'var(--card)',
+                            color: showUpgradeConfirmation ? 'var(--brand)' : 'var(--foreground)',
+                          }}
+                          title={isCompletedExperience ? '进入升单确认' : '体验卡服务全部完成后才可升单'}
+                        >
+                          已升单
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-1 gap-3">
+                        <div className="flex flex-col gap-1">
+                          <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>客户标签</label>
+                          <select
+                            value={showUpgradeConfirmation ? pendingUpgradeTag : form.customerTag}
+                            disabled={isView}
+                            onChange={event => {
+                              const nextTag = event.target.value as CustomerTag | '';
+                              if (showUpgradeConfirmation) {
+                                setPendingUpgradeTag(nextTag);
+                              } else {
+                                setCustomerTag(nextTag);
+                              }
+                            }}
+                            className="px-3 py-2 rounded-lg text-sm outline-none"
+                            style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
+                          >
+                            <option value="">
+                              {showUpgradeConfirmation ? '请选择 A2 或以上客户标签' : '请选择客户标签'}
+                            </option>
+                            {!showUpgradeConfirmation && form.customerTag && !PRE_UPGRADE_TAG_DEFS.some(tag => tag.tag === form.customerTag) && (
+                              <option value={form.customerTag} disabled>{form.customerTag}（当前标签，升单后可用）</option>
+                            )}
+                            {(showUpgradeConfirmation ? UPGRADE_TAG_DEFS : PRE_UPGRADE_TAG_DEFS).map(tag => (
+                              <option key={tag.tag} value={tag.tag}>{tag.label} — {tag.desc}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                      <div className="text-xs mt-2" style={{ color: 'var(--muted-foreground)' }}>
+                        {isCompletedExperience
+                          ? '当前状态：未升单。可直接维护 A2 以下（不含 A2）客户标签；升单需另选 A2 或以上标签并再次确认。'
+                          : '当前状态：未升单。体验卡已分配的服务全部完成后，才可发起升单。'}
+                      </div>
+                      {showUpgradeConfirmation && !isView && (
+                        <div className="mt-3 rounded-lg p-3" style={{ background: 'var(--card)', border: '1px solid var(--warning)' }}>
+                          <div className="text-sm font-semibold text-foreground">再次确认升单</div>
+                          <div className="text-xs mt-1" style={{ color: 'var(--muted-foreground)' }}>
+                            请在上方“客户标签”选择 A2 或以上级别标签。确认后体验卡阶段将固化为记录，套餐1阶段自动开放。
+                          </div>
+                          <div className="flex justify-end gap-2 mt-3">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShowUpgradeConfirmation(false);
+                                setPendingUpgradeTag('');
+                              }}
+                              className="px-3 py-1.5 rounded-lg text-sm border hover:bg-muted"
+                              style={{ borderColor: 'var(--border)' }}
+                            >
+                              取消
+                            </button>
+                            <button
+                              type="button"
+                              disabled={!pendingUpgradeTag}
+                              onClick={() => {
+                                if (!isCompletedExperience) {
+                                  toast.error('体验卡服务尚未全部完成，暂不能升单');
+                                  setShowUpgradeConfirmation(false);
+                                  return;
+                                }
+                                if (!pendingUpgradeTag || !UPGRADE_TAGS.has(pendingUpgradeTag)) {
+                                  toast.error('请选择 A2 或以上级别的客户标签');
+                                  return;
+                                }
+                                setExperienceUpgradeStatus('已升单', pendingUpgradeTag);
+                                setActiveTab('package');
+                              }}
+                              className="px-3 py-1.5 rounded-lg text-sm font-medium text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                              style={{ background: 'var(--brand)' }}
+                            >
+                              再次确认升单
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
+                  <div className="text-sm font-semibold text-foreground pt-1">
+                    {form.orderType === '套餐' ? `套餐${form.activePackageNumber}信息` : '体验卡信息'}
+                  </div>
                   <fieldset disabled={isExperienceFrozen} style={{ minWidth: 0, opacity: isExperienceFrozen ? 0.64 : 1 }}>
+                  {form.orderType === '套餐' && (
+                    <div className="flex flex-col gap-1 mb-3">
+                      <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>客户标签</label>
+                      <select
+                        value={form.customerTag}
+                        disabled={isView}
+                        onChange={event => setCustomerTag(event.target.value as CustomerTag | '')}
+                        className="px-3 py-2 rounded-lg text-sm outline-none"
+                        style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
+                      >
+                        <option value="">请选择客户标签</option>
+                        {TAG_DEFS.map(tag => (
+                          <option key={tag.tag} value={tag.tag}>{tag.label} — {tag.desc}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                   {/* 金额 */}
                   <div className="flex flex-col gap-1">
                     <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>对应金额（元）</label>
@@ -1715,8 +2722,14 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
                     />
                   </div>
 
-                  {/* 合同状态 — 仅套餐显示 */}
-                  <div className={form.orderType === '套餐' ? '' : 'hidden'}>
+                  {/* 服务项目 */}
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>服务项目</label>
+                    <ServiceItemsPicker value={form.serviceItems} onChange={v => set('serviceItems', v)} />
+                  </div>
+
+                  {form.orderType === '套餐' && (
+                  <div className="flex flex-col gap-2">
                     <div className="flex flex-col gap-1">
                       <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>合同状态</label>
                       <div className="flex gap-3">
@@ -1734,23 +2747,17 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
                         ))}
                       </div>
                     </div>
-                  </div>
-
-                  {/* 服务项目 */}
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>服务项目</label>
-                    <ServiceItemsPicker value={form.serviceItems} onChange={v => set('serviceItems', v)} />
-                  </div>
-
-                  <div className="flex flex-col gap-2">
                     <div className="flex items-center justify-between">
-                      <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>合同附件</label>
+                      <div>
+                        <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>合同附件</label>
+                        <div className="text-xs mt-0.5" style={{ color: 'var(--muted-foreground)' }}>支持 PDF、JPG、PNG、WEBP</div>
+                      </div>
                       {!isView && (
                         <>
                           <input
                             ref={contractFileRef}
                             type="file"
-                            accept="application/pdf,image/*"
+                            accept="application/pdf,image/jpeg,image/png,image/webp"
                             multiple
                             className="hidden"
                             onChange={e => handleContractFiles(e.target.files)}
@@ -1794,16 +2801,20 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
                       </div>
                     )}
                   </div>
+                  )}
                   </fieldset>
                 </div>
               </div>
 
-              {/* ── 服务人员 ── */}
-              <div className={activeTab === 'service' ? '' : 'hidden'}>
+              {/* ── 当前阶段服务人员 ── */}
+              <div className={isActiveStageTab ? 'mt-5 pt-5' : 'hidden'} style={{ borderTop: isActiveStageTab ? '1px solid var(--border)' : undefined }}>
                 <fieldset style={{ minWidth: 0 }}>
                 <div className="flex flex-col gap-4">
                   <div>
-                    <div className="text-sm font-semibold text-foreground mb-2">服务人员分配</div>
+                    <div className="text-sm font-semibold text-foreground mb-1">
+                      {form.orderType === '套餐' ? `套餐${form.activePackageNumber}` : '体验卡阶段'} · 服务人员与服务记录
+                    </div>
+                    <div className="text-xs mb-3" style={{ color: 'var(--muted-foreground)' }}>服务人员、排期及服务照片均归属于当前订单阶段。</div>
                     <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
                       <div className="px-4 py-2 text-xs font-medium flex gap-3" style={{ background: 'var(--muted)', color: 'var(--muted-foreground)', borderBottom: '1px solid var(--border)' }}>
                         <span className="w-20">服务类型</span>
@@ -1908,172 +2919,147 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
                         : `人工校正后，仅校正时间之后完成的排期会继续累加。当前主服务进度：${form.usedTimes} / ${Math.max(1, Number(form.totalTimes) || 1)}`}
                     </div>
                   </div>
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>预约时间</label>
-                    <input
-                      type="datetime-local"
-                      className="px-3 py-2 rounded-lg text-sm outline-none"
-                      style={{ background: 'var(--muted)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
-                      value={form.appointmentTime}
-                      onChange={e => set('appointmentTime', e.target.value)}
-                    />
+                  <div className="rounded-xl p-4" style={{ background: 'var(--muted)', border: '1px solid var(--border)' }}>
+                    <div className="flex items-center justify-between gap-4">
+                      <div>
+                        <div className="text-xs mb-1" style={{ color: 'var(--muted-foreground)' }}>下一次上门时间</div>
+                        {nextAppointment ? (
+                          <div className="text-sm font-semibold text-foreground">
+                            {nextAppointment.date} {nextAppointment.timeSlot}
+                            <span className="font-normal ml-3" style={{ color: 'var(--muted-foreground)' }}>
+                              {nextAppointment.therapistName || '待分配技师'} · {nextAppointment.service || '服务项目待确认'}
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="text-sm font-semibold text-foreground">还未预约</div>
+                        )}
+                      </div>
+                      {!nextAppointment && form.customerId && (
+                        <button
+                          type="button"
+                          onClick={goToAppointmentCalendar}
+                          className="px-4 py-2 rounded-lg text-sm text-white hover:opacity-90"
+                          style={{ background: 'var(--brand)' }}
+                        >
+                          去预约
+                        </button>
+                      )}
+                    </div>
+                    <div className="text-xs mt-2" style={{ color: 'var(--muted-foreground)' }}>
+                      预约时间由技师排期表同步，此处不直接修改。
+                    </div>
                   </div>
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>服务记录备注</label>
-                    <textarea
-                      className="px-3 py-2 rounded-lg text-sm outline-none resize-none"
-                      style={{ background: 'var(--muted)', border: '1px solid var(--border)', minHeight: 72 }}
-                      value={form.serviceNote}
-                      onChange={e => set('serviceNote', e.target.value)}
-                      placeholder="请输入服务记录说明..."
-                    />
-                  </div>
+
                   <div className="flex flex-col gap-2">
                     <div className="flex items-center justify-between">
-                      <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>服务照片维护</label>
-                      <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>每次最多 10 张 PNG/JPG</span>
+                      <div className="text-sm font-semibold text-foreground">服务记录</div>
+                      <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                        共 {serviceRecords.length} 次已确认服务
+                      </span>
                     </div>
-                    {!isView && (
-                      <div className="rounded-xl p-3 flex flex-col gap-3" style={{ background: 'var(--muted)', border: '1px solid var(--border)' }}>
-                        <div className="grid grid-cols-3 gap-3">
-                          <div className="flex flex-col gap-1">
-                            <label className="text-xs" style={{ color: 'var(--muted-foreground)' }}>第几次</label>
-                            <input
-                              type="number"
-                              min={1}
-                              className="px-3 py-2 rounded-lg text-sm outline-none"
-                              style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
-                              value={form.newPhotoSeq}
-                              onChange={e => set('newPhotoSeq', e.target.value)}
-                              placeholder="如：1"
-                            />
-                          </div>
-                          <div className="flex flex-col gap-1 col-span-2">
-                            <label className="text-xs" style={{ color: 'var(--muted-foreground)' }}>上传/服务时间</label>
-                            <input
-                              type="datetime-local"
-                              className="px-3 py-2 rounded-lg text-sm outline-none"
-                              style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
-                              value={form.newPhotoTime}
-                              onChange={e => set('newPhotoTime', e.target.value)}
-                            />
-                          </div>
-                        </div>
-                        <div className="flex flex-col gap-1">
-                          <label className="text-xs" style={{ color: 'var(--muted-foreground)' }}>备注信息</label>
-                          <input
-                            className="px-3 py-2 rounded-lg text-sm outline-none"
-                            style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
-                            value={form.newPhotoRemark}
-                            onChange={e => set('newPhotoRemark', e.target.value)}
-                            placeholder="填写本次服务照片说明"
-                          />
-                        </div>
-                        <input
-                          ref={servicePhotoFileRef}
-                          type="file"
-                          accept="image/png,image/jpeg"
-                          multiple
-                          className="hidden"
-                          onChange={e => handleServicePhotoFiles(e.target.files)}
-                        />
-                        <div className="flex flex-wrap gap-2">
-                          {form.newPhotoFiles.map(photo => (
-                            <div key={photo.id} className="relative w-16 h-16 rounded-lg overflow-hidden" style={{ border: '1px solid var(--border)' }}>
-                              <img src={attachmentSrc(photo)} alt={photo.name} className="w-full h-full object-cover" />
-                              <button
-                                type="button"
-                                className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full flex items-center justify-center"
-                                style={{ background: 'rgba(0,0,0,0.5)' }}
-                                onClick={() => set('newPhotoFiles', form.newPhotoFiles.filter(x => x.id !== photo.id))}
-                              >
-                                <XIcon size={10} className="text-white" />
-                              </button>
-                            </div>
-                          ))}
-                          <button
-                            type="button"
-                            onClick={() => servicePhotoFileRef.current?.click()}
-                            className="w-16 h-16 rounded-lg flex flex-col items-center justify-center gap-1 text-xs hover:border-brand transition-colors"
-                            style={{ border: '2px dashed var(--border)', color: 'var(--muted-foreground)' }}
-                          >
-                            <ImageIcon size={18} />
-                            上传
-                          </button>
-                        </div>
-                        <div className="flex justify-end gap-2">
-                          {form.editingPhotoRecordId && (
-                            <button type="button" onClick={resetPhotoDraft} className="px-3 py-1.5 rounded-lg text-sm border hover:bg-muted" style={{ borderColor: 'var(--border)' }}>取消编辑</button>
-                          )}
-                          <button
-                            type="button"
-                            onClick={handleSavePhotoRecord}
-                            className="px-4 py-1.5 rounded-lg text-sm text-white hover:opacity-90"
-                            style={{ background: 'var(--brand)' }}
-                          >
-                            {form.editingPhotoRecordId ? '保存本次' : '新增本次'}
-                          </button>
-                        </div>
+                    {serviceRecords.length === 0 ? (
+                      <div className="rounded-xl p-8 text-center text-sm" style={{ border: '1px solid var(--border)', color: 'var(--muted-foreground)' }}>
+                        暂无已完成的上门服务记录
                       </div>
-                    )}
-                    <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
-                      <div className="grid grid-cols-[70px_140px_1fr_100px] gap-3 px-3 py-2 text-xs font-medium" style={{ background: 'var(--muted)', color: 'var(--muted-foreground)' }}>
-                        <span>次数</span>
-                        <span>时间</span>
-                        <span>图片/备注</span>
-                        <span>操作</span>
-                      </div>
-                      {form.servicePhotoRecords.length === 0 ? (
-                        <div className="p-6 text-center text-sm" style={{ color: 'var(--muted-foreground)' }}>暂无服务照片记录</div>
-                      ) : (
-                        [...form.servicePhotoRecords].sort((a, b) => (a.seq || 0) - (b.seq || 0)).map(record => (
-                          <div key={record.id} className="grid grid-cols-[70px_140px_1fr_100px] gap-3 px-3 py-3 items-start text-sm" style={{ borderTop: '1px solid var(--border)' }}>
-                            <span className="font-semibold text-foreground">第 {record.seq} 次</span>
-                            <span style={{ color: 'var(--muted-foreground)' }}>{displayDateTime(record.time)}</span>
-                            <div className="flex flex-col gap-2">
-                              <div className="flex flex-wrap gap-1.5">
-                                {(record.photos || []).map(photo => (
-                                  <button
-                                    type="button"
-                                    key={photo.id}
-                                    onClick={() => openAttachment(photo)}
-                                    className="w-12 h-12 rounded-lg overflow-hidden"
-                                    style={{ border: '1px solid var(--border)' }}
-                                  >
+                    ) : serviceRecords.map((record, index) => {
+                      const photos = (record.photos || []) as OrderAttachment[];
+                      const signatures = (record.signaturePhotos || []) as OrderAttachment[];
+                      return (
+                        <div key={record.id} className="rounded-xl p-4 flex flex-col gap-3" style={{ border: '1px solid var(--border)', background: 'var(--card)' }}>
+                          <div className="grid grid-cols-[70px_1fr_1fr] gap-3 text-sm">
+                            <div className="font-semibold" style={{ color: 'var(--brand)' }}>第 {serviceRecords.length - index} 次</div>
+                            <div><span style={{ color: 'var(--muted-foreground)' }}>服务时间：</span>{displayDateTime(record.serviceDate)}</div>
+                            <div><span style={{ color: 'var(--muted-foreground)' }}>服务技师：</span>{record.therapistName || '—'}</div>
+                            <div className="col-start-2 col-span-2"><span style={{ color: 'var(--muted-foreground)' }}>服务项目：</span>{record.serviceItems || '—'}</div>
+                          </div>
+                          <div>
+                            <div className="text-xs mb-2" style={{ color: 'var(--muted-foreground)' }}>客户签字凭证</div>
+                            {signatures.length === 0 ? (
+                              <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>未上传</span>
+                            ) : (
+                              <div className="flex flex-wrap gap-2">
+                                {signatures.map(photo => (
+                                  <button type="button" key={photo.id} onClick={() => openAttachment(photo)} className="w-16 h-16 rounded-lg overflow-hidden" style={{ border: '1px solid var(--border)' }}>
                                     <img src={attachmentSrc(photo)} alt={photo.name} className="w-full h-full object-cover" />
                                   </button>
                                 ))}
                               </div>
-                              {record.remark && <div className="text-xs break-words" style={{ color: 'var(--muted-foreground)' }}>{record.remark}</div>}
-                            </div>
-                            <div className="flex flex-wrap gap-2">
-                              {record.photos?.[0] && <button type="button" className="text-xs hover:underline" style={{ color: 'var(--brand)' }} onClick={() => openAttachment(record.photos[0])}>查看</button>}
+                            )}
+                          </div>
+                          <div>
+                            <div className="flex items-center justify-between mb-2">
+                              <div className="text-xs" style={{ color: 'var(--muted-foreground)' }}>其他服务照片（最多 10 张）</div>
                               {!isView && (
-                                <>
-                                  <button type="button" className="text-xs hover:underline" style={{ color: 'var(--brand)' }} onClick={() => handleEditPhotoRecord(record)}>编辑</button>
-                                  <button
-                                    type="button"
-                                    className="text-xs hover:underline"
-                                    style={{ color: 'var(--danger)' }}
-                                    onClick={() => set('servicePhotoRecords', form.servicePhotoRecords.filter(x => x.id !== record.id))}
-                                  >
-                                    删除
-                                  </button>
-                                </>
+                                <label className="px-3 py-1.5 rounded-lg text-xs cursor-pointer hover:bg-muted" style={{ border: '1px solid var(--border)', color: 'var(--brand)' }}>
+                                  {uploadingRecordId === record.id ? '上传中...' : '上传照片'}
+                                  <input
+                                    type="file"
+                                    accept="image/png,image/jpeg"
+                                    multiple
+                                    className="hidden"
+                                    disabled={uploadingRecordId === record.id}
+                                    onChange={event => uploadServiceRecordPhotos(record.id, photos, event.target.files)}
+                                  />
+                                </label>
                               )}
                             </div>
+                            {photos.length === 0 ? (
+                              <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>暂无照片</span>
+                            ) : (
+                              <div className="flex flex-wrap gap-2">
+                                {photos.map(photo => (
+                                  <button type="button" key={photo.id} onClick={() => openAttachment(photo)} className="w-16 h-16 rounded-lg overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+                                    <img src={attachmentSrc(photo)} alt={photo.name} className="w-full h-full object-cover" />
+                                  </button>
+                                ))}
+                              </div>
+                            )}
                           </div>
-                        ))
-                      )}
-                    </div>
+                        </div>
+                      );
+                    })}
                   </div>
+                  {form.servicePhotoRecords.length > 0 && (
+                    <div className="flex flex-col gap-2">
+                      <div className="text-sm font-semibold text-foreground">历史照片记录</div>
+                      <div className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                        以下为旧版订单中保存的照片，仅作历史留档查看。
+                      </div>
+                      {[...form.servicePhotoRecords]
+                        .sort((a, b) => (b.time || '').localeCompare(a.time || ''))
+                        .map(record => (
+                          <div key={record.id} className="rounded-xl p-3 flex items-start gap-4" style={{ border: '1px solid var(--border)' }}>
+                            <div className="w-28 flex-shrink-0 text-sm">
+                              <div className="font-semibold">第 {record.seq} 次</div>
+                              <div className="text-xs mt-1" style={{ color: 'var(--muted-foreground)' }}>{displayDateTime(record.time)}</div>
+                            </div>
+                            <div className="flex-1">
+                              <div className="flex flex-wrap gap-2">
+                                {(record.photos || []).map(photo => (
+                                  <button type="button" key={photo.id} onClick={() => openAttachment(photo)} className="w-14 h-14 rounded-lg overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+                                    <img src={attachmentSrc(photo)} alt={photo.name} className="w-full h-full object-cover" />
+                                  </button>
+                                ))}
+                              </div>
+                              {record.remark && <div className="text-xs mt-2" style={{ color: 'var(--muted-foreground)' }}>{record.remark}</div>}
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  )}
                 </div>
                 </fieldset>
               </div>
 
-              {/* ── 跟进情况 ── */}
-              <div className={activeTab === 'follow' ? '' : 'hidden'}>
+              {/* ── 当前阶段跟进情况 ── */}
+              <div className={isActiveStageTab ? 'mt-5 pt-5' : 'hidden'} style={{ borderTop: isActiveStageTab ? '1px solid var(--border)' : undefined }}>
                 <div className="flex flex-col gap-4">
+                  <div>
+                    <div className="text-sm font-semibold text-foreground">
+                      {form.orderType === '套餐' ? `套餐${form.activePackageNumber}` : '体验卡阶段'} · 跟进情况
+                    </div>
+                    <div className="text-xs mt-1" style={{ color: 'var(--muted-foreground)' }}>新增记录只写入当前阶段；已固化阶段的记录保留在上方阶段摘要中。</div>
+                  </div>
                   {isEdit ? (
                     <>
                       <div className="flex flex-col gap-3">
@@ -2143,7 +3129,7 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
                           style={{ background: 'var(--brand)' }}
                         >
                           <PlusIcon size={14} />
-                          {sortFollowRecords(form.followRecords)[0]?.status !== '已完成' && form.followRecords.length > 0 ? '保存本次' : '新增本次'}
+                          保存本次
                         </button>
                       </div>
                       {form.followRecords.length > 0 && (
@@ -2204,18 +3190,140 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
                   )}
                 </div>
               </div>
+
+              {activeTab === 'experience' && form.orderType === '套餐' && form.experienceSnapshot && (
+                <div className="rounded-xl p-4" style={{ background: 'var(--muted)', border: '1px solid var(--border)' }}>
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="text-sm font-semibold text-foreground">体验卡阶段（已结束）</div>
+                    {canChooseFollower && !isView ? (
+                      <button
+                        type="button"
+                        onClick={() => setIsEditingExperienceSnapshot(value => !value)}
+                        className="px-3 py-1.5 rounded-lg text-xs border hover:bg-card"
+                        style={{ borderColor: 'var(--brand)', color: 'var(--brand)' }}
+                      >
+                        {isEditingExperienceSnapshot ? '完成记录编辑' : '管理员编辑记录'}
+                      </button>
+                    ) : (
+                      <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>客服仅可查看</span>
+                    )}
+                  </div>
+                  {isEditingExperienceSnapshot && canChooseFollower && !isView ? (
+                    <div className="flex flex-col gap-4">
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="flex flex-col gap-1">
+                          <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>体验卡金额（元）</label>
+                          <input
+                            value={form.experienceSnapshot.amount}
+                            onChange={event => updateExperienceSnapshot({ amount: event.target.value })}
+                            className="px-3 py-2 rounded-lg text-sm outline-none"
+                            style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
+                          />
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>购买时间</label>
+                          <input
+                            type="date"
+                            value={form.experienceSnapshot.purchaseDate}
+                            onChange={event => updateExperienceSnapshot({ purchaseDate: event.target.value })}
+                            className="px-3 py-2 rounded-lg text-sm outline-none"
+                            style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
+                          />
+                        </div>
+                        <div className="col-span-2 flex flex-col gap-1">
+                          <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>付款状态</label>
+                          <select
+                            value={form.experienceSnapshot.payStatus}
+                            onChange={event => updateExperienceSnapshot({ payStatus: event.target.value as NewPayStatus })}
+                            className="px-3 py-2 rounded-lg text-sm outline-none"
+                            style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
+                          >
+                            {(['已支付', '待支付', '已付定金', '已退款'] as NewPayStatus[]).map(status => (
+                              <option key={status} value={status}>{status}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="col-span-2 flex flex-col gap-1">
+                          <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>服务项目</label>
+                          <textarea
+                            rows={2}
+                            value={form.experienceSnapshot.serviceItems}
+                            onChange={event => updateExperienceSnapshot({ serviceItems: event.target.value })}
+                            className="px-3 py-2 rounded-lg text-sm outline-none resize-none"
+                            style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
+                          />
+                        </div>
+                        <div className="col-span-2 flex flex-col gap-1">
+                          <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>服务备注</label>
+                          <textarea
+                            rows={2}
+                            value={form.experienceSnapshot.serviceNote}
+                            onChange={event => updateExperienceSnapshot({ serviceNote: event.target.value })}
+                            className="px-3 py-2 rounded-lg text-sm outline-none resize-none"
+                            style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
+                          />
+                        </div>
+                      </div>
+                      <div className="rounded-xl overflow-hidden" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
+                        <div className="px-4 py-2 text-xs font-medium flex gap-3" style={{ color: 'var(--muted-foreground)', borderBottom: '1px solid var(--border)' }}>
+                          <span className="w-20">服务类型</span>
+                          <span className="flex-1">分配人员</span>
+                          <span className="w-28">服务状态</span>
+                        </div>
+                        <div className="px-4">
+                          {([
+                            ['产康师', 'sp1'],
+                            ['运动康复师', 'sp2'],
+                            ['调理师', 'sp3'],
+                          ] as const).map(([label, key]) => {
+                            const person = form.experienceSnapshot!.servicePeople[key] || { type: label, assign: '待分配' };
+                            return (
+                              <ServicePersonRow
+                                key={key}
+                                label={label}
+                                value={person}
+                                onChange={value => updateExperienceSnapshotPerson(key, value)}
+                                usedTimes={person.usedTimes || '0'}
+                                isExperience
+                                canEditProgress
+                                onUsedTimesChange={value => updateExperienceSnapshotPerson(key, {
+                                  ...person,
+                                  usedTimes: String(Math.max(0, Math.min(1, Number(value) || 0))),
+                                })}
+                              />
+                            );
+                          })}
+                        </div>
+                      </div>
+                      <div className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                        历史跟进记录、服务照片和签字凭证继续作为原始记录保留。
+                      </div>
+                    </div>
+                  ) : (
+                    <StageSummary stage={form.experienceSnapshot} />
+                  )}
+                </div>
+              )}
+              {activeTab === 'experience' && form.orderType === '套餐' && !form.experienceSnapshot && (
+                <div className="rounded-xl p-10 text-center" style={{ background: 'var(--muted)', border: '1px solid var(--border)', color: 'var(--muted-foreground)' }}>
+                  <FileTextIcon size={32} className="mx-auto mb-3 opacity-30" />
+                  <div className="text-sm font-medium">该历史订单没有体验卡阶段记录</div>
+                  <div className="text-xs mt-1">套餐信息请在“套餐阶段”中查看和维护。</div>
+                </div>
+              )}
               </div>
             </div>
 
             {/* Footer */}
             <div className="flex items-center justify-between px-6 py-4" style={{ borderTop: '1px solid var(--border)' }}>
               <div className="flex items-center gap-1">
-                {TABS.map(tab => (
+                {visibleTabs.map(tab => (
                   <button
-                    key={tab.key}
-                    onClick={() => setActiveTab(tab.key)}
-                    className="w-2 h-2 rounded-full transition-colors"
-                    style={{ background: activeTab === tab.key ? 'var(--brand)' : 'var(--border)' }}
+                    key={tab.id}
+                    disabled={tab.disabled}
+                    onClick={() => openVisibleTab(tab)}
+                    className="w-2 h-2 rounded-full transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                    style={{ background: activeVisibleTabId === tab.id ? 'var(--brand)' : 'var(--border)' }}
                   />
                 ))}
               </div>
@@ -2232,18 +3340,19 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
                     className="px-4 py-1.5 rounded-lg text-sm border hover:bg-muted"
                     style={{ borderColor: 'var(--border)' }}
                     onClick={() => {
-                      const idx = TABS.findIndex(t => t.key === activeTab);
-                      if (idx > 0) setActiveTab(TABS[idx - 1].key);
+                      const idx = visibleTabs.findIndex(tab => tab.id === activeVisibleTabId);
+                      if (idx > 0) openVisibleTab(visibleTabs[idx - 1]);
                     }}
                   >上一步</button>
                 )}
-                {activeTab !== 'follow' ? (
+                {activeTab === 'customer' ? (
                   <button
                     className="px-4 py-1.5 rounded-lg text-sm text-white font-medium hover:opacity-90"
                     style={{ background: 'var(--brand)' }}
                     onClick={() => {
-                      const idx = TABS.findIndex(t => t.key === activeTab);
-                      if (idx < TABS.length - 1) setActiveTab(TABS[idx + 1].key);
+                      const idx = visibleTabs.findIndex(tab => tab.id === activeVisibleTabId);
+                      const nextTab = visibleTabs.slice(idx + 1).find(tab => !tab.disabled);
+                      if (nextTab) openVisibleTab(nextTab);
                     }}
                   >下一步</button>
                 ) : isView ? (
@@ -2271,10 +3380,16 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
 
 function initForm(): OrderForm {
   return {
-    customerId: '', customerName: '', customerPhone: '', customerArea: '', customerTag: '', customerAdvisor: '',
-    orderType: '', amount: '', payStatus: '待支付', purchaseDate: new Date().toISOString().slice(0, 10),
+    customerId: '', customerName: '', customerWechat: '', customerPhone: '', customerArea: '',
+    customerSource: '小红书', customerAcquiredAt: new Date().toISOString().slice(0, 10),
+    customerTag: '', customerAdvisor: '', customerFollowStatus: '待跟进', customerFollowDate: '',
+    customerIntendedProduct: '', customerSituation: '', customerRemark: '',
+    customerBirthYear: '', customerDeliveryDate: '', customerBabyCount: '',
+    customerDeliveryType: '未知', customerFeedingType: '未知', customerFollowTask: '', customerProfile: {},
+    orderType: '体验卡', amount: '', payStatus: '待支付', purchaseDate: new Date().toISOString().slice(0, 10),
     totalTimes: '1', usedTimes: 0,
     experienceUpgradeStatus: '', experienceSnapshot: null,
+    upgradeCustomerTag: '', packageHistory: [], activePackageNumber: 1,
     contractStatus: '无',
     servicePerson1: { type: '产康师', assign: '待分配' },
     servicePerson2: { type: '运动康复师', assign: '待分配' },
@@ -2292,20 +3407,32 @@ function initForm(): OrderForm {
 }
 
 /* ─── Helper: get therapist display string for an order ─ */
-function getTherapistDisplay(orderId: string): string {
-  const saved = orderTherapistMap.get(orderId);
-  if (saved) {
-    const names = [saved.sp1.assign, saved.sp2.assign, saved.sp3.assign]
-      .filter(a => a !== '待分配' && a !== '无');
-    return names.length > 0 ? names.join('、') : '待分配';
-  }
-  return '待分配';
+function getTherapistDisplay(orderOrId: string | {
+  id?: string;
+  servicePeople?: Partial<Record<'sp1' | 'sp2' | 'sp3', ServicePerson>> | null;
+}): string {
+  const orderId = typeof orderOrId === 'string' ? orderOrId : orderOrId.id || '';
+  const persisted = typeof orderOrId === 'string' ? null : orderOrId.servicePeople;
+  const people = orderTherapistMap.get(orderId)
+    || (persisted?.sp1 || persisted?.sp2 || persisted?.sp3 ? persisted : null);
+  if (!people) return '待分配';
+
+  const names = [people.sp1?.assign, people.sp2?.assign, people.sp3?.assign]
+    .filter((name): name is string => Boolean(name && name !== '待分配' && name !== '无'));
+  return names.length > 0 ? Array.from(new Set(names)).join('、') : '待分配';
 }
 
 /* ─── Helper: get contract status for an order ─────────── */
-function getContractStatus(orderId: string, orderType: OrderType): ContractStatus {
-  if (orderType === '体验卡') return '无';
-  return orderContractMap.get(orderId) ?? '未回签';
+function getContractStatus(order?: {
+  id?: string;
+  type?: string;
+  contractSigned?: boolean;
+}): ContractStatus {
+  const source = order || { type: '体验卡' };
+  return resolveOrderContractStatus(
+    source,
+    orderContractMap.get(source.id || '')
+  );
 }
 
 /* ─── Helper: get follow records for an order ──────────── */
@@ -2367,19 +3494,41 @@ export default function OrdersListPage() {
   const [modalMode, setModalMode] = useState<OrderModalMode>('create');
   const [editOrderId, setEditOrderId] = useState('');
   const [selectedOrder, setSelectedOrder] = useState<any | null>(null);
+  const appointmentResumeAttemptedRef = useRef(false);
   const [showImport, setShowImport] = useState(false);
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importMsg, setImportMsg] = useState('');
   const importInputRef = useRef<HTMLInputElement>(null);
   const [pageSize, setPageSize] = useState(20);
   const [purchaseDateRange, setPurchaseDateRange] = useState<PurchaseDateRange>('all');
+  const [purchaseCustomRange, setPurchaseCustomRange] = useGlobalDateRange('all');
 
   // Multi-select filter states
   const [fType, setFType] = useState<string[]>([]);
   const [fPay, setFPay] = useState<string[]>([]);
+  const [fContract, setFContract] = useState<string[]>(() => {
+    const filter = readDashboardFilter();
+    if (filter.orderContractStatus === '未回签') {
+      clearDashboardFilter();
+      return ['未回签'];
+    }
+    return [];
+  });
   const [fArea, setFArea] = useState<string[]>([]);
   const [fTag, setFTag] = useState<string[]>([]);
-  const [fAdvisor, setFAdvisor] = useState<string[]>([]);
+  const [fFollowTime, setFFollowTime] = useState<string[]>(() => {
+    const filter = readDashboardFilter();
+    if (filter.orderFollowTime === 'today') {
+      clearDashboardFilter();
+      return ['today'];
+    }
+    return [];
+  });
+  const [fAdvisor, setFAdvisor] = useState<string[]>(() =>
+    currentUser.role === 'service' && String(currentUser.name || '').trim()
+      ? [String(currentUser.name).trim()]
+      : []
+  );
   const [fTherapist, setFTherapist] = useState<string[]>([]);
 
   const isReadOnly = currentUser.role === 'finance';
@@ -2387,11 +3536,36 @@ export default function OrdersListPage() {
 
   // Build option lists from data
   const customersQ = useCustomers({ page: 1, pageSize: 1000, includeOrdered: 1 });
+  const customerFilterOptionsQ = useCustomerFilterOptions();
   const therapistsQ = useTherapists({ page: 1, pageSize: 1000 });
-  const ordersQ = useOrders({ page: 1, pageSize: 1000 });
+  const ordersQ = useOrders({
+    page: 1,
+    pageSize: 1000,
+    from: purchaseCustomRange.start,
+    to: purchaseCustomRange.end,
+  });
   const CUSTOMERS: any[] = customersQ.data?.data ?? [];
   const THERAPISTS: any[] = therapistsQ.data?.data ?? [];
   const ORDERS: any[] = ordersQ.data?.data ?? [];
+  useEffect(() => {
+    if (appointmentResumeAttemptedRef.current || !ordersQ.data) return;
+    appointmentResumeAttemptedRef.current = true;
+    const draft = readOrderAppointmentDraft<OrderForm, any>(sessionStorage);
+    if (!draft) return;
+    const resumeOrder = ORDERS.find(item =>
+      item.id === draft.orderId || item._id === draft.orderId || item.no === draft.orderId
+    ) ?? draft.orderSnapshot;
+    if (!resumeOrder) {
+      clearOrderAppointmentDraft(sessionStorage);
+      toast.error('未找到原订单，无法恢复预约前的编辑内容');
+      return;
+    }
+    setModalMode('edit');
+    setEditOrderId(draft.orderId);
+    setSelectedOrder(resumeOrder);
+    setShowModal(true);
+    toast.success('预约流程已返回，请继续完成并保存订单修改');
+  }, [ordersQ.data]);
   const customerById = new Map(CUSTOMERS.flatMap(c => [[c.id, c], [c._id, c]].filter(([id]) => !!id) as [string, any][]));
   const customerByName = new Map(CUSTOMERS.map(c => [c.name, c]));
   const TYPE_OPTIONS = [
@@ -2412,7 +3586,7 @@ export default function OrdersListPage() {
       customerPhone: o.customerPhone || cust?.phone || '',
       advisor: o.advisor || cust?.advisor || '—',
       tag: (o.tag || cust?.tag || null) as CustomerTag | null,
-      resolvedCustomerId: o.customerCode || cust?.id || o.customerId || '—',
+      resolvedCustomerId: cust?.id || o.customerCode || o.customerId || '—',
       internalCustomerId: o.customerId || cust?._id || '',
     };
   });
@@ -2425,11 +3599,12 @@ export default function OrdersListPage() {
   const TAG_OPTIONS = TAG_DEFS.map(d => ({ value: d.tag, label: d.tag }));
   const AREA_OPTIONS = CITY_OPTIONS;
   const ADVISOR_OPTIONS = toOptions([
+    ...(customerFilterOptionsQ.data?.advisors ?? []),
     ...CUSTOMERS.map(c => c.advisor),
     ...enrichedOrders.map(o => o.advisor),
   ]);
   const assignedTherapistNames = enrichedOrders.flatMap(o =>
-    getTherapistDisplay(o.id).split(/[，,、]/).map(name => name.trim()).filter(name => name && name !== '待分配')
+    getTherapistDisplay(o).split(/[，,、]/).map(name => name.trim()).filter(name => name && name !== '待分配')
   );
   const therapistTypeOrder = ['产康师', '调理师', '运动康复师'];
   const THERAPIST_OPTIONS: FilterOption[] = [
@@ -2448,35 +3623,62 @@ export default function OrdersListPage() {
 
   const filtered = enrichedOrders.filter(o => {
     const matchSearch = !search || o.customerName.includes(search) || o.id.includes(search);
-    const matchPurchaseDate = matchesPurchaseDateRange(o.purchaseDate || '', purchaseDateRange);
+    const projection = o.purchaseRangeProjection;
+    const matchPurchaseDate = projection?.active
+      ? ensureArray<string>(projection.visibleStageKeys).length > 0
+      : dateInRange(o.purchaseDate || o.createdAt, purchaseCustomRange);
     const matchType = fType.length === 0 || fType.includes(o.type);
     const normalizedPay = o.payStatus === '已支付' ? '已付款' : o.payStatus === '待支付' ? '待付款' : o.payStatus;
     const matchPay = fPay.length === 0 || fPay.includes(normalizedPay);
+    const matchContract = matchesOrderContractStatus(
+      getContractStatus(o),
+      fContract
+    );
     const matchArea = fArea.length === 0 || fArea.some(area => String(o.area || '').includes(area));
     const matchTag = fTag.length === 0 || (o.tag !== null && fTag.includes(o.tag));
+    const followInfo = getFollowDisplay(o);
+    const matchFollowTime = matchesFollowTimeFilter(followInfo.date, fFollowTime);
     const matchAdvisor = fAdvisor.length === 0 || fAdvisor.includes(o.advisor);
-    const therapistDisplay = getTherapistDisplay(o.id);
+    const therapistDisplay = getTherapistDisplay(o);
     const matchTherapist = fTherapist.length === 0 || fTherapist.some(t => therapistDisplay.includes(t));
-    return matchSearch && matchPurchaseDate && matchType && matchPay && matchArea && matchTag && matchAdvisor && matchTherapist;
+    return matchSearch && matchPurchaseDate && matchType && matchPay && matchContract && matchArea && matchTag && matchFollowTime && matchAdvisor && matchTherapist;
   }).sort((a, b) => {
-    const bTime = new Date(`${b.purchaseDate || ''}T00:00:00`).getTime();
-    const aTime = new Date(`${a.purchaseDate || ''}T00:00:00`).getTime();
+    const bTime = new Date(`${b.purchaseRangeProjection?.displayPurchaseDate || b.purchaseDate || ''}T00:00:00`).getTime();
+    const aTime = new Date(`${a.purchaseRangeProjection?.displayPurchaseDate || a.purchaseDate || ''}T00:00:00`).getTime();
     return (Number.isFinite(bTime) ? bTime : 0) - (Number.isFinite(aTime) ? aTime : 0);
   });
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const paginated = filtered.slice((page - 1) * pageSize, page * pageSize);
+  const amountStageRows = filtered.map(order => getOrderAmountStages(order));
+  const maxPackageNumber = Math.max(
+    1,
+    ...amountStageRows.flatMap(stages =>
+      stages.map(stage => stage.key)
+        .filter(key => key.startsWith('package-'))
+        .map(key => Number(key.slice('package-'.length)) || 0),
+    ),
+  );
+  const amountColumns: Array<{ key: string; label: string }> = [
+    { key: 'experience', label: '体验卡金额' },
+    ...Array.from({ length: maxPackageNumber }, (_, index) => ({
+      key: `package-${index + 1}`,
+      label: `套餐${index + 1}金额`,
+    })),
+  ];
+  const amountTotals = sumOrderAmountStages(amountStageRows);
 
-  useEffect(() => { setPage(1); }, [search, purchaseDateRange, fType, fPay, fArea, fTag, fAdvisor, fTherapist]);
+  useEffect(() => { setPage(1); }, [search, purchaseDateRange, purchaseCustomRange.start, purchaseCustomRange.end, fType, fPay, fContract, fArea, fTag, fFollowTime, fAdvisor, fTherapist]);
 
   function handleOrderCustomerExport() {
     const headers = ['订单编号', '购买时间', '客户ID', '客户姓名', '联系电话', '所在区域', '客户标签', '归属客服', '订单类型', '服务项目', '跟进状态', '跟进时间', '跟进事项', '付款状态', '订单金额', '合同状态', '服务人员', '预约服务时间', '服务备注'];
     const rows = filtered.map(order => {
       const follow = getFollowDisplay(order);
       return [
-        order.id, order.purchaseDate || '', order.resolvedCustomerId, order.customerName, order.customerPhone, order.area, order.tag || '', order.advisor,
-        order.type, order.serviceItems || '', follow.status, follow.date, follow.task, payStatusDisplay(effectiveOrderPayStatus(order)), order.amount,
-        getContractStatus(order.id, order.type), getTherapistDisplay(order.id), order.appointmentTime || '', order.serviceNote || '',
+        order.id, order.purchaseRangeProjection?.displayPurchaseDate || order.purchaseDate || '', order.resolvedCustomerId, order.customerName, order.customerPhone, order.area, order.tag || '', order.advisor,
+        order.type, order.serviceItems || '', follow.status, follow.date, follow.task, payStatusDisplay(effectiveOrderPayStatus(order)),
+        getOrderAmountStages(order).reduce((sum, stage) => sum + stage.amount, 0),
+        getContractStatus(order), getTherapistDisplay(order), order.appointmentTime || '', order.serviceNote || '',
       ];
     });
     downloadXlsx(`订单客户信息_${new Date().toISOString().slice(0, 10)}.xlsx`, headers, rows);
@@ -2524,10 +3726,17 @@ export default function OrdersListPage() {
   }
 
   /* ── Column widths for non-frozen cols ── */
-  // 区域(92) | 订单类型(80) | 服务项目(160) | 跟进状态(76) | 跟进时间(82) | 跟进事项(120) | 付款状态(76) | 金额(80) | 合同状态(76) | 归属客服(76) | 技师(88) | 操作(96)
-  const NORMAL_COLS = [92, 80, 160, 76, 82, 120, 76, 80, 76, 76, 88, 82, 96];
+  // 标签 | 区域 | 订单类型 | 服务项目 | 跟进状态 | 跟进时间 | 跟进事项 | 付款状态
+  const NORMAL_COLS_BEFORE_AMOUNT = [54, 92, 80, 160, 76, 82, 120, 76];
+  // 合同状态 | 归属客服 | 客户ID | 技师 | 服务情况
+  const NORMAL_COLS_AFTER_AMOUNT = [76, 76, 92, 88, 82];
+  const NORMAL_COLS = [
+    ...NORMAL_COLS_BEFORE_AMOUNT,
+    ...amountColumns.map(() => 108),
+    ...NORMAL_COLS_AFTER_AMOUNT,
+  ];
   const totalNormal = NORMAL_COLS.reduce((s, w) => s + w, 0);
-  const tableMinW = FREEZE_TOTAL + totalNormal;
+  const tableMinW = FREEZE_TOTAL + totalNormal + ACTION_COL_W;
 
   return (
     <>
@@ -2590,13 +3799,34 @@ export default function OrdersListPage() {
               </div>
             </div>
             {/* Filter dropdowns */}
-            <div className="order-2 basis-full flex flex-wrap items-center gap-3 pt-3" style={{ borderTop: '1px solid var(--border)' }}>
-            <div className="flex items-center gap-1">
+            <DateRangeFilter
+              label="购卡时间范围"
+              className="hidden"
+              value={purchaseCustomRange}
+              onChange={value => { setPurchaseCustomRange(value); setPurchaseDateRange('custom'); }}
+            />
+            <div
+              className="order-2 basis-full flex flex-nowrap items-center gap-2 pt-3 [&>.w-px]:hidden"
+              style={{ borderTop: '1px solid var(--border)' }}
+            >
+            <DateRangeFilter
+              label="购卡时间范围"
+              value={purchaseCustomRange}
+              onChange={value => { setPurchaseCustomRange(value); setPurchaseDateRange('custom'); }}
+              quickOptions={GLOBAL_DATE_RANGE_QUICK_OPTIONS}
+              onQuickSelect={value => setPurchaseDateRange(
+                value === 'all' || value === 'today' || value === 'week' || value === 'month'
+                  ? value
+                  : 'custom',
+              )}
+            />
+            <div className="hidden" style={{ background: 'var(--border)' }} />
+            <div className="hidden">
               <span className="text-xs font-medium mr-1" style={{ color: 'var(--muted-foreground)' }}>购卡时间</span>
-              {(['all', 'today', 'week', 'month'] as PurchaseDateRange[]).map(range => (
+              {(['all', 'today', 'week', 'month'] as Exclude<PurchaseDateRange, 'custom'>[]).map(range => (
                 <button
                   key={range}
-                  onClick={() => setPurchaseDateRange(range)}
+                  onClick={() => { setPurchaseDateRange(range); setPurchaseCustomRange(quickDateRange(range)); }}
                   className="px-2.5 py-1 rounded-md text-xs font-medium transition-all"
                   style={{
                     background: purchaseDateRange === range ? 'var(--brand)' : 'var(--muted)',
@@ -2613,6 +3843,13 @@ export default function OrdersListPage() {
             <div className="w-px h-5 flex-shrink-0" style={{ background: 'var(--border)' }} />
             <MultiSelectDropdown label="付款状态" options={PAY_OPTIONS} selected={fPay} onChange={setFPay} />
             <div className="w-px h-5 flex-shrink-0" style={{ background: 'var(--border)' }} />
+            <MultiSelectDropdown
+              label="合同"
+              options={CONTRACT_STATUS_FILTER_OPTIONS}
+              selected={fContract}
+              onChange={setFContract}
+            />
+            <div className="w-px h-5 flex-shrink-0" style={{ background: 'var(--border)' }} />
             <MultiSelectDropdown label="区域" options={AREA_OPTIONS} selected={fArea} onChange={setFArea} />
             <div className="w-px h-5 flex-shrink-0" style={{ background: 'var(--border)' }} />
             <MultiSelectDropdown
@@ -2621,6 +3858,15 @@ export default function OrdersListPage() {
               selected={fTag}
               onChange={setFTag}
               grouped={true}
+            />
+            <div className="w-px h-5 flex-shrink-0" style={{ background: 'var(--border)' }} />
+            <MultiSelectDropdown
+              label="跟进时间"
+              options={FOLLOW_TIME_FILTER_OPTIONS}
+              selected={fFollowTime}
+              onChange={setFFollowTime}
+              allSelectedLabel="跟进时间 全选"
+              fixedSelectAllLabel
             />
             <div className="w-px h-5 flex-shrink-0" style={{ background: 'var(--border)' }} />
             <MultiSelectDropdown label="客服" options={ADVISOR_OPTIONS} selected={fAdvisor} onChange={setFAdvisor} />
@@ -2674,15 +3920,15 @@ export default function OrdersListPage() {
               <colgroup>
                 {COL_W.map((w, i) => <col key={`f${i}`} style={{ width: w }} />)}
                 {NORMAL_COLS.map((w, i) => <col key={`n${i}`} style={{ width: w }} />)}
+                <col style={{ width: ACTION_COL_W }} />
               </colgroup>
               <thead>
                 <tr>
-                  {/* Frozen cols */}
+                  {/* Only purchase time and customer name are frozen on the left. */}
                   <th style={STICKY_TH_STYLE(0)}>购卡时间</th>
-                  <th style={STICKY_TH_STYLE(1)}>客户ID</th>
-                  <th style={STICKY_TH_STYLE(2)}>客户姓名</th>
-                  <th style={STICKY_TH_STYLE(3)}>标签</th>
+                  <th style={STICKY_TH_STYLE(1)}>客户姓名</th>
                   {/* Normal cols */}
+                  <th style={{ textAlign: 'center' }}>标签</th>
                   <th>区域</th>
                   <th style={{ textAlign: 'center' }}>订单类型</th>
                   <th>服务项目</th>
@@ -2690,15 +3936,39 @@ export default function OrdersListPage() {
                   <th style={{ textAlign: 'center' }}>跟进时间</th>
                   <th>跟进事项</th>
                   <th style={{ textAlign: 'center' }}>付款状态</th>
-                  <th style={{ textAlign: 'center' }}>金额</th>
+                  {amountColumns.map(column => (
+                    <th key={column.key} style={{ textAlign: 'center' }}>{column.label}</th>
+                  ))}
                   <th style={{ textAlign: 'center' }}>合同状态</th>
                   <th>归属客服</th>
+                  <th style={{ textAlign: 'center' }}>客户ID</th>
                   <th>技师</th>
                   <th style={{ textAlign: 'center' }}>服务情况</th>
-                  <th style={{ textAlign: 'center' }}>操作</th>
+                  <th style={STICKY_RIGHT_TH_STYLE}>操作</th>
                 </tr>
               </thead>
               <tbody>
+                <tr style={{ background: 'rgba(30,136,229,0.06)' }}>
+                  <td style={STICKY_TD_STYLE(0, 'rgba(30,136,229,0.06)')}>
+                    <span className="text-xs font-semibold" style={{ color: 'var(--brand)' }}>销售总额</span>
+                  </td>
+                  <td style={STICKY_TD_STYLE(1, 'rgba(30,136,229,0.06)')} />
+                  {NORMAL_COLS_BEFORE_AMOUNT.map((_, index) => <td key={`summary-before-${index}`} />)}
+                  {amountColumns.map(column => (
+                    <td
+                      key={`summary-${column.key}`}
+                      style={{ textAlign: 'center' }}
+                      title={`当前筛选 ${filtered.length} 条订单的${column.label}逐行合计`}
+                    >
+                      <span className="text-sm font-bold" style={{ color: 'var(--brand)' }}>
+                        ¥{(amountTotals.get(column.key) || 0).toLocaleString()}
+                      </span>
+                    </td>
+                  ))}
+                  {NORMAL_COLS_AFTER_AMOUNT.map((_, index) => <td key={`summary-after-${index}`} />)}
+                  {/* Keep the frozen action pane opaque so horizontally scrolled totals never bleed through it. */}
+                  <td style={STICKY_RIGHT_TD_STYLE('var(--card)')} />
+                </tr>
                 {paginated.map(o => {
                   const bgColor = 'var(--card)';
 
@@ -2710,27 +3980,25 @@ export default function OrdersListPage() {
                     return '—';
                   })();
 
-                  const therapistDisplay = getTherapistDisplay(o.id);
-                  const contractStatus = getContractStatus(o.id, o.type);
+                  const therapistDisplay = getTherapistDisplay(o);
+                  const contractStatus = getContractStatus(o);
                   const followInfo = getFollowDisplay(o);
                   const displayPayStatus = effectiveOrderPayStatus(o);
+                  const orderAmountStages = new Map(
+                    getOrderAmountStages(o).map(stage => [stage.key, stage]),
+                  );
 
                   return (
-                    <tr key={o.id}>
+                    <tr key={o._id || o.id}>
                       {/* Frozen: 购卡时间 */}
                       <td style={STICKY_TD_STYLE(0, bgColor)}>
-                        <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>{o.purchaseDate || '—'}</span>
-                      </td>
-
-                      {/* Frozen: 客户ID */}
-                      <td style={STICKY_TD_STYLE(1, bgColor)}>
-                        <span className="font-mono text-xs" style={{ color: 'var(--brand)', letterSpacing: '-0.02em' }}>
-                          {o.resolvedCustomerId}
+                        <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                          {o.purchaseRangeProjection?.displayPurchaseDate || o.purchaseDate || '—'}
                         </span>
                       </td>
 
                       {/* Frozen: 客户姓名 */}
-                      <td style={STICKY_TD_STYLE(2, bgColor)}>
+                      <td style={STICKY_TD_STYLE(1, bgColor)}>
                         <span
                           className="font-medium text-sm"
                           style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
@@ -2740,8 +4008,8 @@ export default function OrdersListPage() {
                         </span>
                       </td>
 
-                      {/* Frozen: 标签 */}
-                      <td style={STICKY_TD_STYLE(3, bgColor)}>
+                      {/* Scrollable: 标签 */}
+                      <td style={{ textAlign: 'center' }}>
                         {o.tag ? (
                           <span className={`badge ${TAG_CLS[o.tag] ?? 'badge-gray'}`}>{o.tag}</span>
                         ) : (
@@ -2844,10 +4112,21 @@ export default function OrdersListPage() {
                         <span className={`badge ${PAY_STATUS_COLORS[displayPayStatus] ?? 'badge-gray'}`}>{payStatusDisplay(displayPayStatus)}</span>
                       </td>
 
-                      {/* 金额 */}
-                      <td style={{ textAlign: 'center' }}>
-                        <span className="font-semibold text-sm">¥{o.amount.toLocaleString()}</span>
-                      </td>
+                      {/* 分阶段金额 */}
+                      {amountColumns.map(column => {
+                        const stage = orderAmountStages.get(column.key);
+                        return (
+                          <td key={`${o.id}-${column.key}`} style={{ textAlign: 'center' }}>
+                            {stage ? (
+                              <span className="text-sm font-semibold text-foreground">
+                                ¥{stage.amount.toLocaleString()}
+                              </span>
+                            ) : (
+                              <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>—</span>
+                            )}
+                          </td>
+                        );
+                      })}
 
                       {/* 合同状态 */}
                       <td style={{ textAlign: 'center' }}>
@@ -2863,6 +4142,13 @@ export default function OrdersListPage() {
                       {/* 归属客服 */}
                       <td>
                         <span className="text-sm">{o.advisor}</span>
+                      </td>
+
+                      {/* 客户ID follows the owning advisor and scrolls with middle columns. */}
+                      <td style={{ textAlign: 'center' }}>
+                        <span className="font-mono text-xs" style={{ color: 'var(--brand)', letterSpacing: '-0.02em' }}>
+                          {o.resolvedCustomerId}
+                        </span>
                       </td>
 
                       {/* 技师 */}
@@ -2885,27 +4171,12 @@ export default function OrdersListPage() {
                       </td>
 
                       {/* 操作 */}
-                      <td style={{ textAlign: 'center' }}>
-                        <div className="flex items-center justify-center gap-1">
-                          <button
-                            className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium hover:opacity-80 transition-opacity"
-                            title="查看"
-                            style={{ background: 'rgba(30,136,229,0.1)', color: 'var(--brand)' }}
-                            onClick={() => { setModalMode('view'); setEditOrderId(o.id); setSelectedOrder(o); setShowModal(true); }}
-                          >
-                            <EyeIcon size={11} />查看
-                          </button>
-                          {!isReadOnly && (
-                            <button
-                              className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium hover:opacity-80 transition-opacity"
-                              title="编辑"
-                              style={{ background: 'rgba(100,100,100,0.1)', color: 'var(--foreground)' }}
-                              onClick={() => { setModalMode('edit'); setEditOrderId(o.id); setSelectedOrder(o); setShowModal(true); }}
-                            >
-                              <PencilIcon size={11} />编辑
-                            </button>
-                          )}
-                        </div>
+                      <td style={STICKY_RIGHT_TD_STYLE(bgColor)}>
+                        <RecordActionButtons
+                          className="w-full"
+                          onView={() => { setModalMode('view'); setEditOrderId(o.id); setSelectedOrder(o); setShowModal(true); }}
+                          onEdit={isReadOnly ? undefined : () => { setModalMode('edit'); setEditOrderId(o.id); setSelectedOrder(o); setShowModal(true); }}
+                        />
                       </td>
                     </tr>
                   );
@@ -2913,7 +4184,7 @@ export default function OrdersListPage() {
 
                 {paginated.length === 0 && (
                   <tr>
-                    <td colSpan={17} className="text-center py-12" style={{ color: 'var(--muted-foreground)' }}>
+                    <td colSpan={16 + amountColumns.length} className="text-center py-12" style={{ color: 'var(--muted-foreground)' }}>
                       <FileTextIcon size={36} className="mx-auto mb-3 opacity-20" />
                       <div className="text-sm">暂无订单数据</div>
                     </td>

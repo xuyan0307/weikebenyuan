@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { authenticateToken } from '../middleware/auth';
+import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { auditLog } from '../middleware/auditLog';
 import { getDb } from '../config/database';
 
@@ -19,16 +19,24 @@ function mapRow(r: any) {
   };
 }
 
-router.get('/', authenticateToken, async (req, res, next) => {
+router.get('/', authenticateToken, async (req: AuthRequest, res, next) => {
   try {
     const db = getDb();
     const page = Math.max(1, parseInt(req.query.page as string) || 1);
     const pageSize = Math.max(1, parseInt(req.query.pageSize as string) || 20);
     const signed = req.query.signed;
     const offset = (page - 1) * pageSize;
-    const whereSql = signed === '1' ? 'WHERE o.contract_signed = 1' : signed === '0' ? 'WHERE o.contract_signed = 0' : '';
+    const where: string[] = ["o.type='套餐'", "o.pay_status='已付款'"];
+    const params: Array<string | number> = [];
+    if (signed === '1') where.push('o.contract_signed = 1');
+    if (signed === '0') where.push('o.contract_signed = 0');
+    if (req.userRole !== 'superadmin' && req.userRole !== 'admin') {
+      where.push("JSON_UNQUOTE(JSON_EXTRACT(o.customer_snapshot, '$.advisorId')) = ?");
+      params.push(req.userId || '');
+    }
+    const whereSql = `WHERE ${where.join(' AND ')}`;
 
-    const [countRows] = await db.query(`SELECT COUNT(*) AS cnt FROM orders o ${whereSql}`);
+    const [countRows] = await db.query(`SELECT COUNT(*) AS cnt FROM orders o ${whereSql}`, params);
     const total = (countRows as any[])[0].cnt;
 
     const [rows] = await db.query(
@@ -45,7 +53,7 @@ router.get('/', authenticateToken, async (req, res, next) => {
        JOIN orders o ON o.id = page_orders.id
        LEFT JOIN customers c ON c.id = o.customer_id
        ORDER BY o.created_at DESC`,
-      [pageSize, offset]
+      [...params, pageSize, offset]
     );
     res.json({ total, page, pageSize, data: (rows as any[]).map(mapRow) });
   } catch (err) { next(err); }

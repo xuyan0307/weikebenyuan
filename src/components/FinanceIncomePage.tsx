@@ -1,11 +1,11 @@
-import { useState, useMemo } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import {
   ChevronLeftIcon, ChevronRightIcon, ChevronDownIcon, ChevronUpIcon,
   PlusIcon, Trash2Icon, EditIcon, CheckIcon, XIcon, TrendingUpIcon,
   TrendingDownIcon, DownloadIcon, BuildingIcon, UsersIcon, ZapIcon,
   BriefcaseIcon, CreditCardIcon, ReceiptIcon
 } from 'lucide-react';
-import { useOrders } from '../api/hooks';
+import { useOrders, usePlatformSetting, usePlatformSettingMutation, useSalary } from '../api/hooks';
 
 // ─────────── 类型 ────────────────────────────────────────────────────────────
 
@@ -44,76 +44,17 @@ interface FinanceRecord {
   amount: number;
 }
 
-// ─────────── Mock 初始数据 ────────────────────────────────────────────────────
+// ─────────── 空白账套结构（实际数据统一由后端配置接口读取）────────────────────
 
-const MONTHS_2025 = ['2025-01', '2025-02', '2025-03', '2025-04', '2025-05', '2025-06'];
-const SHORT_MONTHS = ['1月', '2月', '3月', '4月', '5月', '6月'];
-
-const initRentRows: RentRow[] = [
-  {
-    id: 'rent1',
-    subItem: '房租费',
-    monthlyData: { '2025-01': 4000, '2025-02': 4000, '2025-03': 4000, '2025-04': 6000, '2025-05': 4000, '2025-06': 4000 },
-  },
-  {
-    id: 'rent2',
-    subItem: '水电费',
-    monthlyData: { '2025-01': 78, '2025-02': 78, '2025-03': 78, '2025-04': 87.26, '2025-05': 303.39, '2025-06': 120 },
-  },
-];
-
-const initStaffRows: StaffRow[] = [
-  { id: 's1', name: '郑芷钰', monthlyData: { '2025-01': 8000, '2025-02': 8000, '2025-03': 8000, '2025-04': 8000, '2025-05': 8000, '2025-06': 8000 } },
-  { id: 's2', name: '徐燕玲', monthlyData: { '2025-01': 8000, '2025-02': 8000, '2025-03': 8000, '2025-04': 8000, '2025-05': 8000, '2025-06': 8000 } },
-  { id: 's3', name: '王秋怡', monthlyData: { '2025-01': 0, '2025-02': 0, '2025-03': 1182, '2025-04': 2600, '2025-05': 3000, '2025-06': 3000 } },
-  { id: 's4', name: '黄屹凌', monthlyData: { '2025-01': 0, '2025-02': 0, '2025-03': 0, '2025-04': 1655, '2025-05': 2600, '2025-06': 2600 } },
-  { id: 's5', name: '徐炎', monthlyData: { '2025-01': 0, '2025-02': 0, '2025-03': 0, '2025-04': 0, '2025-05': 4000, '2025-06': 4000 } },
-];
-
-const initFlowRecords: FlowRecord[] = [
-  { id: 'f1', date: '5.3', summary: '小红书聚光充值', amount: 3000 },
-  { id: 'f2', date: '5.19', summary: '小红书退款', amount: -2036.74 },
-  { id: 'f3', date: '5.19', summary: '小红书聚光充值', amount: 200 },
-  { id: 'f4', date: '5.20', summary: '小红书聚光充值', amount: 200 },
-  { id: 'f5', date: '5.20', summary: '小红书退款', amount: -77.32 },
-  { id: 'f6', date: '5.21', summary: '小红书聚光充值', amount: 1922.68 },
-  { id: 'f7', date: '5.21', summary: '小红书聚光充值', amount: 154.64 },
-  { id: 'f8', date: '5.31', summary: '小红书聚光充值', amount: 7663.49 },
-  { id: 'f9', date: '6.3', summary: '抖音信息流充值', amount: 5000 },
-  { id: 'f10', date: '6.15', summary: '小红书聚光充值', amount: 2000 },
-];
-
-const initOfficeRecords: OfficeRecord[] = [
-  { id: 'o1', date: '1.13', summary: '米挠喵博主 蒲公英商单', amount: 405 },
-  { id: 'o2', date: '1.14', summary: '灰豚月卡会员', amount: 110 },
-  { id: 'o3', date: '1.16', summary: '小博主 feeling推广费', amount: 303.6 },
-  { id: 'o4', date: '1.16', summary: '剪辑费用-1条', amount: 40 },
-  { id: 'o5', date: '1.17', summary: '生姜艾草按摩精油', amount: 37.79 },
-  { id: 'o6', date: '1.17', summary: '大头棉签10包18+美团8.8', amount: 26.8 },
-  { id: 'o7', date: '1.17', summary: '护理垫+艾草精油', amount: 32.6 },
-  { id: 'o8', date: '1.23', summary: '徐小白的1件制服+2个名牌', amount: 121 },
-  { id: 'o9', date: '1.26', summary: '剪辑视频费用', amount: 75 },
-  { id: 'o10', date: '5.3', summary: '办公用品采购', amount: 280 },
-  { id: 'o11', date: '5.15', summary: '快递耗材', amount: 56.4 },
-  { id: 'o12', date: '6.1', summary: '会议室租用费', amount: 350 },
-  { id: 'o13', date: '6.10', summary: '印刷宣传材料', amount: 420 },
-];
-
-const initFinanceRecords: FinanceRecord[] = [
-  { id: 'fin1', month: '2025-01', summary: '银商手续费', amount: 85.89 },
-  { id: 'fin2', month: '2025-02', summary: '银商手续费', amount: 80.27 },
-  { id: 'fin3', month: '2025-03', summary: '银商手续费', amount: 237.21 },
-  { id: 'fin4', month: '2025-04', summary: '银商手续费', amount: 296.62 },
-  { id: 'fin5', month: '2025-05', summary: '银商手续费', amount: 271.72 },
-  { id: 'fin6', month: '2025-06', summary: '银商手续费', amount: 158.50 },
-];
-
-// ─────────── 技师薪酬 mock（模拟从 FinanceSalaryPage 同步的数据）────────────
-
-const THERAPIST_SALARY_BY_MONTH: Record<string, number> = {
-  '2025-01': 12400, '2025-02': 11800, '2025-03': 15600,
-  '2025-04': 18200, '2025-05': 21340, '2025-06': 16800,
-};
+// Historical detail tables always follow the latest six calendar months instead
+// of being pinned to the original 2025 demo period.
+const DISPLAY_MONTHS = Array.from({ length: 6 }, (_, index) => {
+  const date = new Date();
+  date.setDate(1);
+  date.setMonth(date.getMonth() - (5 - index));
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+});
+const DISPLAY_MONTH_LABELS = DISPLAY_MONTHS.map(month => `${Number(month.slice(5))}月`);
 
 // ─────────── 工具 ─────────────────────────────────────────────────────────────
 
@@ -127,11 +68,11 @@ function fmtNum(n: number): string {
   return n.toLocaleString('zh-CN', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 }
 
-function parseMonthFromDate(dateStr: string): string {
-  // dateStr = "M.D" or "MM.DD"
+function parseMonthFromDate(dateStr: string, year = new Date().getFullYear()): string {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr.slice(0, 7);
+  // 兼容旧的 "M.D" 输入；年份使用当前查看年份，不再固定为演示年份。
   const [m] = dateStr.split('.');
   const mo = String(parseInt(m)).padStart(2, '0');
-  const year = '2025'; // demo: 固定2025
   return `${year}-${mo}`;
 }
 
@@ -217,13 +158,73 @@ function EditableCell({
   );
 }
 
+function InlineStringCell({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  if (editing) {
+    return (
+      <input
+        autoFocus
+        value={draft}
+        onChange={e => setDraft(e.target.value)}
+        onBlur={() => { onChange(draft); setEditing(false); }}
+        onKeyDown={e => {
+          if (e.key === 'Enter') { onChange(draft); setEditing(false); }
+          if (e.key === 'Escape') setEditing(false);
+        }}
+        className="border border-brand rounded px-1.5 py-0.5 text-sm bg-background text-foreground outline-none w-full"
+      />
+    );
+  }
+  return (
+    <span
+      className="cursor-pointer hover:text-brand transition-colors block"
+      onClick={() => { setDraft(value); setEditing(true); }}
+    >
+      {value || <span className="text-muted-foreground/40">点击编辑</span>}
+    </span>
+  );
+}
+
+function InlineMoneyCell({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  if (editing) {
+    return (
+      <input
+        autoFocus
+        type="number"
+        value={draft}
+        onChange={e => setDraft(e.target.value)}
+        onBlur={() => { onChange(parseFloat(draft) || 0); setEditing(false); }}
+        onKeyDown={e => {
+          if (e.key === 'Enter') { onChange(parseFloat(draft) || 0); setEditing(false); }
+          if (e.key === 'Escape') setEditing(false);
+        }}
+        className="w-24 border border-brand rounded px-1.5 py-0.5 text-sm text-right bg-background text-foreground outline-none"
+      />
+    );
+  }
+  return (
+    <span
+      className={`cursor-pointer hover:text-brand transition-colors ${value < 0 ? 'text-danger' : ''}`}
+      onClick={() => { setDraft(value === 0 ? '' : String(value)); setEditing(true); }}
+    >
+      {value === 0
+        ? <span className="text-muted-foreground/40">—</span>
+        : <span>{value < 0 ? '-' : ''}{Math.abs(value).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+      }
+    </span>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 主页面
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function FinanceIncomePage() {
   const [timeMode, setTimeMode] = useState<TimeMode>('月');
-  const [monthOffset, setMonthOffset] = useState(0); // 0 = 2025-06
+  const [monthOffset, setMonthOffset] = useState(0); // 0 = 当前月
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [activeTab, setActiveTab] = useState<'summary' | 'rent' | 'staff' | 'flow' | 'office' | 'finance'>('summary');
 
@@ -231,19 +232,48 @@ export default function FinanceIncomePage() {
   const ORDERS: any[] = ordersQ.data?.data ?? [];
 
   // ── 数据状态 ──────────────────────────────────────────────────────────────
-  const [rentRows, setRentRows] = useState<RentRow[]>(initRentRows);
-  const [staffRows, setStaffRows] = useState<StaffRow[]>(initStaffRows);
-  const [flowRecords, setFlowRecords] = useState<FlowRecord[]>(initFlowRecords);
-  const [officeRecords, setOfficeRecords] = useState<OfficeRecord[]>(initOfficeRecords);
-  const [financeRecords, setFinanceRecords] = useState<FinanceRecord[]>(initFinanceRecords);
+  const [rentRows, setRentRows] = useState<RentRow[]>([]);
+  const [staffRows, setStaffRows] = useState<StaffRow[]>([]);
+  const [flowRecords, setFlowRecords] = useState<FlowRecord[]>([]);
+  const [officeRecords, setOfficeRecords] = useState<OfficeRecord[]>([]);
+  const [financeRecords, setFinanceRecords] = useState<FinanceRecord[]>([]);
+  const expenseSetting = usePlatformSetting<{
+    rentRows: RentRow[]; staffRows: StaffRow[]; flowRecords: FlowRecord[];
+    officeRecords: OfficeRecord[]; financeRecords: FinanceRecord[];
+  }>('finance-expenses-v1');
+  const saveExpenseSetting = usePlatformSettingMutation<{
+    rentRows: RentRow[]; staffRows: StaffRow[]; flowRecords: FlowRecord[];
+    officeRecords: OfficeRecord[]; financeRecords: FinanceRecord[];
+  }>('finance-expenses-v1');
+  const expensesHydrated = useRef(false);
+
+  useEffect(() => {
+    if (!expenseSetting.isSuccess) return;
+    const stored = expenseSetting.data;
+    setRentRows(stored?.rentRows || []);
+    setStaffRows(stored?.staffRows || []);
+    setFlowRecords(stored?.flowRecords || []);
+    setOfficeRecords(stored?.officeRecords || []);
+    setFinanceRecords(stored?.financeRecords || []);
+    expensesHydrated.current = true;
+  }, [expenseSetting.isSuccess, expenseSetting.data]);
+
+  useEffect(() => {
+    if (!expensesHydrated.current) return;
+    const timer = window.setTimeout(() => {
+      void saveExpenseSetting({ rentRows, staffRows, flowRecords, officeRecords, financeRecords });
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [rentRows, staffRows, flowRecords, officeRecords, financeRecords]);
 
   // ── 当前月份 ─────────────────────────────────────────────────────────────
-  // 基准：2025-06 offset=0
-  const baseYear = 2025;
-  const baseMonth = 6;
+  const today = new Date();
+  const baseYear = today.getFullYear();
+  const baseMonth = today.getMonth() + 1;
   const curDate = new Date(baseYear, baseMonth - 1 + monthOffset);
   const curYM = `${curDate.getFullYear()}-${String(curDate.getMonth() + 1).padStart(2, '0')}`;
   const curLabel = `${curDate.getFullYear()}年${curDate.getMonth() + 1}月`;
+  const salaryQ = useSalary(curYM, `${curYM}-01`, 'month');
 
   function toggleSection(key: string) {
     setCollapsed(prev => ({ ...prev, [key]: !prev[key] }));
@@ -251,14 +281,24 @@ export default function FinanceIncomePage() {
 
   // ── 营收（从订单同步）─────────────────────────────────────────────────────
   const revenueData = useMemo(() => {
-    const expCards = ORDERS.filter(o => o.type === '体验卡' && o.payStatus === '已付款');
-    const packages = ORDERS.filter(o => o.type === '套餐' && o.payStatus === '已付款');
-    const refunds = ORDERS.filter(o => o.payStatus === '已退款');
+    const inSelectedMonth = (order: any) => String(order.purchaseDate || order.createdAt || '').slice(0, 7) === curYM;
+    const monthlyOrders = ORDERS.filter(inSelectedMonth);
+    const expCards = monthlyOrders.filter(o => o.type === '体验卡' && o.payStatus === '已付款');
+    const packages = monthlyOrders.filter(o => o.type === '套餐' && o.payStatus === '已付款');
+    const refunds = monthlyOrders.filter(o => o.payStatus === '已退款');
     const expTotal = expCards.reduce((s, o) => s + o.amount, 0);
     const pkgTotal = packages.reduce((s, o) => s + o.amount, 0);
     const refundTotal = refunds.reduce((s, o) => s + o.amount, 0);
-    return { expTotal, pkgTotal, refundTotal, total: expTotal + pkgTotal - refundTotal, expCards, packages };
-  }, [ORDERS]);
+    return {
+      expTotal,
+      pkgTotal,
+      refundTotal,
+      total: expTotal + pkgTotal - refundTotal,
+      expCards,
+      packages,
+      orders: monthlyOrders,
+    };
+  }, [ORDERS, curYM]);
 
   // ── 房租水电 ─────────────────────────────────────────────────────────────
   const rentTotal = useMemo(() =>
@@ -273,18 +313,18 @@ export default function FinanceIncomePage() {
   );
 
   // ── 技师费用（从工资结算同步）────────────────────────────────────────────
-  const therapistSalary = THERAPIST_SALARY_BY_MONTH[curYM] ?? 0;
+  const therapistSalary = (salaryQ.data?.data || []).reduce((sum, record) => sum + Number(record.total || 0), 0);
   const laborTotal = staffTotal + therapistSalary;
 
   // ── 推流费用 ─────────────────────────────────────────────────────────────
   const flowRecordsByMonth = useMemo(() => {
-    return flowRecords.filter(r => parseMonthFromDate(r.date) === curYM);
+    return flowRecords.filter(r => parseMonthFromDate(r.date, curDate.getFullYear()) === curYM);
   }, [flowRecords, curYM]);
   const flowTotal = flowRecordsByMonth.reduce((s, r) => s + r.amount, 0);
 
   // ── 办公费用 ─────────────────────────────────────────────────────────────
   const officeRecordsByMonth = useMemo(() => {
-    return officeRecords.filter(r => parseMonthFromDate(r.date) === curYM);
+    return officeRecords.filter(r => parseMonthFromDate(r.date, curDate.getFullYear()) === curYM);
   }, [officeRecords, curYM]);
   const officeTotal = officeRecordsByMonth.reduce((s, r) => s + r.amount, 0);
 
@@ -312,7 +352,7 @@ export default function FinanceIncomePage() {
   function addRentRow() {
     setRentRows(prev => [...prev, {
       id: uid(), subItem: '新项目',
-      monthlyData: Object.fromEntries(MONTHS_2025.map(m => [m, 0])),
+      monthlyData: Object.fromEntries(DISPLAY_MONTHS.map(m => [m, 0])),
     }]);
   }
   function deleteRentRow(id: string) {
@@ -328,7 +368,7 @@ export default function FinanceIncomePage() {
   function addStaffRow() {
     setStaffRows(prev => [...prev, {
       id: uid(), name: '新员工',
-      monthlyData: Object.fromEntries(MONTHS_2025.map(m => [m, 0])),
+      monthlyData: Object.fromEntries(DISPLAY_MONTHS.map(m => [m, 0])),
     }]);
   }
   function deleteStaffRow(id: string) {
@@ -374,72 +414,12 @@ export default function FinanceIncomePage() {
   // 渲染：内联编辑表格行
   // ─────────────────────────────────────────────────────────────────────────
 
-  function InlineStringCell({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-    const [editing, setEditing] = useState(false);
-    const [draft, setDraft] = useState('');
-    if (editing) {
-      return (
-        <input
-          autoFocus
-          value={draft}
-          onChange={e => setDraft(e.target.value)}
-          onBlur={() => { onChange(draft); setEditing(false); }}
-          onKeyDown={e => {
-            if (e.key === 'Enter') { onChange(draft); setEditing(false); }
-            if (e.key === 'Escape') setEditing(false);
-          }}
-          className="border border-brand rounded px-1.5 py-0.5 text-sm bg-background text-foreground outline-none w-full"
-        />
-      );
-    }
-    return (
-      <span
-        className="cursor-pointer hover:text-brand transition-colors block"
-        onClick={() => { setDraft(value); setEditing(true); }}
-      >
-        {value || <span className="text-muted-foreground/40">点击编辑</span>}
-      </span>
-    );
-  }
-
-  function InlineMoneyCell({ value, onChange }: { value: number; onChange: (v: number) => void }) {
-    const [editing, setEditing] = useState(false);
-    const [draft, setDraft] = useState('');
-    if (editing) {
-      return (
-        <input
-          autoFocus
-          type="number"
-          value={draft}
-          onChange={e => setDraft(e.target.value)}
-          onBlur={() => { onChange(parseFloat(draft) || 0); setEditing(false); }}
-          onKeyDown={e => {
-            if (e.key === 'Enter') { onChange(parseFloat(draft) || 0); setEditing(false); }
-            if (e.key === 'Escape') setEditing(false);
-          }}
-          className="w-24 border border-brand rounded px-1.5 py-0.5 text-sm text-right bg-background text-foreground outline-none"
-        />
-      );
-    }
-    return (
-      <span
-        className={`cursor-pointer hover:text-brand transition-colors ${value < 0 ? 'text-danger' : ''}`}
-        onClick={() => { setDraft(value === 0 ? '' : String(value)); setEditing(true); }}
-      >
-        {value === 0
-          ? <span className="text-muted-foreground/40">—</span>
-          : <span>{value < 0 ? '-' : ''}{Math.abs(value).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-        }
-      </span>
-    );
-  }
-
   // ─────────────────────────────────────────────────────────────────────────
   // 渲染二级页面
   // ─────────────────────────────────────────────────────────────────────────
 
   if (activeTab === 'rent') {
-    const colTotals = MONTHS_2025.map(ym =>
+    const colTotals = DISPLAY_MONTHS.map(ym =>
       rentRows.reduce((s, r) => s + (r.monthlyData[ym] ?? 0), 0)
     );
     return (
@@ -470,8 +450,8 @@ export default function FinanceIncomePage() {
                 <th className="px-4 py-2.5 text-xs font-semibold text-muted-foreground w-12">序号</th>
                 <th className="px-4 py-2.5 text-xs font-semibold text-muted-foreground text-left">主项</th>
                 <th className="px-4 py-2.5 text-xs font-semibold text-muted-foreground text-left">项目</th>
-                {MONTHS_2025.map((ym, i) => (
-                  <th key={ym} className="px-4 py-2.5 text-xs font-semibold text-muted-foreground">{SHORT_MONTHS[i]}</th>
+                {DISPLAY_MONTHS.map((ym, i) => (
+                  <th key={ym} className="px-4 py-2.5 text-xs font-semibold text-muted-foreground">{DISPLAY_MONTH_LABELS[i]}</th>
                 ))}
                 <th className="px-4 py-2.5 text-xs font-semibold text-muted-foreground w-12">操作</th>
               </tr>
@@ -487,7 +467,7 @@ export default function FinanceIncomePage() {
                       onChange={v => setRentRows(prev => prev.map(r => r.id === row.id ? { ...r, subItem: v } : r))}
                     />
                   </td>
-                  {MONTHS_2025.map(ym => (
+                  {DISPLAY_MONTHS.map(ym => (
                     <td key={ym} className="px-4 py-2.5">
                       <EditableCell
                         value={row.monthlyData[ym] ?? 0}
@@ -519,7 +499,7 @@ export default function FinanceIncomePage() {
   }
 
   if (activeTab === 'staff') {
-    const colTotals = MONTHS_2025.map(ym =>
+    const colTotals = DISPLAY_MONTHS.map(ym =>
       staffRows.reduce((s, r) => s + (r.monthlyData[ym] ?? 0), 0)
     );
     return (
@@ -543,8 +523,8 @@ export default function FinanceIncomePage() {
               <tr className="bg-brand/5 border-b border-border">
                 <th className="px-4 py-2.5 text-xs font-semibold text-muted-foreground w-12">序号</th>
                 <th className="px-4 py-2.5 text-xs font-semibold text-muted-foreground text-left">姓名</th>
-                {MONTHS_2025.map((ym, i) => (
-                  <th key={ym} className="px-4 py-2.5 text-xs font-semibold text-muted-foreground">{SHORT_MONTHS[i]}基本工资</th>
+                {DISPLAY_MONTHS.map((ym, i) => (
+                  <th key={ym} className="px-4 py-2.5 text-xs font-semibold text-muted-foreground">{DISPLAY_MONTH_LABELS[i]}基本工资</th>
                 ))}
                 <th className="px-4 py-2.5 text-xs font-semibold text-muted-foreground w-12">操作</th>
               </tr>
@@ -559,7 +539,7 @@ export default function FinanceIncomePage() {
                       onChange={v => setStaffRows(prev => prev.map(r => r.id === row.id ? { ...r, name: v } : r))}
                     />
                   </td>
-                  {MONTHS_2025.map(ym => (
+                  {DISPLAY_MONTHS.map(ym => (
                     <td key={ym} className="px-4 py-2.5">
                       <EditableCell
                         value={row.monthlyData[ym] ?? 0}
@@ -585,9 +565,9 @@ export default function FinanceIncomePage() {
               </tr>
               <tr className="bg-muted/30">
                 <td colSpan={2} className="px-4 py-2.5 text-muted-foreground text-center text-xs">技师薪酬（同步）</td>
-                {MONTHS_2025.map(ym => (
+                {DISPLAY_MONTHS.map(ym => (
                   <td key={ym} className="px-4 py-2.5 text-muted-foreground text-xs">
-                    {(THERAPIST_SALARY_BY_MONTH[ym] ?? 0).toLocaleString()}
+                    {(ym === curYM ? therapistSalary : 0).toLocaleString()}
                   </td>
                 ))}
                 <td />
@@ -600,7 +580,7 @@ export default function FinanceIncomePage() {
   }
 
   if (activeTab === 'flow') {
-    const flowByMonth = MONTHS_2025.map(ym => ({
+    const flowByMonth = DISPLAY_MONTHS.map(ym => ({
       ym,
       records: flowRecords.filter(r => parseMonthFromDate(r.date) === ym),
       total: flowRecords.filter(r => parseMonthFromDate(r.date) === ym).reduce((s, r) => s + r.amount, 0),
@@ -679,7 +659,7 @@ export default function FinanceIncomePage() {
   }
 
   if (activeTab === 'office') {
-    const officeByMonth = MONTHS_2025.map(ym => ({
+    const officeByMonth = DISPLAY_MONTHS.map(ym => ({
       ym,
       records: officeRecords.filter(r => parseMonthFromDate(r.date) === ym),
       total: officeRecords.filter(r => parseMonthFromDate(r.date) === ym).reduce((s, r) => s + r.amount, 0),
@@ -758,7 +738,7 @@ export default function FinanceIncomePage() {
   }
 
   if (activeTab === 'finance') {
-    const finByMonth = MONTHS_2025.map(ym => ({
+    const finByMonth = DISPLAY_MONTHS.map(ym => ({
       ym,
       records: financeRecords.filter(r => r.month === ym),
       total: financeRecords.filter(r => r.month === ym).reduce((s, r) => s + r.amount, 0),
@@ -947,7 +927,7 @@ export default function FinanceIncomePage() {
                 </tr>
               </thead>
               <tbody>
-                {ORDERS.map(o => (
+                {revenueData.orders.map(o => (
                   <tr key={o.id} className="border-b border-border hover:bg-accent/30 transition-colors">
                     <td className="px-3 py-1.5 font-mono text-brand/80">{o.id}</td>
                     <td className="px-3 py-1.5">{o.customerName}</td>

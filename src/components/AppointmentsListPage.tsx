@@ -1,675 +1,637 @@
-import { useState, useEffect } from 'react';
 import {
-  SearchIcon, FilterIcon, BellIcon, BellOffIcon, ClockIcon, AlertTriangleIcon,
-  ChevronLeftIcon, ChevronRightIcon, MapPinIcon, EditIcon, EyeIcon, XIcon,
-  CheckCircleIcon, CalendarIcon, UserIcon, PhoneIcon
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
+import {
+  AlertTriangleIcon,
+  BellIcon,
+  BellOffIcon,
+  CalendarDaysIcon,
+  ClockIcon,
+  XIcon,
 } from 'lucide-react';
 import type { Appointment } from '../api/endpoints';
+import {
+  useAppointmentMutations,
+  useAppointments,
+} from '../api/hooks';
 import { useApp } from '../hooks/useApp';
-import { useAppointments, useTherapists, useCustomers } from '../api/hooks';
-import { toast } from 'sonner';
+import { RecordActionButtons } from './ui/record-action-buttons';
+import {
+  GlobalMultiSelectFilter,
+  matchesGlobalMultiSelect,
+  type GlobalFilterOption,
+} from './ui/global-multi-select-filter';
+import { mutationErrorMessage } from '../utils/appointmentEdit';
+import {
+  clearDashboardFilter,
+  readDashboardFilter,
+} from '../utils/dashboardTodoNavigation';
+import { DateRangeFilter } from './ui/date-range-filter';
+import { GLOBAL_DATE_RANGE_QUICK_OPTIONS, quickDateRange, type DateRangeValue } from '../utils/dateRange';
+import { useGlobalDateRange } from '../utils/useGlobalDateRange';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+type TimeRange = 'all' | 'today' | 'week' | 'month' | 'custom';
+type NotifyStatus = '需通知' | '已通知' | '延迟' | '遗漏';
 
-type NotifyStatus = '待通知' | '已通知' | '延迟通知' | '遗漏';
+const APPOINTMENT_STATUS_OPTIONS: GlobalFilterOption[] = [
+  { value: '待服务', label: '待服务' },
+  { value: '已完成', label: '已完成' },
+  { value: '取消', label: '取消' },
+];
+const NOTIFY_STATUS_OPTIONS: GlobalFilterOption[] = [
+  { value: '需通知', label: '需通知' },
+  { value: '已通知', label: '已通知' },
+  { value: '延迟', label: '延迟' },
+  { value: '遗漏', label: '遗漏' },
+];
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+const APPOINTMENT_COLUMN_WIDTHS_KEY = 'appointments-list-column-widths-v1';
+const appointmentColumns = [
+  { key: 'customerId', label: '客户ID', width: 5.5, minWidth: 4.5, align: 'text-left' },
+  { key: 'customerName', label: '客户姓名', width: 7, minWidth: 5, align: 'text-left' },
+  { key: 'phone', label: '联系电话', width: 6.5, minWidth: 5, align: 'text-left' },
+  { key: 'area', label: '所在区域', width: 5.5, minWidth: 4.5, align: 'text-left' },
+  { key: 'therapist', label: '技师', width: 7, minWidth: 5, align: 'text-left' },
+  { key: 'date', label: '预约时间', width: 7, minWidth: 5.5, align: 'text-left' },
+  { key: 'time', label: '开始时间', width: 5, minWidth: 4.5, align: 'text-left' },
+  { key: 'status', label: '状态', width: 6, minWidth: 5, align: 'text-left' },
+  { key: 'type', label: '类型', width: 5.5, minWidth: 4.5, align: 'text-left' },
+  { key: 'service', label: '服务内容', width: 18, minWidth: 8, align: 'text-left' },
+  { key: 'advisor', label: '对应客服', width: 6.5, minWidth: 5, align: 'text-left' },
+  { key: 'notify', label: '通知状态', width: 8.5, minWidth: 6, align: 'text-left' },
+  { key: 'actions', label: '操作', width: 12, minWidth: 7, align: 'text-center' },
+] as const;
 
-function getDeadline(apptDate: string): Date {
-  // Deadline = apptDate - 1 day at 20:00:00
-  const d = new Date(apptDate);
-  d.setDate(d.getDate() - 1);
-  d.setHours(20, 0, 0, 0);
-  return d;
+const defaultColumnWidths = appointmentColumns.map(column => column.width);
+
+function loadColumnWidths() {
+  if (typeof window === 'undefined') return defaultColumnWidths;
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(APPOINTMENT_COLUMN_WIDTHS_KEY) || '');
+    if (
+      Array.isArray(saved)
+      && saved.length === appointmentColumns.length
+      && saved.every((width, index) => Number.isFinite(width) && width >= appointmentColumns[index].minWidth)
+    ) {
+      return saved as number[];
+    }
+  } catch {
+    // Ignore invalid or stale browser preferences.
+  }
+  return defaultColumnWidths;
 }
 
-function formatDeadline(apptDate: string): string {
-  const d = getDeadline(apptDate);
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${d.getFullYear()}-${mm}-${dd} 20:00`;
-}
-
-function timeSlotToStart(slot: string): string {
-  if (slot === '上午') return '09:00';
-  if (slot === '下午') return '14:00';
-  if (slot === '晚上') return '18:00';
-  // 形如 "09:00-11:00" → 取 "-" 前半段
-  if (slot.includes('-')) return slot.split('-')[0].trim();
-  return slot;
-}
-
-// ─── Notify Badge ─────────────────────────────────────────────────────────────
-
-const NOTIFY_STYLE: Record<NotifyStatus, { bg: string; text: string; border: string; icon: typeof BellIcon }> = {
-  '待通知': { bg: '#FFFBEB', text: '#B45309', border: '#FCD34D', icon: ClockIcon },
-  '已通知': { bg: '#F0FDF4', text: '#16A34A', border: '#86EFAC', icon: BellIcon },
-  '延迟通知': { bg: '#FFF7ED', text: '#C2410C', border: '#FDBA74', icon: AlertTriangleIcon },
-  '遗漏': { bg: '#FEF2F2', text: '#DC2626', border: '#FCA5A5', icon: BellOffIcon },
+const notifyStyles: Record<NotifyStatus, string> = {
+  需通知: 'border-amber-200 bg-amber-50 text-amber-700',
+  已通知: 'border-green-200 bg-green-50 text-green-700',
+  延迟: 'border-orange-200 bg-orange-50 text-orange-700',
+  遗漏: 'border-red-200 bg-red-50 text-red-700',
 };
 
-function NotifyBadge({ status }: { status: NotifyStatus }) {
-  const s = NOTIFY_STYLE[status];
-  const Icon = s.icon;
+const appointmentStyles: Record<string, string> = {
+  待服务: 'bg-blue-50 text-blue-700',
+  已完成: 'bg-green-50 text-green-700',
+  取消: 'bg-gray-100 text-gray-600',
+};
+
+function formatDate(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function getRange(range: Exclude<TimeRange, 'custom'>) {
+  if (range === 'all') return {};
+  const now = new Date();
+  const from = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const to = new Date(from);
+  if (range === 'week') {
+    const mondayOffset = (from.getDay() + 6) % 7;
+    from.setDate(from.getDate() - mondayOffset);
+    to.setDate(from.getDate() + 6);
+  } else if (range === 'month') {
+    from.setDate(1);
+    to.setMonth(to.getMonth() + 1, 0);
+  }
+  return { from: formatDate(from), to: formatDate(to) };
+}
+
+function startTime(slot: string) {
+  const match = String(slot || '').match(/(\d{1,2}:\d{2})/);
+  if (match) return match[1];
+  if (slot.includes('下午')) return '13:00';
+  if (slot.includes('晚上')) return '18:00';
+  return '09:00';
+}
+
+function Badge({ value, kind }: { value: string; kind: 'notify' | 'appointment' }) {
+  const style = kind === 'notify'
+    ? notifyStyles[value as NotifyStatus] || 'border-gray-200 bg-gray-100 text-gray-600'
+    : appointmentStyles[value] || 'bg-gray-100 text-gray-600';
   return (
-    <span
-      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
-      style={{ background: s.bg, color: s.text, border: `1px solid ${s.border}` }}
-    >
-      <Icon size={11} />
-      {status}
+    <span className={`inline-flex items-center whitespace-nowrap rounded px-1.5 py-1 text-xs font-medium ${style} ${kind === 'notify' ? 'border' : ''}`}>
+      {value}
     </span>
   );
 }
 
-// ─── Edit Modal ───────────────────────────────────────────────────────────────
-
-interface EditModalProps {
-  appt: Appointment | null;
-  currentStatus: NotifyStatus;
+function AppointmentModal({
+  appointment,
+  mode,
+  canEditNotification,
+  saving,
+  onClose,
+  onEdit,
+  onSave,
+}: {
+  appointment: Appointment | null;
+  mode: 'view' | 'edit';
+  canEditNotification: boolean;
+  saving: boolean;
   onClose: () => void;
-  onSave: (apptId: string, status: NotifyStatus) => void;
-}
+  onEdit: () => void;
+  onSave: (body: Partial<Appointment>) => Promise<void>;
+}) {
+  const [notifyStatus, setNotifyStatus] = useState<NotifyStatus | ''>('');
 
-function EditModal({ appt, currentStatus, onClose, onSave }: EditModalProps) {
-  const [draft, setDraft] = useState<NotifyStatus>(currentStatus);
-
-  // Sync draft when target changes
   useEffect(() => {
-    setDraft(currentStatus);
-  }, [currentStatus, appt]);
+    if (!appointment) return;
+    setNotifyStatus(appointment.notifyStatus || '');
+  }, [appointment]);
 
-  const visible = !!appt;
+  if (!appointment) return null;
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    await onSave({ notifyStatus: notifyStatus || undefined });
+  };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center transition-opacity duration-200"
-      style={{ background: 'rgba(0,0,0,0.45)', opacity: visible ? 1 : 0, pointerEvents: visible ? 'auto' : 'none' }}
-    >
-      <div
-        className="rounded-2xl shadow-custom overflow-hidden"
-        style={{ width: 420, background: 'var(--card)' }}
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onMouseDown={onClose}>
+      <form
+        className={`flex w-full flex-col overflow-hidden rounded-2xl bg-white shadow-xl ${mode === 'edit' ? 'max-w-md' : 'max-h-[92vh] max-w-3xl'}`}
+        onSubmit={submit}
+        onMouseDown={event => event.stopPropagation()}
       >
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4" style={{ borderBottom: '1px solid var(--border)' }}>
-          <span className="font-bold text-base text-foreground">编辑通知状态</span>
-          <button className="p-1.5 rounded-lg hover:bg-muted transition-colors" onClick={onClose}>
-            <XIcon size={16} style={{ color: 'var(--muted-foreground)' }} />
+        <div className="flex items-center justify-between border-b px-6 py-4">
+          <div>
+            <h3 className="text-lg font-semibold">{mode === 'edit' ? '修改通知状态' : '预约详情'}</h3>
+            <p className="mt-1 text-xs text-gray-500">{appointment.customerName} · {appointment.customerId}</p>
+          </div>
+          <button type="button" className="rounded p-2 hover:bg-gray-100" onClick={onClose} title="关闭">
+            <XIcon size={20} />
           </button>
         </div>
-
-        {/* Body */}
-        <div className="px-6 py-5 flex flex-col gap-5">
-          {/* Appt summary */}
-          {appt && (
-            <div className="rounded-xl px-4 py-3 flex items-center gap-3" style={{ background: 'var(--muted)', border: '1px solid var(--border)' }}>
-              <div
-                className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold text-white flex-shrink-0"
-                style={{ background: 'var(--brand)' }}
-              >
-                {appt.customerName[0]}
-              </div>
-              <div>
-                <div className="font-semibold text-sm text-foreground">{appt.customerName}</div>
-                <div className="text-xs mt-0.5 flex items-center gap-1.5" style={{ color: 'var(--muted-foreground)' }}>
-                  <CalendarIcon size={11} />
-                  {appt.date} · {appt.timeSlot} · {appt.service}
+        <div className="overflow-y-auto p-6">
+          {mode === 'edit' ? (
+            <>
+              <div className="rounded-lg border bg-gray-50 px-4 py-3 text-sm text-gray-600">
+                <div className="flex justify-between gap-4">
+                  <span>预约时间</span>
+                  <span className="font-medium text-gray-900">{appointment.date} {startTime(appointment.timeSlot)}</span>
+                </div>
+                <div className="mt-2 flex justify-between gap-4">
+                  <span>服务技师</span>
+                  <span className="font-medium text-gray-900">{appointment.therapistName || '—'}</span>
                 </div>
               </div>
+              <label className="mt-5 block text-sm text-gray-600">
+                通知状态
+                <select
+                  required
+                  value={notifyStatus}
+                  disabled={!canEditNotification}
+                  onChange={event => setNotifyStatus(event.target.value as NotifyStatus)}
+                  className="mt-2 h-11 w-full rounded border bg-white px-3 text-gray-900 outline-none focus:border-blue-500 disabled:bg-gray-100"
+                >
+                  <option value="">请选择通知状态</option>
+                  {NOTIFY_STATUS_OPTIONS.map(option => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </label>
+              <p className="mt-3 text-xs leading-5 text-gray-500">
+                预约时间、技师、服务内容、状态及备注均由排期管理同步，请在排期管理中调整。
+              </p>
+            </>
+          ) : (
+            <>
+          <section className="rounded-lg border bg-gray-50/60 p-5">
+            <h4 className="mb-4 font-semibold text-gray-900">客户信息</h4>
+            <div className="grid grid-cols-2 gap-x-8 gap-y-5">
+              {[
+                ['客户ID', appointment.customerId],
+                ['客户姓名', appointment.customerName],
+                ['联系电话', appointment.customerPhone || '—'],
+                ['对应客服', appointment.advisorName || '—'],
+              ].map(([label, value]) => (
+                <div key={label}>
+                  <div className="mb-1 text-xs text-gray-500">{label}</div>
+                  <div className="text-sm text-gray-900">{value}</div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="mt-5 rounded-lg border p-5">
+            <h4 className="mb-4 font-semibold text-gray-900">预约信息</h4>
+              <div className="grid grid-cols-2 gap-x-8 gap-y-5">
+                {[
+                  ['服务技师', appointment.therapistName || '—'],
+                  ['所在区域', appointment.area || '—'],
+                  ['预约日期', appointment.date],
+                  ['开始时间', startTime(appointment.timeSlot)],
+                  ['预约状态', appointment.status],
+                  ['类型', appointment.orderType || '体验卡'],
+                  ['通知状态', appointment.notifyStatus || '—'],
+                  ['服务内容', appointment.serviceContent || appointment.service || '—'],
+                  ['备注', appointment.remark || '—'],
+                ].map(([label, value]) => (
+                  <div key={label} className={label === '服务内容' || label === '备注' ? 'col-span-2' : ''}>
+                    <div className="mb-1 text-xs text-gray-500">{label}</div>
+                    <div className="whitespace-pre-wrap text-sm text-gray-900">{value}</div>
+                  </div>
+                ))}
+              </div>
+          </section>
+          {appointment.notifyError && (
+            <div className="mt-5 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              企业微信推送异常：{appointment.notifyError}
             </div>
           )}
-
-          {/* Status select */}
-          <div>
-            <label className="text-sm font-medium text-foreground mb-2 block">通知状态</label>
-            <select
-              className="w-full rounded-lg px-3 py-2.5 text-sm outline-none"
-              style={{ background: 'var(--muted)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
-              value={draft}
-              onChange={e => setDraft(e.target.value as NotifyStatus)}
-            >
-              {(['待通知', '已通知', '延迟通知', '遗漏'] as NotifyStatus[]).map(s => (
-                <option key={s} value={s}>{s}</option>
-              ))}
-            </select>
-            {/* Preview badge */}
-            <div className="mt-2 flex items-center gap-2">
-              <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>预览：</span>
-              <NotifyBadge status={draft} />
-            </div>
-          </div>
+            </>
+          )}
         </div>
-
-        {/* Footer */}
-        <div className="flex justify-end gap-2 px-6 py-4" style={{ borderTop: '1px solid var(--border)' }}>
-          <button
-            className="px-4 py-2 rounded-lg text-sm font-medium transition-colors hover:bg-muted"
-            style={{ color: 'var(--muted-foreground)', border: '1px solid var(--border)' }}
-            onClick={onClose}
-          >
-            取消
-          </button>
-          <button
-            className="px-4 py-2 rounded-lg text-sm font-medium text-white transition-opacity hover:opacity-90"
-            style={{ background: 'var(--brand)' }}
-            onClick={() => { if (appt) onSave(appt.id, draft); }}
-          >
-            保存
-          </button>
+        <div className="flex justify-end gap-3 border-t px-6 py-4">
+          {mode === 'view' ? (
+            <>
+              <button type="button" className="h-10 rounded border px-5 text-sm hover:bg-gray-50" onClick={onClose}>
+                关闭
+              </button>
+              {canEditNotification && (
+                <button type="button" className="h-10 rounded bg-blue-500 px-5 text-sm text-white hover:bg-blue-600" onClick={onEdit}>
+                  修改通知状态
+                </button>
+              )}
+            </>
+          ) : (
+            <>
+              <button type="button" className="h-10 rounded border px-5 text-sm hover:bg-gray-50" onClick={onClose}>
+                取消
+              </button>
+              <button
+                type="submit"
+                disabled={saving}
+                className="h-10 rounded bg-blue-500 px-5 text-sm text-white hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {saving ? '保存中...' : '保存修改'}
+              </button>
+            </>
+          )}
         </div>
-      </div>
+      </form>
     </div>
   );
 }
 
-// ─── Detail Modal ─────────────────────────────────────────────────────────────
-
-interface DetailModalProps {
-  appt: Appointment | null;
-  notifyStatus: NotifyStatus;
-  onClose: () => void;
-}
-
-function DetailModal({ appt, notifyStatus, onClose }: DetailModalProps) {
-  const visible = !!appt;
-  const customersQ = useCustomers({ page: 1, pageSize: 1000 });
-  const customers: any[] = customersQ.data?.data ?? [];
-
-  if (!appt) {
-    return (
-      <div
-        className="fixed inset-0 z-50 flex items-center justify-center"
-        style={{ background: 'rgba(0,0,0,0.45)', opacity: 0, pointerEvents: 'none' }}
-      />
-    );
-  }
-
-  const customer = customers.find(c => c.id === appt.customerId) ?? null;
-  const deadline = formatDeadline(appt.date);
-
-  function InfoRow({ label, children }: { label: string; children: React.ReactNode }) {
-    return (
-      <div className="flex items-start gap-2 py-2" style={{ borderBottom: '1px solid var(--border)' }}>
-        <span className="text-xs w-20 flex-shrink-0 pt-0.5" style={{ color: 'var(--muted-foreground)' }}>{label}</span>
-        <span className="text-sm text-foreground flex-1">{children}</span>
-      </div>
-    );
-  }
-
-  function SectionTitle({ title }: { title: string }) {
-    return (
-      <div className="flex items-center gap-2 mt-4 mb-1">
-        <div className="w-1 h-4 rounded-full" style={{ background: 'var(--brand)' }} />
-        <span className="text-xs font-bold uppercase tracking-wide" style={{ color: 'var(--brand)' }}>{title}</span>
-      </div>
-    );
-  }
-
-  const APPT_STATUS_STYLE: Record<string, { bg: string; text: string }> = {
-    '已确认': { bg: '#F0FDF4', text: '#16A34A' },
-    '待确认': { bg: '#FFFBEB', text: '#B45309' },
-    '已取消': { bg: '#F5F5F5', text: '#757575' },
-    '已完成': { bg: '#EFF6FF', text: '#1D4ED8' },
-  };
-  const apptStyle = APPT_STATUS_STYLE[appt.status] ?? { bg: '#F5F5F5', text: '#757575' };
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center transition-opacity duration-200"
-      style={{ background: 'rgba(0,0,0,0.45)', opacity: visible ? 1 : 0, pointerEvents: visible ? 'auto' : 'none' }}
-    >
-      <div
-        className="rounded-2xl shadow-custom flex flex-col overflow-hidden"
-        style={{ width: 520, maxHeight: '88vh', background: 'var(--card)' }}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 flex-shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>
-          <div className="flex items-center gap-3">
-            <div
-              className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold text-white flex-shrink-0"
-              style={{ background: 'var(--brand)' }}
-            >
-              {appt.customerName[0]}
-            </div>
-            <div>
-              <div className="font-bold text-base text-foreground">{appt.customerName}</div>
-              <div className="text-xs mt-0.5 font-mono" style={{ color: 'var(--muted-foreground)' }}>{appt.id}</div>
-            </div>
-          </div>
-          <button className="p-1.5 rounded-lg hover:bg-muted transition-colors" onClick={onClose}>
-            <XIcon size={16} style={{ color: 'var(--muted-foreground)' }} />
-          </button>
-        </div>
-
-        {/* Body */}
-        <div className="flex-1 overflow-y-auto px-6 py-4">
-          {/* Basic info */}
-          <SectionTitle title="基本信息" />
-          <InfoRow label="客户 ID">
-            <span className="font-mono text-xs" style={{ color: 'var(--brand)' }}>{appt.customerId}</span>
-          </InfoRow>
-          <InfoRow label="客户姓名">{appt.customerName}</InfoRow>
-          <InfoRow label="联系电话">
-            {customer?.phone
-              ? <span className="flex items-center gap-1"><PhoneIcon size={12} style={{ color: 'var(--muted-foreground)' }} />{customer.phone}</span>
-              : <span style={{ color: 'var(--muted-foreground)' }}>—</span>
-            }
-          </InfoRow>
-          <InfoRow label="所在区域">
-            {appt.area
-              ? <span className="flex items-center gap-1"><MapPinIcon size={12} style={{ color: 'var(--muted-foreground)' }} />{appt.area}</span>
-              : <span style={{ color: 'var(--muted-foreground)' }}>—</span>
-            }
-          </InfoRow>
-          <InfoRow label="对应客服">
-            {customer?.advisor
-              ? <span className="flex items-center gap-1"><UserIcon size={12} style={{ color: 'var(--muted-foreground)' }} />{customer.advisor}</span>
-              : <span style={{ color: 'var(--muted-foreground)' }}>—</span>
-            }
-          </InfoRow>
-
-          {/* Appointment info */}
-          <SectionTitle title="预约信息" />
-          <InfoRow label="技师">{appt.therapistName}</InfoRow>
-          <InfoRow label="预约日期">
-            <span className="flex items-center gap-1"><CalendarIcon size={12} style={{ color: 'var(--muted-foreground)' }} />{appt.date}</span>
-          </InfoRow>
-          <InfoRow label="开始时间">{timeSlotToStart(appt.timeSlot)}</InfoRow>
-          <InfoRow label="服务项目">
-            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium" style={{ background: '#EFF6FF', color: '#1D4ED8', border: '1px solid #93C5FD' }}>
-              {appt.service}
-            </span>
-          </InfoRow>
-          <InfoRow label="预约状态">
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium" style={{ background: apptStyle.bg, color: apptStyle.text }}>
-              <CheckCircleIcon size={10} />
-              {appt.status}
-            </span>
-          </InfoRow>
-
-          {/* Notify info */}
-          <SectionTitle title="通知信息" />
-          <InfoRow label="通知状态"><NotifyBadge status={notifyStatus} /></InfoRow>
-          <InfoRow label="通知截止">
-            <span style={{ color: 'var(--muted-foreground)' }}>{deadline}</span>
-          </InfoRow>
-          <InfoRow label="备注">
-            <span style={{ color: appt.remark ? 'var(--foreground)' : 'var(--muted-foreground)' }}>
-              {appt.remark || '—'}
-            </span>
-          </InfoRow>
-        </div>
-
-        {/* Footer */}
-        <div className="flex justify-end px-6 py-4 flex-shrink-0" style={{ borderTop: '1px solid var(--border)' }}>
-          <button
-            className="px-5 py-2 rounded-lg text-sm font-medium transition-colors hover:opacity-90 text-white"
-            style={{ background: 'var(--brand)' }}
-            onClick={onClose}
-          >
-            关闭
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── Main Page ────────────────────────────────────────────────────────────────
-
-export default function AppointmentsListPage() {
+export function AppointmentsListPage() {
   const { currentUser } = useApp();
-  const isTherapist = currentUser.role === 'therapist';
-
-  const apptsQ = useAppointments({ page: 1, pageSize: 1000 });
-  const customersQ = useCustomers({ page: 1, pageSize: 1000 });
-  const therapistsQ = useTherapists({ page: 1, pageSize: 1000 });
-  const APPOINTMENTS: Appointment[] = apptsQ.data?.data ?? [];
-  const CUSTOMERS: any[] = customersQ.data?.data ?? [];
-  const THERAPISTS: any[] = therapistsQ.data?.data ?? [];
-
-  function getCustomer(customerId: string) {
-    return CUSTOMERS.find(c => c.id === customerId) ?? null;
-  }
-
-  // Initialize all as '待通知'
-  const [notifyStatusMap, setNotifyStatusMap] = useState<Record<string, NotifyStatus>>({});
-
-  // Sync new appointments to '待通知' default + auto-promote overdue ones to '延迟通知'
-  useEffect(() => {
-    if (APPOINTMENTS.length === 0) return;
-    const now = new Date();
-    const updates: Record<string, NotifyStatus> = {};
-    const advisorSet = new Set<string>();
-
-    APPOINTMENTS.forEach(appt => {
-      const deadline = getDeadline(appt.date);
-      if (now > deadline) {
-        updates[appt.id] = '延迟通知';
-        const cust = getCustomer(appt.customerId);
-        if (cust?.advisor) advisorSet.add(cust.advisor);
-      } else if (notifyStatusMap[appt.id] === undefined) {
-        updates[appt.id] = '待通知';
-      }
-    });
-
-    if (Object.keys(updates).length > 0) {
-      setNotifyStatusMap(prev => ({ ...prev, ...updates }));
-      advisorSet.forEach(advisor => {
-        toast.warning(`已发送通知提醒至 ${advisor}`);
-      });
+  const canEditNotification = ['superadmin', 'admin', 'service'].includes(currentUser.role);
+  const [timeRange, setTimeRange] = useState<TimeRange>('all');
+  const [appointmentDateRange, setAppointmentDateRange] = useGlobalDateRange('all');
+  const [notifyFilters, setNotifyFilters] = useState<string[]>(() => {
+    const filter = readDashboardFilter();
+    if (filter.appointmentNotifyStatus === '需通知') {
+      clearDashboardFilter();
+      return ['需通知'];
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [APPOINTMENTS.length]);
+    return [];
+  });
+  const [appointmentFilters, setAppointmentFilters] = useState<string[]>([]);
+  const [therapistFilters, setTherapistFilters] = useState<string[]>([]);
+  const [selectedAdvisors, setSelectedAdvisors] = useState<string[]>([]);
+  const [appointmentModal, setAppointmentModal] = useState<{
+    appointment: Appointment;
+    mode: 'view' | 'edit';
+  } | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [columnWidths, setColumnWidths] = useState<number[]>(loadColumnWidths);
+  const [resizingColumn, setResizingColumn] = useState<number | null>(null);
+  const tableRef = useRef<HTMLTableElement>(null);
+  const resizeRef = useRef<{
+    index: number;
+    startX: number;
+    leftWidth: number;
+    rightWidth: number;
+    tableWidth: number;
+  } | null>(null);
+  const range = useMemo(
+    () => appointmentDateRange.start || appointmentDateRange.end
+      ? { from: appointmentDateRange.start, to: appointmentDateRange.end }
+      : {},
+    [appointmentDateRange.start, appointmentDateRange.end]
+  );
+  const query = useAppointments({ page: 1, pageSize: 2000, ...range });
+  const appointmentMutations = useAppointmentMutations();
+  const appointments = query.data?.data || [];
 
-  // Filters
-  const [search, setSearch] = useState('');
-  const [notifyFilter, setNotifyFilter] = useState('__all__');
-  const [therapistFilter, setTherapistFilter] = useState('__all__');
-  const [page, setPage] = useState(1);
-  const pageSize = 10;
+  useEffect(() => {
+    window.localStorage.setItem(APPOINTMENT_COLUMN_WIDTHS_KEY, JSON.stringify(columnWidths));
+  }, [columnWidths]);
 
-  // Modals
-  const [editTarget, setEditTarget] = useState<Appointment | null>(null);
-  const [detailTarget, setDetailTarget] = useState<Appointment | null>(null);
+  useEffect(() => {
+    if (resizingColumn === null) return;
 
-  // Derived counts
-  const counts = {
-    total: APPOINTMENTS.length,
-    waiting: Object.values(notifyStatusMap).filter(s => s === '待通知').length,
-    done: Object.values(notifyStatusMap).filter(s => s === '已通知').length,
-    delayed: Object.values(notifyStatusMap).filter(s => s === '延迟通知').length,
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
+    const resize = (event: PointerEvent) => {
+      const state = resizeRef.current;
+      if (!state) return;
+      const delta = ((event.clientX - state.startX) / state.tableWidth) * 100;
+      const pairWidth = state.leftWidth + state.rightWidth;
+      const leftMinimum = appointmentColumns[state.index].minWidth;
+      const rightMinimum = appointmentColumns[state.index + 1].minWidth;
+      const nextLeft = Math.min(
+        pairWidth - rightMinimum,
+        Math.max(leftMinimum, state.leftWidth + delta)
+      );
+
+      setColumnWidths(current => {
+        const next = [...current];
+        next[state.index] = nextLeft;
+        next[state.index + 1] = pairWidth - nextLeft;
+        return next;
+      });
+    };
+
+    const stop = () => {
+      resizeRef.current = null;
+      setResizingColumn(null);
+    };
+
+    document.addEventListener('pointermove', resize);
+    document.addEventListener('pointerup', stop, { once: true });
+    return () => {
+      document.removeEventListener('pointermove', resize);
+      document.removeEventListener('pointerup', stop);
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
+    };
+  }, [resizingColumn]);
+
+  const startColumnResize = (event: ReactPointerEvent<HTMLButtonElement>, index: number) => {
+    if (!tableRef.current || index >= appointmentColumns.length - 1) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const tableWidth = tableRef.current.getBoundingClientRect().width;
+    if (!tableWidth) return;
+    resizeRef.current = {
+      index,
+      startX: event.clientX,
+      leftWidth: columnWidths[index],
+      rightWidth: columnWidths[index + 1],
+      tableWidth,
+    };
+    setResizingColumn(index);
   };
 
-  // Filter
-  const filtered = APPOINTMENTS.filter(a => {
-    const cust = getCustomer(a.customerId);
-    const advisor = cust?.advisor ?? '';
-    const q = search.toLowerCase();
-    const matchSearch = !search
-      || a.customerName.toLowerCase().includes(q)
-      || a.therapistName.toLowerCase().includes(q)
-      || advisor.toLowerCase().includes(q);
-    const matchNotify = notifyFilter === '__all__' || notifyStatusMap[a.id] === notifyFilter;
-    const matchTherapist = therapistFilter === '__all__' || a.therapistId === therapistFilter;
-    return matchSearch && matchNotify && matchTherapist;
-  });
+  const advisors = useMemo(
+    () => Array.from(new Set(appointments.map(item => item.advisorName).filter(Boolean) as string[])).sort(),
+    [appointments]
+  );
+  const therapistNames = useMemo(
+    () => Array.from(new Set(appointments.map(item => item.therapistName).filter(Boolean))).sort(),
+    [appointments]
+  );
+  const advisorOptions = useMemo<GlobalFilterOption[]>(
+    () => advisors.map(name => ({ value: name, label: name })),
+    [advisors]
+  );
+  const therapistOptions = useMemo<GlobalFilterOption[]>(
+    () => therapistNames.map(name => ({ value: name, label: name })),
+    [therapistNames]
+  );
+  const filtered = useMemo(() => appointments.filter(item => {
+    if (!matchesGlobalMultiSelect(item.notifyStatus || '', notifyFilters)) return false;
+    if (!matchesGlobalMultiSelect(item.status, appointmentFilters)) return false;
+    if (!matchesGlobalMultiSelect(item.therapistName || '', therapistFilters)) return false;
+    if (!matchesGlobalMultiSelect(item.advisorName || '', selectedAdvisors)) return false;
+    return true;
+  }), [appointments, notifyFilters, appointmentFilters, therapistFilters, selectedAdvisors]);
 
-  const totalPages = Math.ceil(filtered.length / pageSize);
-  const paginated = filtered.slice((page - 1) * pageSize, page * pageSize);
+  const notifyCounts = useMemo(() => ({
+    需通知: filtered.filter(item => item.notifyStatus === '需通知').length,
+    已通知: filtered.filter(item => item.notifyStatus === '已通知').length,
+    延迟: filtered.filter(item => item.notifyStatus === '延迟').length,
+    遗漏: filtered.filter(item => item.notifyStatus === '遗漏').length,
+  }), [filtered]);
 
-  function handleFilterChange(setter: (v: string) => void) {
-    return (v: string) => { setter(v); setPage(1); };
-  }
-
-  function handleSaveNotify(apptId: string, status: NotifyStatus) {
-    setNotifyStatusMap(prev => ({ ...prev, [apptId]: status }));
-    setEditTarget(null);
-    toast.success('通知状态已更新');
-  }
-
-  // Summary cards config
   const summaryCards = [
-    { label: '预约总数', value: counts.total, color: 'var(--brand)', icon: CalendarIcon, bg: '#EFF6FF' },
-    { label: '待通知', value: counts.waiting, color: '#B45309', icon: ClockIcon, bg: '#FFFBEB' },
-    { label: '已通知', value: counts.done, color: '#16A34A', icon: BellIcon, bg: '#F0FDF4' },
-    { label: '延迟通知', value: counts.delayed, color: '#F97316', icon: AlertTriangleIcon, bg: '#FFF7ED' },
+    { label: '预约总数', value: filtered.length, icon: CalendarDaysIcon, color: 'text-blue-600', bg: 'bg-blue-50' },
+    { label: '需通知', value: notifyCounts.需通知, icon: ClockIcon, color: 'text-amber-600', bg: 'bg-amber-50' },
+    { label: '已通知', value: notifyCounts.已通知, icon: BellIcon, color: 'text-green-600', bg: 'bg-green-50' },
+    { label: '延迟', value: notifyCounts.延迟, icon: AlertTriangleIcon, color: 'text-orange-600', bg: 'bg-orange-50' },
+    { label: '遗漏', value: notifyCounts.遗漏, icon: BellOffIcon, color: 'text-red-600', bg: 'bg-red-50' },
   ];
 
+  const saveAppointment = async (body: Partial<Appointment>) => {
+    if (!appointmentModal) return;
+    setSaving(true);
+    try {
+      const id = appointmentModal.appointment._id || appointmentModal.appointment.id;
+      if (
+        canEditNotification
+        && body.notifyStatus
+        && body.notifyStatus !== appointmentModal.appointment.notifyStatus
+      ) {
+        await appointmentMutations.patchNotificationStatus({
+          id,
+          status: body.notifyStatus,
+        });
+      }
+      setAppointmentModal(null);
+    } catch (error) {
+      window.alert(mutationErrorMessage(error, '预约保存失败，请稍后重试'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
-    <div data-cmp="AppointmentsListPage" className="flex flex-col gap-4">
-      {/* Summary cards */}
-      <div className="flex gap-4">
-        {summaryCards.map(card => {
-          const Icon = card.icon;
-          return (
-            <div key={card.label} className="flex-1 bg-card rounded-xl p-4 shadow-custom">
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-sm font-medium" style={{ color: 'var(--muted-foreground)' }}>{card.label}</span>
-                <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: card.bg }}>
-                  <Icon size={15} style={{ color: card.color }} />
-                </div>
-              </div>
-              <div className="text-2xl font-bold" style={{ color: card.color }}>{card.value}</div>
+    <div className="space-y-5">
+      <div className="grid grid-cols-5 gap-4">
+        {summaryCards.map(card => (
+          <div key={card.label} className="rounded-lg bg-white p-5 shadow-sm">
+            <div className="flex items-start justify-between">
+              <span className="text-sm text-gray-500">{card.label}</span>
+              <span className={`rounded-lg p-2 ${card.bg} ${card.color}`}><card.icon size={18} /></span>
             </div>
-          );
-        })}
+            <div className={`mt-3 text-3xl font-semibold ${card.color}`}>{card.value}</div>
+          </div>
+        ))}
       </div>
 
-      {/* Filters */}
-      <div className="bg-card rounded-xl px-4 py-3 shadow-custom flex flex-wrap items-center gap-3">
-        <div
-          className="flex items-center gap-2 px-3 py-1.5 rounded-lg"
-          style={{ background: 'var(--muted)', border: '1px solid var(--border)', minWidth: 220 }}
-        >
-          <SearchIcon size={14} style={{ color: 'var(--muted-foreground)' }} />
-          <input
-            className="bg-transparent outline-none text-sm flex-1"
-            style={{ color: 'var(--foreground)' }}
-            placeholder="搜索客户姓名 / 技师 / 客服"
-            value={search}
-            onChange={e => { handleFilterChange(setSearch)(e.target.value); }}
+      <div className="rounded-lg bg-white p-4 shadow-sm">
+        <div className="flex flex-nowrap items-center justify-start gap-3">
+          <DateRangeFilter
+            label="预约时间范围"
+            value={appointmentDateRange}
+            onChange={value => { setAppointmentDateRange(value); setTimeRange('custom'); }}
+            quickOptions={GLOBAL_DATE_RANGE_QUICK_OPTIONS}
+            onQuickSelect={value => setTimeRange(
+              value === 'all' || value === 'today' || value === 'week' || value === 'month'
+                ? value
+                : 'custom',
+            )}
+          />
+          <div className="hidden">
+            {([
+              ['all', '全部'],
+              ['today', '今日'],
+              ['week', '本周'],
+              ['month', '本月'],
+            ] as Array<[Exclude<TimeRange, 'custom'>, string]>).map(([value, label]) => (
+              <button
+                type="button"
+                key={value}
+                onClick={() => { setTimeRange(value); setAppointmentDateRange(quickDateRange(value)); }}
+                className={`h-8 rounded px-3 text-sm ${timeRange === value ? 'bg-blue-500 text-white' : 'text-gray-600 hover:bg-white'}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <GlobalMultiSelectFilter
+            label="客服"
+            options={advisorOptions}
+            selected={selectedAdvisors}
+            onChange={setSelectedAdvisors}
+            width={200}
+          />
+          <GlobalMultiSelectFilter
+            label="预约状态"
+            options={APPOINTMENT_STATUS_OPTIONS}
+            selected={appointmentFilters}
+            onChange={setAppointmentFilters}
+          />
+          <GlobalMultiSelectFilter
+            label="通知状态"
+            options={NOTIFY_STATUS_OPTIONS}
+            selected={notifyFilters}
+            onChange={setNotifyFilters}
+          />
+          <GlobalMultiSelectFilter
+            label="技师"
+            options={therapistOptions}
+            selected={therapistFilters}
+            onChange={setTherapistFilters}
+            width={200}
           />
         </div>
-
-        {/* Notify status filter */}
-        <select
-          className="text-sm rounded-lg px-2 py-1.5 outline-none"
-          style={{ background: 'var(--muted)', color: 'var(--foreground)', border: '1px solid var(--border)', height: 36 }}
-          value={notifyFilter}
-          onChange={e => handleFilterChange(setNotifyFilter)(e.target.value)}
-        >
-          <option value="__all__">全部通知状态</option>
-          {(['待通知', '已通知', '延迟通知', '遗漏'] as NotifyStatus[]).map(s => (
-            <option key={s} value={s}>{s}</option>
-          ))}
-        </select>
-
-        {/* Therapist filter */}
-        {!isTherapist && (
-          <select
-            className="text-sm rounded-lg px-2 py-1.5 outline-none"
-            style={{ background: 'var(--muted)', color: 'var(--foreground)', border: '1px solid var(--border)', height: 36 }}
-            value={therapistFilter}
-            onChange={e => handleFilterChange(setTherapistFilter)(e.target.value)}
-          >
-            <option value="__all__">全部技师</option>
-            {THERAPISTS.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-          </select>
-        )}
-
-        <div className="flex-1" />
-        <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--muted-foreground)' }}>
-          <FilterIcon size={14} />
-          共 <strong className="text-foreground">{filtered.length}</strong> 条预约
-        </div>
       </div>
 
-      {/* Table */}
-      <div className="bg-card rounded-xl shadow-custom overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="data-table w-full text-center" style={{ minWidth: 1100 }}>
-            <thead>
+      <div className="overflow-hidden rounded-lg bg-white shadow-sm">
+        <div className="w-full overflow-hidden">
+          <table ref={tableRef} className="w-full table-fixed text-[13px]">
+            <colgroup>
+              {appointmentColumns.map((column, index) => (
+                <col key={column.key} style={{ width: `${columnWidths[index]}%` }} />
+              ))}
+            </colgroup>
+            <thead className="sticky top-0 z-10 bg-gray-50 text-gray-500">
               <tr>
-                <th style={{ minWidth: 80, textAlign: 'center' }}>客户 ID</th>
-                <th style={{ minWidth: 80, textAlign: 'center' }}>客户姓名</th>
-                <th style={{ minWidth: 100, textAlign: 'center' }}>联系电话</th>
-                <th style={{ minWidth: 80, textAlign: 'center' }}>所在区域</th>
-                <th style={{ minWidth: 80, textAlign: 'center' }}>技师</th>
-                <th style={{ minWidth: 90, textAlign: 'center' }}>预约时间</th>
-                <th style={{ minWidth: 70, textAlign: 'center' }}>开始时间</th>
-                <th style={{ minWidth: 120, textAlign: 'center' }}>服务项目</th>
-                <th style={{ minWidth: 80, textAlign: 'center' }}>对应客服</th>
-                <th style={{ minWidth: 110, textAlign: 'center' }}>通知状态</th>
-                <th style={{ minWidth: 100, textAlign: 'center' }}>备注</th>
-                <th style={{ minWidth: 80, textAlign: 'center' }}>操作</th>
+                {appointmentColumns.map((column, index) => (
+                  <th
+                    key={column.key}
+                    className={`relative select-none py-3 ${index === 0 ? 'pl-4 pr-1' : 'px-1'} ${column.align}`}
+                  >
+                    <span className="block truncate">{column.label}</span>
+                    {index < appointmentColumns.length - 1 && (
+                      <button
+                        type="button"
+                        aria-label={`调整${column.label}列宽`}
+                        title="拖动调整列宽"
+                        onPointerDown={event => startColumnResize(event, index)}
+                        className={`group absolute right-0 top-0 z-20 h-full w-2 translate-x-1/2 cursor-col-resize touch-none ${
+                          resizingColumn === index ? 'bg-blue-100/50' : ''
+                        }`}
+                      >
+                        <span className={`absolute right-1 top-1/4 h-1/2 w-px ${
+                          resizingColumn === index ? 'bg-blue-500' : 'bg-gray-300 group-hover:bg-blue-500'
+                        }`} />
+                      </button>
+                    )}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
-              {paginated.map(appt => {
-                const customer = getCustomer(appt.customerId);
-                const phone = customer?.phone ?? '—';
-                const advisor = customer?.advisor ?? '—';
-                const notifyStatus = notifyStatusMap[appt.id] ?? '待通知';
-
-                return (
-                  <tr key={appt.id}>
-                    {/* 客户 ID */}
-                    <td className="text-center">
-                      <span className="font-mono text-xs" style={{ color: 'var(--muted-foreground)' }}>{appt.customerId}</span>
-                    </td>
-
-                    {/* 客户姓名 */}
-                    <td className="text-center">
-                      <span className="font-medium text-sm">{appt.customerName}</span>
-                    </td>
-
-                    {/* 联系电话 */}
-                    <td>
-                      <div className="flex items-center justify-center gap-1 text-sm" style={{ color: 'var(--muted-foreground)' }}>
-                        <PhoneIcon size={11} />
-                        {phone}
-                      </div>
-                    </td>
-
-                    {/* 所在区域 */}
-                    <td className="text-center text-sm" style={{ color: 'var(--muted-foreground)' }}>
-                      {appt.area || '—'}
-                    </td>
-
-                    {/* 技师 */}
-                    <td className="text-center text-sm" style={{ color: 'var(--foreground)' }}>
-                      {appt.therapistName}
-                    </td>
-
-                    {/* 预约时间 */}
-                    <td className="text-center text-sm" style={{ color: 'var(--foreground)' }}>
-                      {appt.date}
-                    </td>
-
-                    {/* 开始时间 */}
-                    <td className="text-center text-sm" style={{ color: 'var(--muted-foreground)' }}>
-                      {timeSlotToStart(appt.timeSlot)}
-                    </td>
-
-                    {/* 服务项目 */}
-                    <td>
-                      <span
-                        className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
-                        style={{ background: '#EFF6FF', color: '#1D4ED8', border: '1px solid #93C5FD', maxWidth: 140, wordBreak: 'break-all', whiteSpace: 'normal' }}
-                      >
-                        {appt.service}
-                      </span>
-                    </td>
-
-                    {/* 对应客服 */}
-                    <td className="text-center text-sm" style={{ color: 'var(--muted-foreground)' }}>
-                      {advisor}
-                    </td>
-
-                    {/* 通知状态 */}
-                    <td>
-                      <NotifyBadge status={notifyStatus} />
-                    </td>
-
-                    {/* 备注 */}
-                    <td>
-                      <span
-                        className="text-xs"
-                        style={{ color: appt.remark ? 'var(--foreground)' : 'var(--muted-foreground)', maxWidth: 100, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                        title={appt.remark}
-                      >
-                        {appt.remark || '—'}
-                      </span>
-                    </td>
-
-                    {/* 操作 */}
-                    <td>
-                      <div className="flex items-center gap-1">
-                        <button
-                          className="p-1.5 rounded hover:bg-muted transition-colors"
-                          title="编辑通知状态"
-                          onClick={() => setEditTarget(appt)}
-                        >
-                          <EditIcon size={14} style={{ color: 'var(--brand)' }} />
-                        </button>
-                        <button
-                          className="p-1.5 rounded hover:bg-muted transition-colors"
-                          title="查看详情"
-                          onClick={() => setDetailTarget(appt)}
-                        >
-                          <EyeIcon size={14} style={{ color: 'var(--muted-foreground)' }} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-              {paginated.length === 0 && (
-                <tr>
-                  <td colSpan={12} className="text-center py-10 text-sm" style={{ color: 'var(--muted-foreground)' }}>
-                    暂无匹配预约记录
+              {filtered.map(item => (
+                <tr key={item._id || item.id} className="border-t hover:bg-blue-50/30">
+                  <td className="truncate py-3 pl-4 pr-1 font-mono text-xs text-blue-600" title={item.customerId}>{item.customerId}</td>
+                  <td className="truncate px-1 py-3" title={item.customerName}>{item.customerName || '—'}</td>
+                  <td className="truncate px-1 py-3 text-gray-600" title={item.customerPhone}>{item.customerPhone || '—'}</td>
+                  <td className="truncate px-1 py-3 text-gray-600" title={item.area}>{item.area || '—'}</td>
+                  <td className="truncate px-1 py-3" title={item.therapistName}>{item.therapistName || '待分配'}</td>
+                  <td className="truncate px-1 py-3 text-gray-600">{item.date}</td>
+                  <td className="truncate px-1 py-3 text-gray-600">{startTime(item.timeSlot)}</td>
+                  <td className="px-1 py-3"><Badge value={item.status} kind="appointment" /></td>
+                  <td className="px-1 py-3">
+                    <span className={`whitespace-nowrap rounded px-1.5 py-1 text-xs ${String(item.orderType) === '套餐' ? 'bg-purple-50 text-purple-700' : 'bg-sky-50 text-sky-700'}`}>
+                      {item.orderType || '体验卡'}
+                    </span>
+                  </td>
+                  <td className="truncate px-1 py-3 text-gray-700" title={item.serviceContent || item.service}>
+                    {item.serviceContent || item.service || '—'}
+                  </td>
+                  <td className="truncate px-1 py-3" title={item.advisorName}>{item.advisorName || '—'}</td>
+                  <td className="px-1 py-3">
+                    {item.notifyStatus
+                      ? <Badge value={item.notifyStatus} kind="notify" />
+                      : <span className="text-gray-400">—</span>}
+                  </td>
+                  <td className="px-2 py-3">
+                    <RecordActionButtons
+                      onView={() => setAppointmentModal({ appointment: item, mode: 'view' })}
+                      onEdit={canEditNotification
+                        ? () => setAppointmentModal({ appointment: item, mode: 'edit' })
+                        : undefined}
+                      viewLabel="查看"
+                      editLabel="编辑"
+                    />
                   </td>
                 </tr>
+              ))}
+              {!query.isLoading && filtered.length === 0 && (
+                <tr><td colSpan={13} className="py-12 text-center text-gray-400">暂无符合条件的预约</td></tr>
+              )}
+              {query.isLoading && (
+                <tr><td colSpan={13} className="py-12 text-center text-gray-400">正在加载预约数据...</td></tr>
               )}
             </tbody>
           </table>
         </div>
-
-        {/* Pagination */}
-        <div className="flex items-center justify-between px-4 py-3" style={{ borderTop: '1px solid var(--border)' }}>
-          <span className="text-sm" style={{ color: 'var(--muted-foreground)' }}>
-            {filtered.length === 0
-              ? '暂无记录'
-              : `第 ${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, filtered.length)} 条，共 ${filtered.length} 条`
-            }
-          </span>
-          <div className="flex items-center gap-1.5">
-            <button
-              className="p-1.5 rounded hover:bg-muted disabled:opacity-40 transition-colors"
-              disabled={page <= 1}
-              onClick={() => setPage(p => p - 1)}
-            >
-              <ChevronLeftIcon size={15} />
-            </button>
-            {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
-              <button
-                key={p}
-                className="w-7 h-7 rounded text-sm font-medium transition-colors"
-                style={{
-                  background: p === page ? 'var(--brand)' : 'transparent',
-                  color: p === page ? '#fff' : 'var(--foreground)',
-                }}
-                onClick={() => setPage(p)}
-              >
-                {p}
-              </button>
-            ))}
-            <button
-              className="p-1.5 rounded hover:bg-muted disabled:opacity-40 transition-colors"
-              disabled={page >= totalPages}
-              onClick={() => setPage(p => p + 1)}
-            >
-              <ChevronRightIcon size={15} />
-            </button>
-          </div>
-        </div>
+        <div className="border-t px-5 py-3 text-sm text-gray-500">共 {filtered.length} 条预约</div>
       </div>
-
-      {/* Edit modal */}
-      <EditModal
-        appt={editTarget}
-        currentStatus={editTarget ? (notifyStatusMap[editTarget.id] ?? '待通知') : '待通知'}
-        onClose={() => setEditTarget(null)}
-        onSave={handleSaveNotify}
-      />
-
-      {/* Detail modal */}
-      <DetailModal
-        appt={detailTarget}
-        notifyStatus={detailTarget ? (notifyStatusMap[detailTarget.id] ?? '待通知') : '待通知'}
-        onClose={() => setDetailTarget(null)}
+      <AppointmentModal
+        appointment={appointmentModal?.appointment || null}
+        mode={appointmentModal?.mode || 'view'}
+        canEditNotification={canEditNotification}
+        saving={saving}
+        onClose={() => !saving && setAppointmentModal(null)}
+        onEdit={() => setAppointmentModal(current => current ? { ...current, mode: 'edit' } : null)}
+        onSave={saveAppointment}
       />
     </div>
   );
 }
+
+export default AppointmentsListPage;

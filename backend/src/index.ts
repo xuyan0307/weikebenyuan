@@ -3,6 +3,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import dotenv from 'dotenv';
+import path from 'path';
 import { createServer } from 'http';
 import { closeDatabase, initDatabase, isDatabaseReady } from './config/database';
 import { authRouter } from './routes/auth';
@@ -17,8 +18,17 @@ import { dashboardRouter } from './routes/dashboard';
 import { operationLogsRouter } from './routes/operation-logs';
 import { usersRouter } from './routes/users';
 import { uploadsRouter } from './routes/uploads';
+import { settingsRouter } from './routes/settings';
 import { errorHandler } from './middleware/errorHandler';
+import {
+  startAppointmentNotificationScheduler,
+  stopAppointmentNotificationScheduler,
+} from './services/appointmentNotificationService';
 
+// Local development keeps shared secrets in the repository root `.env.local`.
+// Support starting the API from either the repository root or `backend/`.
+dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
+dotenv.config({ path: path.resolve(process.cwd(), '..', '.env.local') });
 dotenv.config();
 
 const app: Application = express();
@@ -67,6 +77,7 @@ app.use('/api/dashboard', dashboardRouter);
 app.use('/api/operation-logs', operationLogsRouter);
 app.use('/api/users', usersRouter);
 app.use('/api/uploads', uploadsRouter);
+app.use('/api/settings', settingsRouter);
 
 // 404处理
 app.use((_req: Request, res: Response) => {
@@ -81,6 +92,7 @@ async function startServer() {
   try {
     // 初始化数据库连接
     await initDatabase();
+    startAppointmentNotificationScheduler();
 
     const server = createServer(app);
     server.listen(PORT, () => {
@@ -95,6 +107,7 @@ async function startServer() {
       if (shuttingDown) return;
       shuttingDown = true;
       console.log(`${signal} received, shutting down gracefully...`);
+      stopAppointmentNotificationScheduler();
       server.close(async () => {
         await closeDatabase();
         console.log('Server closed');

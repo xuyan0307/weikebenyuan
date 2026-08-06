@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect } from 'react';
 import { toast } from 'sonner';
 import {
-  PlusIcon, SearchIcon, PencilIcon, Trash2Icon, EyeIcon,
+  PlusIcon, SearchIcon, Trash2Icon,
   UploadIcon, XIcon, PlusCircleIcon, ChevronDownIcon,
 } from 'lucide-react';
+import { RecordActionButtons } from './ui/record-action-buttons';
 import type { Therapist, CertWithExpiry, MultiCert } from '../data/mockData';
 import { useTherapists, useTherapistMutations } from '../api/hooks';
 import { useApp } from '../hooks/useApp';
@@ -27,6 +28,7 @@ interface TherapistForm {
   status: '在职' | '离职' | '休假';
   rating: string;
   upgradeRate: string;
+  commissionRate: string;
   gradeKey: TherapistGradeKey;
   remark: string;
   healthCert: CertWithExpiry;
@@ -63,6 +65,10 @@ const GRADE_DEFAULT_RATE: Record<TherapistGradeKey, string> = {
   B: '50',
   S: '60',
   ace: '75',
+};
+
+const GRADE_DEFAULT_COMMISSION: Record<TherapistGradeKey, string> = {
+  observer: '0', A: '6', B: '8', S: '12', ace: '15',
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -491,6 +497,7 @@ function TherapistDetailModal({ therapist, onClose }: TherapistDetailModalProps)
                   </span>
                 }
               />
+              <InfoRow label="提成比例" value={`${therapist.commissionRate ?? 0}%`} />
               <InfoRow label="收入规则" value={grade.incomeRule} />
               <InfoRow label="每单奖金" value={grade.bonus} />
               <InfoRow label="等级定位" value={grade.position} />
@@ -536,7 +543,12 @@ function EditModal({ form, onChange, onClose, onSave, onDelete, isNew, canEditGr
 
   function setGrade(key: TherapistGradeKey) {
     if (!canEditGrade) return;
-    onChange({ ...form, gradeKey: key, upgradeRate: GRADE_DEFAULT_RATE[key] });
+    onChange({
+      ...form,
+      gradeKey: key,
+      upgradeRate: GRADE_DEFAULT_RATE[key],
+      commissionRate: GRADE_DEFAULT_COMMISSION[key],
+    });
   }
 
   const selectedGrade = THERAPIST_GRADE_DEFS.find(g => g.key === form.gradeKey) ?? calcTherapistGrade(Number(form.upgradeRate) || 0);
@@ -574,7 +586,7 @@ function EditModal({ form, onChange, onClose, onSave, onDelete, isNew, canEditGr
               <input className={inputCls} value={form.birthYear} onChange={e => f('birthYear', e.target.value)} placeholder="如 1990" />
             </div>
             <div className={fieldCls}>
-              <label className={labelCls}>联系电话 *</label>
+              <label className={labelCls}>联系电话</label>
               <input className={inputCls} value={form.phone} onChange={e => f('phone', e.target.value)} placeholder="请输入电话" />
             </div>
             <div className={fieldCls}>
@@ -658,12 +670,29 @@ function EditModal({ form, onChange, onClose, onSave, onDelete, isNew, canEditGr
                     ...form,
                     upgradeRate: next,
                     gradeKey: Number.isFinite(nextNum) ? calcTherapistGrade(nextNum).key : form.gradeKey,
+                    commissionRate: Number.isFinite(nextNum)
+                      ? GRADE_DEFAULT_COMMISSION[calcTherapistGrade(nextNum).key]
+                      : form.commissionRate,
                   });
                 }}
               />
               {!canEditGrade && (
                 <p className="text-[11px] text-gray-400 mt-1">仅管理员和超级管理员可调整等级相关数据</p>
               )}
+            </div>
+            <div className={fieldCls}>
+              <label className={labelCls}>提成比例 (0–100 %)</label>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                step="0.01"
+                className={`${inputCls} ${!canEditGrade ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : ''}`}
+                value={form.commissionRate}
+                disabled={!canEditGrade}
+                onChange={e => f('commissionRate', e.target.value)}
+              />
+              <p className="text-[11px] text-gray-400 mt-1">切换等级时带出默认比例，也可单独调整；工资结算全局读取此值</p>
             </div>
           </div>
 
@@ -750,6 +779,7 @@ const BLANK_FORM: TherapistForm = {
   status: '在职',
   rating: '4.5',
   upgradeRate: '30',
+  commissionRate: '0',
   gradeKey: 'observer',
   remark: '',
   healthCert: { state: '无证书' },
@@ -775,6 +805,13 @@ const TYPE_OPTIONS: MultiSelectOption[] = [
   { label: '调理师', value: '调理师' },
 ];
 
+const THERAPIST_COLUMN_HEADERS = [
+  '序号', '技师类型', '姓名', '出生年份', '可接单范围', '详细住址', '电话',
+  '服务方式', '技师特点', '综合升单率', '服务评分', '等级', '提成比例', '操作',
+];
+const DEFAULT_THERAPIST_COLUMN_WIDTHS = [3, 6, 5, 5, 9, 10, 7, 10, 10, 6, 5, 6, 7, 11];
+const THERAPIST_COLUMN_WIDTHS_KEY = 'therapist-list-column-widths-v1';
+
 export default function TherapistListPage() {
   const { currentUser } = useApp();
   const therapistsQ = useTherapists({ page: 1, pageSize: 1000 });
@@ -793,6 +830,45 @@ export default function TherapistListPage() {
   const [editId, setEditId] = useState<string | null>(null);
   const [form, setForm] = useState<TherapistForm>(BLANK_FORM);
   const canEditGrade = currentUser.role === 'admin' || currentUser.role === 'superadmin';
+  const tableRef = useRef<HTMLTableElement | null>(null);
+  const [columnWidths, setColumnWidths] = useState<number[]>(() => {
+    if (typeof window === 'undefined') return DEFAULT_THERAPIST_COLUMN_WIDTHS;
+    try {
+      const stored = JSON.parse(window.localStorage.getItem(THERAPIST_COLUMN_WIDTHS_KEY) || 'null');
+      return Array.isArray(stored) && stored.length === DEFAULT_THERAPIST_COLUMN_WIDTHS.length
+        ? stored.map(Number)
+        : DEFAULT_THERAPIST_COLUMN_WIDTHS;
+    } catch {
+      return DEFAULT_THERAPIST_COLUMN_WIDTHS;
+    }
+  });
+
+  function beginColumnResize(index: number, event: React.MouseEvent<HTMLSpanElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    const tableWidth = tableRef.current?.getBoundingClientRect().width || 1;
+    const startX = event.clientX;
+    const start = [...columnWidths];
+    const onMove = (moveEvent: MouseEvent) => {
+      const delta = ((moveEvent.clientX - startX) / tableWidth) * 100;
+      const pairTotal = start[index] + start[index + 1];
+      const left = Math.max(3, Math.min(pairTotal - 3, start[index] + delta));
+      const next = [...start];
+      next[index] = left;
+      next[index + 1] = pairTotal - left;
+      setColumnWidths(next);
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      setColumnWidths(current => {
+        window.localStorage.setItem(THERAPIST_COLUMN_WIDTHS_KEY, JSON.stringify(current));
+        return current;
+      });
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }
 
   // ── filtered list ──
   const filtered = therapists.filter(t => {
@@ -829,6 +905,7 @@ export default function TherapistListPage() {
       status: t.status,
       rating: String(t.rating),
       upgradeRate: String(t.upgradeRate),
+      commissionRate: String(t.commissionRate ?? GRADE_DEFAULT_COMMISSION[calcTherapistGrade(t.upgradeRate).key]),
       gradeKey: calcTherapistGrade(t.upgradeRate).key,
       remark: t.remark ?? '',
       healthCert: { ...t.healthCert },
@@ -853,11 +930,12 @@ export default function TherapistListPage() {
   // ── save ──
   async function handleSave() {
     if (!form.name.trim()) { toast.error('请填写技师姓名'); return; }
-    if (!form.phone.trim()) { toast.error('请填写联系电话'); return; }
     const ratingNum = parseFloat(form.rating);
     const upgradeNum = parseInt(form.upgradeRate, 10);
+    const commissionNum = parseFloat(form.commissionRate);
     if (isNaN(ratingNum) || ratingNum < 0 || ratingNum > 5) { toast.error('评分须在 0~5 之间'); return; }
     if (isNaN(upgradeNum) || upgradeNum < 0 || upgradeNum > 100) { toast.error('升单率须在 0~100 之间'); return; }
+    if (isNaN(commissionNum) || commissionNum < 0 || commissionNum > 100) { toast.error('提成比例须在 0~100 之间'); return; }
 
     const normalizedUpgradeNum = upgradeNum;
     const star = calcLegacyStarLevel(normalizedUpgradeNum);
@@ -880,6 +958,7 @@ export default function TherapistListPage() {
           orders: 0,
           rating: ratingNum,
           upgradeRate: normalizedUpgradeNum,
+          commissionRate: commissionNum,
           starLevel: star,
           healthCert: form.healthCert,
           firstAidCert: toMultiCert(form.firstAidCert),
@@ -905,6 +984,7 @@ export default function TherapistListPage() {
           status: form.status,
           rating: ratingNum,
           upgradeRate: normalizedUpgradeNum,
+          commissionRate: commissionNum,
           starLevel: star,
           healthCert: form.healthCert,
           firstAidCert: toMultiCert(form.firstAidCert),
@@ -997,30 +1077,23 @@ export default function TherapistListPage() {
       </div>
 
       {/* ── Table ── */}
-      <div className="bg-white rounded-xl shadow-custom overflow-auto flex-1">
-        <table className="w-full text-sm" style={{ minWidth: 960, borderCollapse: 'collapse' }}>
+      <div className="bg-white rounded-xl shadow-custom overflow-y-auto overflow-x-hidden flex-1">
+        <table ref={tableRef} className="w-full text-sm" style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse' }}>
           <colgroup>
-            <col style={{ width: 40 }} />
-            <col style={{ width: 80 }} />
-            <col style={{ width: 80 }} />
-            <col style={{ width: 68 }} />
-            <col style={{ width: 120 }} />
-            <col style={{ width: 150 }} />
-            <col style={{ width: 110 }} />
-            <col style={{ width: 160 }} />
-            <col style={{ width: 160 }} />
-            <col style={{ width: 72 }} />
-            <col style={{ width: 72 }} />
-            <col style={{ width: 80 }} />
-            <col style={{ width: 110 }} />
+            {columnWidths.map((width, index) => <col key={index} style={{ width: `${width}%` }} />)}
           </colgroup>
           <thead>
             <tr className="bg-gray-50 border-b border-gray-200">
-              {['序号', '技师类型', '姓名', '出生年份', '可接单范围', '详细住址', '电话',
-                '服务方式', '技师特点', '综合升单率', '服务评分', '等级', '操作',
-              ].map(h => (
-                <th key={h} className="px-2 py-2.5 text-xs font-semibold text-gray-600 text-center whitespace-nowrap">
+              {THERAPIST_COLUMN_HEADERS.map((h, index) => (
+                <th key={h} className="relative px-1 py-2.5 text-xs font-semibold text-gray-600 text-center whitespace-nowrap overflow-hidden text-ellipsis">
                   {h}
+                  {index < THERAPIST_COLUMN_HEADERS.length - 1 && (
+                    <span
+                      onMouseDown={event => beginColumnResize(index, event)}
+                      className="absolute right-0 top-0 h-full w-1 cursor-col-resize hover:bg-blue-300"
+                      title="拖动调整列宽"
+                    />
+                  )}
                 </th>
               ))}
             </tr>
@@ -1038,9 +1111,9 @@ export default function TherapistListPage() {
                   <td className="px-2 py-2 text-center font-medium text-gray-800 whitespace-nowrap">{t.name}</td>
                   <td className="px-2 py-2 text-center text-xs text-gray-600">{t.birthYear ?? '—'}</td>
                   {/* 可接单范围 — text-xs */}
-                  <td className="px-2 py-2 text-center text-xs text-gray-700">{t.area}</td>
-                  <td className="px-2 py-2 text-center text-xs text-gray-600">{t.detailAddress}</td>
-                  <td className="px-2 py-2 text-center text-xs text-gray-600">{t.phone}</td>
+                  <td className="px-1 py-2 text-center text-xs text-gray-700 overflow-hidden text-ellipsis whitespace-nowrap" title={t.area}>{t.area || '—'}</td>
+                  <td className="px-1 py-2 text-center text-xs text-gray-600 overflow-hidden text-ellipsis whitespace-nowrap" title={t.detailAddress}>{t.detailAddress || '—'}</td>
+                  <td className="px-1 py-2 text-center text-xs text-gray-600 overflow-hidden text-ellipsis whitespace-nowrap" title={t.phone}>{t.phone || '—'}</td>
                   {/* 服务方式 — 单行截断 + title */}
                   <td className="px-2 py-2 text-center">
                     <span
@@ -1066,29 +1139,20 @@ export default function TherapistListPage() {
                   <td className="px-2 py-2 text-center">
                     <GradeBadge grade={grade} />
                   </td>
+                  <td className="px-1 py-2 text-center text-xs font-semibold text-purple-600 whitespace-nowrap">{t.commissionRate ?? 0}%</td>
                   {/* 操作列：仅详情 + 编辑，无删除 */}
                   <td className="px-2 py-2">
-                    <div className="flex justify-center items-center gap-1.5">
-                      <button
-                        onClick={() => setDetailTarget(t)}
-                        className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-blue-600 text-white hover:bg-blue-700 whitespace-nowrap"
-                      >
-                        <EyeIcon size={12} />详情
-                      </button>
-                      <button
-                        onClick={() => openEdit(t)}
-                        className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-blue-100 text-blue-700 hover:bg-blue-200 whitespace-nowrap"
-                      >
-                        <PencilIcon size={12} />编辑
-                      </button>
-                    </div>
+                    <RecordActionButtons
+                      onView={() => setDetailTarget(t)}
+                      onEdit={() => openEdit(t)}
+                    />
                   </td>
                 </tr>
               );
             })}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={13} className="py-16 text-center text-gray-400 text-sm">暂无数据</td>
+                <td colSpan={14} className="py-16 text-center text-gray-400 text-sm">暂无数据</td>
               </tr>
             )}
           </tbody>

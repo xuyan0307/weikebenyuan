@@ -39,3 +39,39 @@ test('customer query can explicitly include ordered customers', () => {
   assert.equal(result.whereSql, '');
   assert.deepEqual(result.params, []);
 });
+
+test('customer query partitions follow time around today', () => {
+  const today = buildCustomerWhere({ followTimes: ['today'] });
+  assert.match(today.whereSql, /DATE\(c\.follow_date\) = CURDATE\(\)/);
+  assert.doesNotMatch(today.whereSql, /DATE\(c\.follow_date\) [<>] CURDATE\(\)/);
+  assert.doesNotMatch(today.whereSql, /c\.follow_date IS NULL/);
+
+  const overdue = buildCustomerWhere({ followTimes: ['overdue'] });
+  assert.match(overdue.whereSql, /DATE\(c\.follow_date\) < CURDATE\(\)/);
+  assert.doesNotMatch(overdue.whereSql, /DATE\(c\.follow_date\) [=>] CURDATE\(\)/);
+  assert.doesNotMatch(overdue.whereSql, /c\.follow_date IS NULL/);
+
+  const pending = buildCustomerWhere({ followTimes: ['pending'] });
+  assert.match(pending.whereSql, /DATE\(c\.follow_date\) > CURDATE\(\)/);
+  assert.doesNotMatch(pending.whereSql, /DATE\(c\.follow_date\) [=<] CURDATE\(\)/);
+  assert.doesNotMatch(pending.whereSql, /c\.follow_date IS NULL/);
+});
+
+test('customer query includes undated rows only when all follow times are selected', () => {
+  const result = buildCustomerWhere({
+    followTimes: ['today', 'overdue', 'pending'],
+  });
+  assert.match(result.whereSql, /c\.tag IN \('D1','D2','D3'\)/);
+  assert.match(result.whereSql, /COALESCE\(c\.total_orders, 0\) = 0/);
+  assert.doesNotMatch(result.whereSql, /follow_date/);
+  assert.deepEqual(result.params, []);
+});
+
+test('customer query returns no rows when all follow times are deselected', () => {
+  const result = buildCustomerWhere({
+    includeOrdered: true,
+    followTimes: ['none'],
+  });
+  assert.equal(result.whereSql, 'WHERE 1=0');
+  assert.deepEqual(result.params, []);
+});

@@ -1,6 +1,7 @@
 import { AppProvider, useApp } from '../hooks/useApp';
 import Sidebar from '../components/Sidebar';
 import TopBar from '../components/TopBar';
+import RegulatoryFooter from '../components/RegulatoryFooter';
 import React, { lazy, Suspense } from 'react';
 
 const DashboardPage = lazy(() => import('../components/DashboardPage'));
@@ -10,8 +11,6 @@ const OrdersListPage = lazy(() => import('../components/OrdersListPage'));
 const ContractListPage = lazy(() => import('../components/ContractListPage'));
 const AppointmentsCalendarPage = lazy(() => import('../components/AppointmentsCalendarPage'));
 const AppointmentsListPage = lazy(() => import('../components/AppointmentsListPage'));
-const ServiceRecordsPage = lazy(() => import('../components/ServiceRecordsPage'));
-const ServiceProgressPage = lazy(() => import('../components/ServiceProgressPage'));
 const TherapistListPage = lazy(() => import('../components/TherapistListPage'));
 const FinanceSalaryPage = lazy(() => import('../components/FinanceSalaryPage'));
 const FinanceIncomePage = lazy(() => import('../components/FinanceIncomePage'));
@@ -107,10 +106,6 @@ function AppShell() {
         return <AppointmentsCalendarPage />;
       case 'appointments-list':
         return <AppointmentsListPage />;
-      case 'services-records':
-        return <ServiceRecordsPage />;
-      case 'services-change':
-        return <ServiceProgressPage />;
       case 'therapists-list':
         return <TherapistListPage />;
       case 'finance-salary':
@@ -144,12 +139,15 @@ function AppShell() {
         <TopBar />
 
         {/* Page content */}
-        <main className="flex-1 overflow-y-auto px-6 py-5">
-          <PageErrorBoundary pageKey={activePage} key={activePage}>
-            <Suspense fallback={<PageLoading />}>
-              {renderActivePage()}
-            </Suspense>
-          </PageErrorBoundary>
+        <main className="flex flex-1 flex-col overflow-y-auto px-6 py-5">
+          <div className="flex-1">
+            <PageErrorBoundary pageKey={activePage} key={activePage}>
+              <Suspense fallback={<PageLoading />}>
+                {renderActivePage()}
+              </Suspense>
+            </PageErrorBoundary>
+          </div>
+          <RegulatoryFooter className="mt-4" />
         </main>
       </div>
     </div>

@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto';
 import type { Pool, PoolConnection } from 'mysql2/promise';
 import { getDb } from '../config/database';
 import { createError } from '../middleware/errorHandler';
-import { parseJson } from '../utils/serialization';
+import { formatDateOnly, parseJson } from '../utils/serialization';
 
 export interface AppointmentWriteBody {
   id?: string;
@@ -16,14 +16,23 @@ export interface AppointmentWriteBody {
   remark?: string;
 }
 
+export interface AppointmentCompletionBody {
+  signaturePhotos?: unknown[];
+}
+
 interface AppointmentRow {
   id: string;
+  appointment_no?: string;
   customer_id: string;
   therapist_id: string;
   date: string | Date;
   time_slot: string;
+  service: string | null;
   status: string;
+  area?: string | null;
+  remark?: string | null;
   progress_applied_at: string | Date | null;
+  has_service_record?: number;
 }
 
 interface OrderProgressRow {
@@ -44,11 +53,30 @@ type ServicePeople = Record<string, ServicePerson | undefined>;
 export type SlotPeriod = 'morning' | 'afternoon' | 'evening';
 
 export function getSlotPeriod(timeSlot: unknown): SlotPeriod | null {
-  const hour = Number.parseInt(String(timeSlot || '').split(':')[0], 10);
-  if (Number.isNaN(hour)) return null;
-  if (hour < 13) return 'morning';
+  const match = /^(\d{2}):(\d{2})$/.exec(String(timeSlot || ''));
+  if (!match) return null;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (hour < 8 || hour > 23 || minute < 0 || minute > 59) return null;
+  if (hour < 12) return 'morning';
   if (hour < 18) return 'afternoon';
   return 'evening';
+}
+
+export function isAppointmentTimePast(date: unknown, timeSlot: unknown, now = new Date()): boolean {
+  const dateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(date || ''));
+  const timeMatch = /^(\d{2}):(\d{2})$/.exec(String(timeSlot || ''));
+  if (!dateMatch || !timeMatch || getSlotPeriod(timeSlot) === null) return true;
+  const value = new Date(
+    Number(dateMatch[1]),
+    Number(dateMatch[2]) - 1,
+    Number(dateMatch[3]),
+    Number(timeMatch[1]),
+    Number(timeMatch[2]),
+    0,
+    0
+  );
+  return Number.isNaN(value.getTime()) || value.getTime() <= now.getTime();
 }
 
 export function incrementAssignedServicePeople(
@@ -90,12 +118,15 @@ export async function createAppointment(body: AppointmentWriteBody, pool: Pool =
     if (!therapistId || !date || requestedPeriod === null) {
       throw createError('请选择技师、预约日期和有效时间', 400);
     }
+    if (isAppointmentTimePast(date, timeSlot)) {
+      throw createError('已经过去的时间不能预约，请重新选择', 400);
+    }
 
     // Locking the therapist serializes concurrent bookings before conflict checking.
     await connection.execute('SELECT id FROM therapists WHERE id = ? FOR UPDATE', [therapistId]);
     const [sameDayRows] = await connection.execute(
       `SELECT time_slot FROM appointments
-       WHERE therapist_id = ? AND date = ? AND status <> '已取消'`,
+       WHERE therapist_id = ? AND date = ? AND status NOT IN ('已取消', '取消')`,
       [therapistId, date]
     );
     const hasConflict = (sameDayRows as Array<{ time_slot: string }>).some(
@@ -134,21 +165,116 @@ export async function createAppointment(body: AppointmentWriteBody, pool: Pool =
   }
 }
 
-export async function updateAppointmentStatus(
+export async function updateAppointment(
   appointmentId: string,
-  status: string,
+  body: AppointmentWriteBody,
   pool: Pool = getDb()
 ) {
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
     const [rows] = await connection.execute(
-      `SELECT id, customer_id, therapist_id, date, time_slot, status, progress_applied_at
-       FROM appointments WHERE id = ? OR appointment_no = ? LIMIT 1 FOR UPDATE`,
+      `SELECT a.id, a.appointment_no, a.customer_id, a.therapist_id, a.date, a.time_slot,
+              a.service, a.status, a.area, a.remark, a.progress_applied_at,
+              EXISTS(SELECT 1 FROM service_records sr WHERE sr.appointment_id = a.id) AS has_service_record
+       FROM appointments a
+       WHERE a.id = ? OR a.appointment_no = ?
+       LIMIT 1 FOR UPDATE`,
+      [appointmentId, appointmentId]
+    );
+    const current = (rows as AppointmentRow[])[0];
+    if (!current) throw createError('预约不存在', 404);
+
+    const therapistId = body.therapistId ?? current.therapist_id;
+    const date = body.date ?? formatDateOnly(current.date);
+    const timeSlot = body.timeSlot ?? current.time_slot;
+    const requestedPeriod = getSlotPeriod(timeSlot);
+    if (!therapistId || !date || requestedPeriod === null) {
+      throw createError('请选择技师、预约日期和有效时间', 400);
+    }
+
+    const scheduleChanged =
+      therapistId !== current.therapist_id
+      || date !== formatDateOnly(current.date)
+      || timeSlot !== current.time_slot;
+    const scheduleLocked = current.status.includes('完成')
+      || current.status.includes('取消')
+      || Boolean(current.progress_applied_at)
+      || Boolean(current.has_service_record);
+    if (scheduleChanged && scheduleLocked) {
+      throw createError('已完成、已取消或已产生服务凭证的预约不能改约', 409);
+    }
+    if (scheduleChanged && isAppointmentTimePast(date, timeSlot)) {
+      throw createError('已经过去的时间不能修改，请重新选择', 400);
+    }
+
+    await connection.execute('SELECT id FROM therapists WHERE id = ? FOR UPDATE', [therapistId]);
+    const [sameDayRows] = await connection.execute(
+      `SELECT time_slot FROM appointments
+       WHERE therapist_id = ? AND date = ? AND id <> ? AND status NOT IN ('已取消', '取消')`,
+      [therapistId, date, current.id]
+    );
+    const hasConflict = (sameDayRows as Array<{ time_slot: string }>).some(
+      appointment => getSlotPeriod(appointment.time_slot) === requestedPeriod
+    );
+    if (hasConflict) {
+      throw createError('该技师此时间段已有预约，请重新选择', 409);
+    }
+
+    await connection.execute(
+      `UPDATE appointments
+       SET therapist_id = ?, date = ?, time_slot = ?, service = ?, area = ?, remark = ?,
+           notify_scheduled_at = CASE WHEN ? THEN NULL ELSE notify_scheduled_at END
+       WHERE id = ?`,
+      [
+        therapistId,
+        date,
+        timeSlot,
+        body.service ?? current.service ?? '',
+        body.area ?? current.area ?? null,
+        body.remark ?? current.remark ?? null,
+        scheduleChanged ? 1 : 0,
+        current.id,
+      ]
+    );
+    await connection.commit();
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+}
+
+export async function updateAppointmentStatus(
+  appointmentId: string,
+  status: string,
+  completionOrPool: AppointmentCompletionBody | Pool = {},
+  providedPool?: Pool
+) {
+  const isPool = typeof (completionOrPool as Pool).getConnection === 'function';
+  const completion = isPool ? {} : completionOrPool as AppointmentCompletionBody;
+  const pool = (isPool ? completionOrPool : providedPool) as Pool | undefined || getDb();
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const [rows] = await connection.execute(
+      `SELECT a.id, a.customer_id, a.therapist_id, a.date, a.time_slot, a.service, a.status,
+              a.progress_applied_at,
+              EXISTS(SELECT 1 FROM service_records sr WHERE sr.appointment_id = a.id) AS has_service_record
+       FROM appointments a WHERE a.id = ? OR a.appointment_no = ? LIMIT 1 FOR UPDATE`,
       [appointmentId, appointmentId]
     );
     const appointment = (rows as AppointmentRow[])[0];
     if (!appointment) throw createError('预约不存在', 404);
+
+    const cancelling = status === '已取消' || status === '取消';
+    const alreadyCompleted = appointment.status === '已完成'
+      || Boolean(appointment.progress_applied_at)
+      || Boolean(appointment.has_service_record);
+    if (cancelling && alreadyCompleted) {
+      throw createError('该预约已完成并产生服务凭证，不能直接取消；如需纠偏请走冲销流程', 409);
+    }
 
     const applyProgress = status === '已完成' && !appointment.progress_applied_at;
     await connection.execute(
@@ -161,6 +287,9 @@ export async function updateAppointmentStatus(
     if (applyProgress) {
       await applyOrderProgress(connection, appointment);
     }
+    if (status === '已完成') {
+      await ensureServiceRecord(connection, appointment, completion.signaturePhotos || []);
+    }
 
     await connection.commit();
   } catch (error) {
@@ -169,6 +298,44 @@ export async function updateAppointmentStatus(
   } finally {
     connection.release();
   }
+}
+
+async function ensureServiceRecord(
+  connection: PoolConnection,
+  appointment: AppointmentRow,
+  signaturePhotos: unknown[]
+) {
+  const [existingRows] = await connection.execute(
+    'SELECT id FROM service_records WHERE appointment_id = ? LIMIT 1 FOR UPDATE',
+    [appointment.id]
+  );
+  const existing = (existingRows as Array<{ id: string }>)[0];
+  if (existing) {
+    if (signaturePhotos.length > 0) {
+      await connection.execute(
+        'UPDATE service_records SET signature_photos = ? WHERE id = ?',
+        [JSON.stringify(signaturePhotos), existing.id]
+      );
+    }
+    return;
+  }
+
+  await connection.execute(
+    `INSERT INTO service_records
+      (id, appointment_id, customer_id, therapist_id, service_date, service_items, duration, feedback, photos, signature_photos)
+     VALUES (?, ?, ?, ?, TIMESTAMP(?, ?), ?, NULL, NULL, ?, ?)`,
+    [
+      randomUUID(),
+      appointment.id,
+      appointment.customer_id,
+      appointment.therapist_id,
+      appointment.date,
+      appointment.time_slot,
+      appointment.service || null,
+      JSON.stringify([]),
+      JSON.stringify(signaturePhotos),
+    ]
+  );
 }
 
 async function applyOrderProgress(connection: PoolConnection, appointment: AppointmentRow) {

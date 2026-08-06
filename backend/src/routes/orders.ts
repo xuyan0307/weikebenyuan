@@ -6,6 +6,8 @@ import { getDb } from '../config/database';
 import { ossFileUrl } from '../utils/oss';
 import { formatDateOnly, parseJson } from '../utils/serialization';
 import { createOrder, deleteOrder, normalizePayStatus, updateOrder } from '../services/orderService';
+import { advisorOrderRecordScope } from '../services/advisorRecordScope';
+import { projectOrderPurchaseRange } from '../services/orderPurchaseRangeService';
 
 const router: Router = Router();
 
@@ -37,28 +39,35 @@ function formatSnapshotDate(value: unknown) {
 function orderCustomerFromRow(r: RowDataPacket) {
   const snapshot = parseJson<Record<string, unknown>>(r.customer_snapshot, {});
   return {
-    id: snapshot.id || r.customer_id || '',
-    customerCode: snapshot.customerCode || r.customer_code || '',
-    name: snapshot.name || r.customer_name || '',
-    wechat: snapshot.wechat || r.customer_wechat || '',
-    phone: snapshot.phone || r.customer_phone || '',
-    area: snapshot.area || r.customer_area || '',
-    source: snapshot.source || r.customer_source || '',
-    acquiredAt: snapshot.acquiredAt || formatSnapshotDate(r.acquired_at),
-    tag: snapshot.tag || r.customer_tag || '',
-    followStatus: snapshot.followStatus || r.customer_follow_status || '',
-    followDate: snapshot.followDate || formatSnapshotDate(r.customer_follow_date),
-    advisor: snapshot.advisor || r.advisor_name || '',
-    advisorId: snapshot.advisorId || r.customer_advisor_id || '',
-    profile: snapshot.profile || parseJson<Record<string, unknown>>(r.customer_profile, {}),
-    situation: snapshot.situation || r.customer_situation || '',
-    intendedProduct: snapshot.intendedProduct || r.intended_product || '',
-    remark: snapshot.remark || r.customer_remark || '',
+    id: r.customer_id || snapshot.id || '',
+    customerCode: r.customer_code || snapshot.customerCode || '',
+    name: r.customer_name || snapshot.name || '',
+    wechat: r.customer_wechat || snapshot.wechat || '',
+    phone: r.customer_phone || snapshot.phone || '',
+    area: r.customer_area || snapshot.area || '',
+    source: r.customer_source || snapshot.source || '',
+    acquiredAt: formatSnapshotDate(r.acquired_at) || snapshot.acquiredAt || '',
+    tag: r.customer_tag || snapshot.tag || '',
+    followStatus: r.customer_follow_status || snapshot.followStatus || '',
+    followDate: formatSnapshotDate(r.customer_follow_date) || snapshot.followDate || '',
+    advisor: r.advisor_name || snapshot.advisor || '',
+    advisorId: r.customer_advisor_id || snapshot.advisorId || '',
+    profile: r.customer_profile ? parseJson<Record<string, unknown>>(r.customer_profile, {}) : (snapshot.profile || {}),
+    situation: r.customer_situation || snapshot.situation || '',
+    intendedProduct: r.intended_product || snapshot.intendedProduct || '',
+    remark: r.customer_remark || snapshot.remark || '',
   };
 }
 
-function mapRow(r: RowDataPacket) {
+function mapRow(r: RowDataPacket, from = '', to = '') {
   const customer = orderCustomerFromRow(r);
+  const servicePeople = parseJson(r.service_people, null);
+  const purchaseRangeProjection = projectOrderPurchaseRange({
+    type: String(r.type || ''),
+    purchaseDate: r.purchase_date_text,
+    createdDate: r.created_at,
+    servicePeople,
+  }, from, to);
   return {
     id: r.order_no || r.id,
     _id: r.id,
@@ -85,7 +94,8 @@ function mapRow(r: RowDataPacket) {
     hasCoupon: !!r.has_coupon,
     serviceItemCount: r.service_item_count || 1,
     serviceItems: r.service_items || r.intended_product || '',
-    servicePeople: parseJson(r.service_people, null),
+    servicePeople,
+    purchaseRangeProjection,
     appointmentTime: r.appointment_time || '',
     serviceNote: r.service_note || '',
     contractAttachments: withSignedAttachmentUrls(parseJson(r.contract_attachments, [])),
@@ -93,26 +103,30 @@ function mapRow(r: RowDataPacket) {
   };
 }
 
-router.get('/', authenticateToken, async (req, res, next) => {
+router.get('/', authenticateToken, async (req: AuthRequest, res, next) => {
   try {
     const db = getDb();
     const page = Math.max(1, parseInt(req.query.page as string) || 1);
     const pageSize = Math.max(1, parseInt(req.query.pageSize as string) || 10);
     const payStatus = (req.query.payStatus as string) || '';
     const customerId = (req.query.customerId as string) || '';
+    const from = (req.query.from as string) || '';
+    const to = (req.query.to as string) || '';
     const offset = (page - 1) * pageSize;
 
     const where: string[] = [];
     const params: unknown[] = [];
+    const dataScope = advisorOrderRecordScope(
+      { role: req.userRole, userId: req.userId },
+      'o'
+    );
+    where.push(dataScope.where);
+    params.push(...dataScope.params);
     if (payStatus) { where.push('o.pay_status = ?'); params.push(payStatus); }
     if (customerId) { where.push('(o.customer_id = ? OR o.customer_id IN (SELECT id FROM customers WHERE customer_code = ?))'); params.push(customerId, customerId); }
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
-    const [countRows] = await db.query(`SELECT COUNT(*) AS cnt FROM orders o ${whereSql}`, params);
-    const total = (countRows as Array<{ cnt: number }>)[0].cnt;
-
-    const [rows] = await db.query(
-      `SELECT o.id, o.order_no, o.customer_id, o.customer_snapshot, o.type, o.amount, o.pay_status, o.paid_at,
+    const selectColumns = `SELECT o.id, o.order_no, o.customer_id, o.customer_snapshot, o.type, o.amount, o.pay_status, o.paid_at,
               DATE_FORMAT(o.purchase_date, '%Y-%m-%d') AS purchase_date_text,
               o.used_times, o.total_times, o.manual_progress_at, o.is_upgrade, o.contract_signed, o.has_coupon,
               o.service_item_count, o.service_items, o.service_people, o.appointment_time,
@@ -121,7 +135,34 @@ router.get('/', authenticateToken, async (req, res, next) => {
               c.area AS customer_area, c.source AS customer_source, c.tag AS customer_tag, c.follow_status AS customer_follow_status,
               c.follow_date AS customer_follow_date, c.advisor_id AS customer_advisor_id, c.profile AS customer_profile,
               c.situation AS customer_situation, c.remark AS customer_remark, c.acquired_at, c.intended_product,
-              u.name AS advisor_name
+              u.name AS advisor_name`;
+    const joins = `LEFT JOIN customers c ON c.id = o.customer_id
+       LEFT JOIN users u ON u.id = c.advisor_id`;
+
+    if (from || to) {
+      const [rangeRows] = await db.query(
+        `${selectColumns} FROM orders o ${joins} ${whereSql}
+         ORDER BY o.purchase_date DESC, o.created_at DESC`,
+        params,
+      );
+      const projected = (rangeRows as RowDataPacket[])
+        .map(row => mapRow(row, from, to))
+        .filter(order => order.purchaseRangeProjection.visibleStageKeys.length > 0)
+        .sort((a, b) => b.purchaseRangeProjection.displayPurchaseDate.localeCompare(a.purchaseRangeProjection.displayPurchaseDate));
+      res.json({
+        total: projected.length,
+        page,
+        pageSize,
+        data: projected.slice(offset, offset + pageSize),
+      });
+      return;
+    }
+
+    const [countRows] = await db.query(`SELECT COUNT(*) AS cnt FROM orders o ${whereSql}`, params);
+    const total = (countRows as Array<{ cnt: number }>)[0].cnt;
+
+    const [rows] = await db.query(
+      `${selectColumns}
        FROM (
          SELECT o.id
          FROM orders o
@@ -130,12 +171,11 @@ router.get('/', authenticateToken, async (req, res, next) => {
          LIMIT ? OFFSET ?
        ) page_orders
        JOIN orders o ON o.id = page_orders.id
-       LEFT JOIN customers c ON c.id = o.customer_id
-       LEFT JOIN users u ON u.id = c.advisor_id
+       ${joins}
        ORDER BY o.purchase_date DESC, o.created_at DESC`,
       [...params, pageSize, offset]
     );
-    res.json({ total, page, pageSize, data: (rows as RowDataPacket[]).map(mapRow) });
+    res.json({ total, page, pageSize, data: (rows as RowDataPacket[]).map(row => mapRow(row)) });
   } catch (err) { next(err); }
 });
 
@@ -146,9 +186,13 @@ router.post('/', authenticateToken, auditLog('orders'), async (req: AuthRequest,
   } catch (err) { next(err); }
 });
 
-router.get('/:id', authenticateToken, async (req, res, next) => {
+router.get('/:id', authenticateToken, async (req: AuthRequest, res, next) => {
   try {
     const db = getDb();
+    const dataScope = advisorOrderRecordScope(
+      { role: req.userRole, userId: req.userId },
+      'o'
+    );
     const [rows] = await db.execute(
       `SELECT o.*, DATE_FORMAT(o.purchase_date, '%Y-%m-%d') AS purchase_date_text,
               c.name AS customer_name, c.customer_code, c.wechat AS customer_wechat, c.phone AS customer_phone,
@@ -159,9 +203,10 @@ router.get('/:id', authenticateToken, async (req, res, next) => {
        FROM orders o
        LEFT JOIN customers c ON c.id = o.customer_id
        LEFT JOIN users u ON u.id = c.advisor_id
-       WHERE o.id = ? OR o.order_no = ?
+       WHERE (o.id = ? OR o.order_no = ?)
+         AND ${dataScope.where}
        LIMIT 1`,
-      [req.params.id, req.params.id]
+      [req.params.id, req.params.id, ...dataScope.params]
     );
     const order = (rows as RowDataPacket[])[0];
     if (!order) {

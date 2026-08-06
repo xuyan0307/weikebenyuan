@@ -4,10 +4,19 @@ import { authenticateToken } from '../middleware/auth';
 import { auditLog } from '../middleware/auditLog';
 import { getDb } from '../config/database';
 import { parseJson } from '../utils/serialization';
+import { ossFileUrl } from '../utils/oss';
 
 const router: Router = Router();
 
 function mapRow(r: any) {
+  const withFreshUrls = (value: unknown) => parseJson<any[]>(value, []).map(item => {
+    if (!item || typeof item !== 'object') return item;
+    const next = { ...item };
+    if (typeof next.objectKey === 'string' && next.objectKey) {
+      try { next.url = ossFileUrl(next.objectKey); } catch { /* local storage keeps its URL */ }
+    }
+    return next;
+  });
   return {
     id: r.id,
     appointmentId: r.appointment_id,
@@ -19,7 +28,8 @@ function mapRow(r: any) {
     serviceItems: r.service_items || '',
     duration: r.duration || 0,
     feedback: r.feedback || '',
-    photos: parseJson(r.photos, []),
+    photos: withFreshUrls(r.photos),
+    signaturePhotos: withFreshUrls(r.signature_photos),
   };
 }
 
@@ -34,7 +44,17 @@ router.get('/', authenticateToken, async (req, res, next) => {
 
     const where: string[] = [];
     const params: any[] = [];
-    if (customerId) { where.push('(s.customer_id = ? OR s.customer_id IN (SELECT id FROM customers WHERE customer_code = ?))'); params.push(customerId, customerId); }
+    if (customerId) {
+      where.push(`(
+        s.customer_id = ?
+        OR s.customer_id IN (SELECT id FROM customers WHERE customer_code = ?)
+        OR s.customer_id IN (
+          SELECT customer_id FROM orders
+          WHERE JSON_UNQUOTE(JSON_EXTRACT(customer_snapshot, '$.customerCode')) = ?
+        )
+      )`);
+      params.push(customerId, customerId, customerId);
+    }
     if (therapistId) { where.push('s.therapist_id = ?'); params.push(therapistId); }
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
@@ -69,11 +89,23 @@ router.post('/', authenticateToken, auditLog('service-records'), async (req, res
     const [custRows] = await db.execute('SELECT id FROM customers WHERE id=? OR customer_code=? LIMIT 1', [b.customerId, b.customerId]);
     const custId = (custRows as any[])[0]?.id || b.customerId;
     await db.execute(
-      `INSERT INTO service_records (id, appointment_id, customer_id, therapist_id, service_date, service_items, duration, feedback, photos)
-       VALUES (?,?,?,?,?,?,?,?,?)`,
-      [id, b.appointmentId || null, custId, b.therapistId, b.serviceDate || new Date(), b.serviceItems || null, b.duration || null, b.feedback || null, b.photos ? JSON.stringify(b.photos) : null]
+      `INSERT INTO service_records (id, appointment_id, customer_id, therapist_id, service_date, service_items, duration, feedback, photos, signature_photos)
+       VALUES (?,?,?,?,?,?,?,?,?,?)`,
+      [id, b.appointmentId || null, custId, b.therapistId, b.serviceDate || new Date(), b.serviceItems || null, b.duration || null, b.feedback || null, b.photos ? JSON.stringify(b.photos) : null, b.signaturePhotos ? JSON.stringify(b.signaturePhotos) : null]
     );
     res.status(201).json({ id });
+  } catch (err) { next(err); }
+});
+
+router.put('/:id', authenticateToken, auditLog('service-records'), async (req, res, next) => {
+  try {
+    const db = getDb();
+    const photos = Array.isArray(req.body?.photos) ? req.body.photos : [];
+    await db.execute('UPDATE service_records SET photos = ? WHERE id = ?', [
+      JSON.stringify(photos),
+      req.params.id,
+    ]);
+    res.json({ message: '服务照片已更新' });
   } catch (err) { next(err); }
 });
 

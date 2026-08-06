@@ -3,6 +3,8 @@ import type { PoolConnection } from 'mysql2/promise';
 import { getDb } from '../config/database';
 import { createError } from '../middleware/errorHandler';
 import { formatDateOnly, jsonOrNull, parseJson } from '../utils/serialization';
+import { mergeCustomerProfileFollowHistory, mergeOrderFollowHistory } from './followHistoryService';
+import { generateCustomerCode } from './customerCodeService';
 
 export interface OrderWriteBody {
   id?: string;
@@ -12,10 +14,16 @@ export interface OrderWriteBody {
   customerWechat?: string;
   customerPhone?: string;
   customerArea?: string;
+  customerSource?: string;
+  customerAcquiredAt?: string;
   customerAdvisor?: string;
   customerTag?: string;
+  customerFollowStatus?: string;
+  customerFollowDate?: string;
+  customerIntendedProduct?: string;
   customerSituation?: string;
   customerRemark?: string;
+  customerProfile?: unknown;
   source?: string;
   purchaseDate?: string;
   followStatus?: string;
@@ -47,6 +55,20 @@ interface CustomerSnapshot extends Record<string, unknown> {
   id: string;
   customerCode: string;
   name: string;
+  wechat?: string;
+  phone?: string;
+  area?: string;
+  source?: string;
+  acquiredAt?: string;
+  tag?: string;
+  followStatus?: string;
+  followDate?: string;
+  advisorId?: string | null;
+  advisor?: string;
+  profile?: unknown;
+  situation?: string;
+  intendedProduct?: string;
+  remark?: string;
 }
 
 interface CustomerDbRow {
@@ -77,6 +99,13 @@ interface OrderDbRow {
   used_times: number;
   total_times: number;
   purchase_date: string | Date | null;
+  service_people: unknown;
+}
+
+interface OrderCustomerTagRow {
+  id: string;
+  customer_snapshot: unknown;
+  service_people: unknown;
 }
 
 export function normalizePayStatus(
@@ -167,8 +196,17 @@ async function resolveOrderCustomerId(
     if (existingByPhone) return existingByPhone;
   }
 
+  if (customerName) {
+    const [nameRows] = await db.execute(
+      'SELECT id FROM customers WHERE name = ? ORDER BY created_at DESC LIMIT 2 FOR UPDATE',
+      [customerName]
+    );
+    const exactNameMatches = nameRows as Array<{ id: string }>;
+    if (exactNameMatches.length === 1) return exactNameMatches[0].id;
+  }
+
   const customerId = randomUUID();
-  const customerCode = 'C' + Date.now().toString().slice(-8);
+  const customerCode = await generateCustomerCode(db);
   const advisorId = await resolveAdvisorId(db, body.customerAdvisor || body.advisor);
   await db.execute(
     `INSERT INTO customers (id, customer_code, name, wechat, phone, area, source, acquired_at, tag, follow_status, advisor_id, profile, situation, intended_product, remark)
@@ -180,15 +218,15 @@ async function resolveOrderCustomerId(
       body.customerWechat || null,
       customerPhone || '',
       body.customerArea || null,
-      body.source || '订单录入',
-      body.purchaseDate || new Date(),
+      body.customerSource || body.source || '订单录入',
+      body.customerAcquiredAt || body.purchaseDate || new Date(),
       body.customerTag || 'D1',
-      '待跟进',
+      body.customerFollowStatus || body.followStatus || '待跟进',
       advisorId,
-      JSON.stringify({ age: 0, deliveryDate: '', deliveryType: '未知', babyCount: 0, feedingType: '未知', followTask: '', followRecords: [] }),
+      JSON.stringify(body.customerProfile || { age: 0, deliveryDate: '', deliveryType: '未知', babyCount: 0, feedingType: '未知', followTask: '', followRecords: [] }),
       body.customerSituation || null,
-      body.serviceItems || null,
-      '订单创建时自动建档',
+      body.customerIntendedProduct || body.serviceItems || null,
+      body.customerRemark || '订单创建时自动建档',
     ]
   );
   return customerId;
@@ -238,16 +276,16 @@ async function getCustomerSnapshot(
     wechat: fallback.customerWechat || '',
     phone: fallback.customerPhone || '',
     area: fallback.customerArea || '',
-    source: fallback.source || '',
-    acquiredAt: fallback.purchaseDate || '',
+    source: fallback.customerSource || fallback.source || '',
+    acquiredAt: fallback.customerAcquiredAt || fallback.purchaseDate || '',
     tag: fallback.customerTag || '',
-    followStatus: fallback.followStatus || '待跟进',
-    followDate: fallback.followDate || '',
+    followStatus: fallback.customerFollowStatus || fallback.followStatus || '待跟进',
+    followDate: fallback.customerFollowDate || fallback.followDate || '',
     advisorId: '',
     advisor: fallback.customerAdvisor || fallback.advisor || '',
-    profile: {},
+    profile: fallback.customerProfile || {},
     situation: fallback.customerSituation || '',
-    intendedProduct: fallback.serviceItems || '',
+    intendedProduct: fallback.customerIntendedProduct || fallback.serviceItems || '',
     remark: fallback.customerRemark || '',
   };
 }
@@ -263,14 +301,95 @@ async function applyCustomerEdits(
   if (body.customerWechat !== undefined) next.wechat = body.customerWechat;
   if (body.customerPhone !== undefined) next.phone = body.customerPhone;
   if (body.customerArea !== undefined) next.area = body.customerArea;
-  if (body.source !== undefined) next.source = body.source;
+  if (body.customerSource !== undefined || body.source !== undefined) next.source = body.customerSource ?? body.source ?? '';
+  if (body.customerAcquiredAt !== undefined) next.acquiredAt = body.customerAcquiredAt;
   if (body.customerTag !== undefined) next.tag = body.customerTag;
+  if (body.customerFollowStatus !== undefined || body.followStatus !== undefined) {
+    next.followStatus = body.customerFollowStatus ?? body.followStatus ?? '';
+  }
+  if (body.customerFollowDate !== undefined || body.followDate !== undefined) {
+    next.followDate = body.customerFollowDate ?? body.followDate ?? '';
+  }
   if (advisor !== undefined) {
     next.advisor = advisor || '';
     next.advisorId = advisor ? await resolveAdvisorId(db, advisor) : '';
   }
-  if (body.serviceItems !== undefined) next.intendedProduct = body.serviceItems;
+  if (body.customerProfile !== undefined) {
+    next.profile = mergeCustomerProfileFollowHistory(next.profile, body.customerProfile);
+  }
+  if (body.customerSituation !== undefined) next.situation = body.customerSituation;
+  if (body.customerIntendedProduct !== undefined) next.intendedProduct = body.customerIntendedProduct;
+  else if (body.serviceItems !== undefined && !next.intendedProduct) next.intendedProduct = body.serviceItems;
+  if (body.customerRemark !== undefined) next.remark = body.customerRemark;
   return next;
+}
+
+async function synchronizeCustomerMaster(
+  db: PoolConnection,
+  customerId: string,
+  snapshot: CustomerSnapshot
+) {
+  if (!customerId) return;
+  await db.execute(
+    `UPDATE customers
+     SET name=?, wechat=?, phone=?, area=?, source=?, acquired_at=?, tag=?,
+         follow_status=COALESCE(NULLIF(?, ''), follow_status), follow_date=?,
+         advisor_id=?, profile=?, situation=?, intended_product=?, remark=?
+     WHERE id=?`,
+    [
+      snapshot.name || '', snapshot.wechat || null, snapshot.phone || '',
+      snapshot.area || null, snapshot.source || null, snapshot.acquiredAt || null,
+      snapshot.tag || null, snapshot.followStatus || '', snapshot.followDate || null,
+      snapshot.advisorId || null, jsonOrNull(snapshot.profile || {}),
+      snapshot.situation || null, snapshot.intendedProduct || null,
+      snapshot.remark || null, customerId,
+    ]
+  );
+}
+
+export function applyCanonicalCustomerTag<T extends Record<string, unknown>>(
+  value: T,
+  tag: string
+): T {
+  return { ...value, tag };
+}
+
+async function synchronizeCustomerTag(
+  db: PoolConnection,
+  customerId: string,
+  customerCode: string,
+  tag: string
+) {
+  const [rows] = await db.execute(
+    `SELECT id, customer_snapshot, service_people
+     FROM orders
+     WHERE customer_id = ?
+        OR JSON_UNQUOTE(JSON_EXTRACT(customer_snapshot, '$.id')) = ?
+        OR JSON_UNQUOTE(JSON_EXTRACT(customer_snapshot, '$.customerCode')) = ?
+     FOR UPDATE`,
+    [customerId, customerId, customerCode]
+  );
+
+  for (const row of rows as OrderCustomerTagRow[]) {
+    const snapshot = applyCanonicalCustomerTag(
+      parseJson<Record<string, unknown>>(row.customer_snapshot, {}),
+      tag
+    );
+    const servicePeople = parseJson<Record<string, unknown>>(row.service_people, {});
+    await db.execute(
+      'UPDATE orders SET customer_snapshot = ?, service_people = ? WHERE id = ?',
+      [
+        JSON.stringify(snapshot),
+        jsonOrNull({ ...servicePeople, upgradeCustomerTag: tag }),
+        row.id,
+      ]
+    );
+  }
+
+  await db.execute(
+    'UPDATE customers SET tag = ? WHERE id = ? OR customer_code = ?',
+    [tag, customerId, customerCode]
+  );
 }
 
 export async function createOrder(body: OrderWriteBody) {
@@ -287,7 +406,9 @@ export async function createOrder(body: OrderWriteBody) {
     });
 
     const customerId = await resolveOrderCustomerId(connection, body, leadCustomer?.id);
-    const customerSnapshot = await getCustomerSnapshot(connection, customerId, body);
+    const sourceSnapshot = await getCustomerSnapshot(connection, customerId, body);
+    const customerSnapshot = await applyCustomerEdits(connection, sourceSnapshot, body);
+    await synchronizeCustomerMaster(connection, customerId, customerSnapshot);
     await assertCustomerHasNoOtherOrder(connection, {
       requestedId,
       customerId,
@@ -312,7 +433,20 @@ export async function createOrder(body: OrderWriteBody) {
         jsonOrNull(body.servicePhotoRecords || []),
       ]
     );
-    if (customerId) await connection.execute('DELETE FROM customers WHERE id = ?', [customerId]);
+    if (body.customerTag !== undefined) {
+      await synchronizeCustomerTag(
+        connection,
+        customerId,
+        customerSnapshot.customerCode,
+        body.customerTag
+      );
+    }
+    if (customerId) {
+      await connection.execute(
+        'UPDATE customers SET total_orders = total_orders + 1 WHERE id = ?',
+        [customerId]
+      );
+    }
     await connection.commit();
     return { id, orderNo };
   } catch (error) {
@@ -329,7 +463,7 @@ export async function updateOrder(orderId: string, body: OrderWriteBody, actor: 
   try {
     await connection.beginTransaction();
     const [rows] = await connection.execute(
-      `SELECT id, customer_id, customer_snapshot, type, used_times, total_times, purchase_date
+      `SELECT id, customer_id, customer_snapshot, type, used_times, total_times, purchase_date, service_people
        FROM orders WHERE id=? OR order_no=? LIMIT 1 FOR UPDATE`,
       [orderId, orderId]
     );
@@ -364,7 +498,11 @@ export async function updateOrder(orderId: string, body: OrderWriteBody, actor: 
       selectedSnapshot = await getCustomerSnapshot(connection, customerId, body);
     }
 
+    const canonicalSnapshot = await getCustomerSnapshot(connection, customerId, body);
+    if (canonicalSnapshot.customerCode) selectedSnapshot = canonicalSnapshot;
+
     const customerSnapshot = await applyCustomerEdits(connection, selectedSnapshot, body);
+    await synchronizeCustomerMaster(connection, customerId, customerSnapshot);
     const payStatus = normalizePayStatus(body.payStatus);
     const orderType = body.type || existing.type;
     const totalTimes = orderType === '体验卡' && !body.isUpgrade
@@ -373,6 +511,7 @@ export async function updateOrder(orderId: string, body: OrderWriteBody, actor: 
     const usedTimes = manualProgressEdit
       ? Math.min(totalTimes, Math.max(0, Number(body.usedTimes) || 0))
       : Number(existing.used_times) || 0;
+    const servicePeople = mergeOrderFollowHistory(existing.service_people, body.servicePeople);
 
     await connection.execute(
       `UPDATE orders
@@ -398,7 +537,7 @@ export async function updateOrder(orderId: string, body: OrderWriteBody, actor: 
         body.hasCoupon ? 1 : 0,
         body.serviceItemCount || 1,
         body.serviceItems || null,
-        jsonOrNull(body.servicePeople),
+        jsonOrNull(servicePeople),
         body.appointmentTime || null,
         body.serviceNote || null,
         jsonOrNull(body.contractAttachments || []),
@@ -408,8 +547,23 @@ export async function updateOrder(orderId: string, body: OrderWriteBody, actor: 
       ]
     );
 
+    if (body.customerTag !== undefined) {
+      await synchronizeCustomerTag(
+        connection,
+        customerId,
+        customerSnapshot.customerCode,
+        body.customerTag
+      );
+    }
     if (customerId && customerId !== existing.customer_id) {
-      await connection.execute('DELETE FROM customers WHERE id = ?', [customerId]);
+      await connection.execute(
+        'UPDATE customers SET total_orders = total_orders + 1 WHERE id = ?',
+        [customerId]
+      );
+      await connection.execute(
+        'UPDATE customers SET total_orders = GREATEST(total_orders - 1, 0) WHERE id = ?',
+        [existing.customer_id]
+      );
     }
     await connection.commit();
   } catch (error) {

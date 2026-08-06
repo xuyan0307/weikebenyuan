@@ -3,6 +3,7 @@ import { EyeIcon, EyeOffIcon, UserIcon, LockIcon, ArrowRightIcon } from 'lucide-
 import { useLogin } from '../api/hooks';
 import { setToken } from '../api/client';
 import type { UserInfo } from '../api/endpoints';
+import RegulatoryFooter from '../components/RegulatoryFooter';
 
 const LOGO_URL = '/logo.jpg';
 
@@ -242,9 +243,13 @@ export default function Login() {
         </div>
       </div>
 
-      <div className="absolute bottom-4 left-0 right-0 text-center text-xs z-10" style={{ color: '#9BBDD4' }}>
+      <div className="absolute bottom-7 left-0 right-0 text-center text-xs z-10" style={{ color: '#9BBDD4' }}>
         © 2025 微可本源 · 产康运营管理平台 · 保留所有权利
       </div>
+      <RegulatoryFooter
+        className="absolute bottom-0 left-0 right-0 z-10"
+        color="#739AB8"
+      />
     </div>
   );
 }

@@ -1,760 +1,620 @@
-import { useState, useMemo } from 'react';
-import { toast } from 'sonner';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  RefreshCwIcon, DownloadIcon, EditIcon, XIcon, PlusIcon, Trash2Icon,
-  ChevronLeftIcon, ChevronRightIcon, CalendarIcon, CheckCircleIcon,
-  AlertCircleIcon, ClockIcon
+  CalendarDaysIcon,
+  CheckIcon,
+  ChevronDownIcon,
+  DownloadIcon,
+  Edit3Icon,
+  RefreshCwIcon,
+  SaveIcon,
+  XIcon,
 } from 'lucide-react';
-import { useTherapists, useAppointments, useOrders } from '../api/hooks';
+import { toast } from 'sonner';
+import type {
+  SalaryCustomerLedger,
+  SalaryLedgerSummary,
+  SalarySettlementEntry,
+} from '../api/endpoints';
+import { useFinanceMutations, useSalary } from '../api/hooks';
+import { useApp } from '../hooks/useApp';
 
-// ─────────── 本地类型 ────────────────────────────────────────────────────────
+type EntryDraft = Pick<
+  SalarySettlementEntry,
+  'experienceFee' | 'laborFee' | 'commission' | 'couponFee' |
+  'otherFee' | 'deduction' | 'settlementStatus' | 'settlementNote'
+>;
 
-type SettleStatus = '待结算' | '已结算' | '审核中';
-
-interface OtherFeeItem {
-  label: string;
-  amount: number;
-  note: string;
+interface AdjustmentDraft {
+  couponFee: number;
+  otherFee: number;
+  commissionRate: number;
+  adjustmentNote: string;
 }
 
-interface TherapistWeekRow {
-  therapistId: string;
-  therapistName: string;
-  therapistType: string;
-  starLevel: 1 | 2 | 3 | 4 | 5;
-  experienceFee: number;    // 体验卡费用
-  laborFee: number;         // 套餐手工费
-  commission: number;       // 提成
-  couponFee: number;        // 抵扣券
-  otherFee: number;         // 其他费用
-  total: number;
-  status: SettleStatus;
-  extras: OtherFeeItem[];
-  // 明细快照
-  expApptIds: string[];     // 体验卡预约id列表
-  laborDetails: { apptId: string; customerName: string; date: string; count: number; fee: number }[];
-  commissionDetails: { orderId: string; customerName: string; amount: number; rate: number; fee: number }[];
-  couponDetails: { orderId: string; customerName: string; fee: number }[];
+const weekdays = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+
+function localDate(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
-// ─────────── 工具函数 ────────────────────────────────────────────────────────
-
-function getWeekBounds(offsetWeeks: number): { start: Date; end: Date; label: string } {
+function mondayOfCurrentWeek(): string {
   const now = new Date();
-  const dow = now.getDay(); // 0=Sun
-  const diffToMon = (dow === 0 ? -6 : 1 - dow);
-  const mon = new Date(now);
-  mon.setDate(now.getDate() + diffToMon + offsetWeeks * 7);
-  mon.setHours(0, 0, 0, 0);
-  const sun = new Date(mon);
-  sun.setDate(mon.getDate() + 6);
-  sun.setHours(23, 59, 59, 999);
-
-  // 计算是该月第几周
-  const firstDayOfMonth = new Date(mon.getFullYear(), mon.getMonth(), 1);
-  const weekNo = Math.ceil((mon.getDate() + firstDayOfMonth.getDay()) / 7);
-  const label = `${mon.getFullYear()}年${mon.getMonth() + 1}月 第${weekNo}周`;
-  return { start: mon, end: sun, label };
+  const weekday = now.getDay() || 7;
+  now.setDate(now.getDate() - weekday + 1);
+  return localDate(now);
 }
 
-function toDateStr(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${dd}`;
+function shiftDate(date: string, amount: number): string {
+  const value = new Date(`${date}T00:00:00`);
+  value.setDate(value.getDate() + amount);
+  return localDate(value);
 }
 
-function parseServiceCount(service: string): number {
-  // 拆分 "," 或 "+" 或 "，"
-  const parts = service.split(/[,，+]/).map(s => s.trim()).filter(Boolean);
-  return parts.length;
+function currentMonth(): string { return localDate(new Date()).slice(0, 7); }
+
+function shiftMonth(month: string, amount: number): string {
+  const [year, monthNo] = month.split('-').map(Number);
+  const value = new Date(year, monthNo - 1 + amount, 1);
+  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}`;
 }
 
-function isExperienceAppt(service: string): boolean {
-  return service.includes('体验卡');
+function mondayOfMonth(month: string): string {
+  if (month === currentMonth()) return mondayOfCurrentWeek();
+  const date = new Date(`${month}-01T00:00:00`);
+  const weekday = date.getDay() || 7;
+  date.setDate(date.getDate() - weekday + 1);
+  return localDate(date);
 }
 
-const COMMISSION_RATE: Record<1 | 2 | 3 | 4 | 5, number> = {
-  1: 0.05, 2: 0.06, 3: 0.08, 4: 0.10, 5: 0.12,
-};
-
-function fmtMoney(n: number): string {
-  return `¥${n.toLocaleString('zh-CN')}`;
+function datesOfWeek(weekStart: string): string[] {
+  return Array.from({ length: 7 }, (_, index) => shiftDate(weekStart, index));
 }
 
-// ─────────── 初始化本周各技师结算行 ──────────────────────────────────────────
+function weekLabel(weekStart: string): string {
+  const weekEnd = shiftDate(weekStart, 6);
+  return `${weekStart.slice(0, 4)}年 ${weekStart.slice(5).replace('-', '/')}–${weekEnd.slice(5).replace('-', '/')}`;
+}
 
-const STATUS_CYCLE: SettleStatus[] = ['待结算', '审核中', '已结算'];
-const weekStatusMap: Map<string, SettleStatus> = new Map();
-const weekExtrasMap: Map<string, OtherFeeItem[]> = new Map();
+function money(value: number): string {
+  return `¥${Number(value || 0).toLocaleString('zh-CN', { maximumFractionDigits: 2 })}`;
+}
 
-function buildRows(weekStart: Date, weekEnd: Date, selectedIds: string[], THERAPISTS: any[], APPOINTMENTS: any[], ORDERS: any[]): TherapistWeekRow[] {
-  const weekStartStr = toDateStr(weekStart);
-  const therapists = selectedIds.length > 0
-    ? THERAPISTS.filter(t => selectedIds.includes(t.id))
-    : THERAPISTS;
+function csvCell(value: unknown): string {
+  return `"${String(value ?? '').replaceAll('"', '""')}"`;
+}
 
-  return therapists.map(therapist => {
-    const key = `W-${weekStartStr}-${therapist.id}`;
+function summaryFromCustomers(customers: SalaryCustomerLedger[], weekKey: string, scope: 'all' | 'month'): SalaryLedgerSummary {
+  const servedThisMonth = new Set<string>();
+  let upgraded = 0;
+  for (const customer of customers) {
+    if (customer.servedThisMonth) servedThisMonth.add(customer.customerDbId);
+    if (customer.upgradedThisMonth) upgraded += 1;
+  }
+  return {
+    customerCount: customers.length,
+    totalServiceTimes: customers.reduce((sum, item) => sum + item.totalTimes, 0),
+    servedTimes: customers.reduce((sum, item) => sum + item.servedTimes, 0),
+    totalFee: customers.reduce((sum, item) => sum + item.totalFee, 0),
+    paidSubtotal: customers.reduce((sum, item) => sum + item.paidSubtotal, 0),
+    unpaidSubtotal: customers.reduce((sum, item) => sum + item.unpaidSubtotal, 0),
+    currentWeekSubtotal: customers.reduce((sum, item) => sum + Number(item.weekSubtotals[weekKey] || 0), 0),
+    upgradeRate: scope === 'all'
+      ? (customers.length ? Math.round((customers.filter(item => item.hasUpgrade).length / customers.length) * 1000) / 10 : 0)
+      : (servedThisMonth.size ? Math.round((upgraded / servedThisMonth.size) * 1000) / 10 : 0),
+  };
+}
 
-    // 本周该技师的预约（非已取消）
-    const weekAppts = APPOINTMENTS.filter(a =>
-      a.therapistId === therapist.id &&
-      a.date >= toDateStr(weekStart) &&
-      a.date <= toDateStr(weekEnd) &&
-      a.status !== '已取消'
-    );
+const therapistTypes = ['产康师', '调理师', '运动康复师'];
+const FROZEN_COLUMN_COUNT = 5;
+const SALARY_COLUMN_WIDTHS_KEY = 'salary-column-widths-v7';
+const defaultColumnWidths = [64, 56, 58, 72, 46, 78, 76, 66, 66, 58, 66, 70, 70, 66, 66, 46, 78, 78, 78, 78, 78, 78, 78, 86];
 
-    // 1. 体验卡费用
-    const expAppts = weekAppts.filter(a => isExperienceAppt(a.service));
-    const experienceFee = expAppts.length * 200;
+function initialColumnWidths(): number[] {
+  try {
+    const saved = JSON.parse(localStorage.getItem(SALARY_COLUMN_WIDTHS_KEY) || '[]');
+    return Array.isArray(saved) && saved.length === defaultColumnWidths.length
+      ? saved.map((value, index) => Math.max(44, Number(value) || defaultColumnWidths[index]))
+      : defaultColumnWidths;
+  } catch { return defaultColumnWidths; }
+}
 
-    // 2. 套餐手工费
-    const packageAppts = weekAppts.filter(a => !isExperienceAppt(a.service));
-    let laborFee = 0;
-    const laborDetails: TherapistWeekRow['laborDetails'] = [];
-    packageAppts.forEach(a => {
-      const cnt = parseServiceCount(a.service);
-      let fee = 0;
-      if (therapist.therapistType === '产康师') {
-        fee = cnt >= 3 ? 400 : cnt === 2 ? 300 : 150;
-      } else {
-        fee = 150;
-      }
-      laborFee += fee;
-      laborDetails.push({
-        apptId: a.id,
-        customerName: a.customerName,
-        date: a.date,
-        count: cnt,
-        fee,
-      });
-    });
-
-    // 3. 提成 + 4. 抵扣券
-    // 找出本周关联的已完成订单（usedTimes === totalTimes）
-    const weekCustomerIds = new Set(weekAppts.map(a => a.customerId));
-    let commission = 0;
-    let couponFee = 0;
-    const commissionDetails: TherapistWeekRow['commissionDetails'] = [];
-    const couponDetails: TherapistWeekRow['couponDetails'] = [];
-
-    ORDERS.forEach(order => {
-      if (order.type === '体验卡') return;
-      if (!weekCustomerIds.has(order.customerId)) return;
-      // 该订单最后一次服务是本周完成的（usedTimes === totalTimes）
-      if (order.usedTimes < order.totalTimes) return;
-      const rate = COMMISSION_RATE[therapist.starLevel];
-      const fee = Math.round(order.amount * rate);
-      commission += fee;
-      commissionDetails.push({
-        orderId: order.id,
-        customerName: order.customerName,
-        amount: order.amount,
-        rate,
-        fee,
-      });
-      // 抵扣券
-      if (order.hasCoupon) {
-        couponFee += 300;
-        couponDetails.push({ orderId: order.id, customerName: order.customerName, fee: 300 });
-      }
-    });
-
-    // 5. 其他费用（存储在 map 中，可通过编辑弹窗修改）
-    const extras: OtherFeeItem[] = weekExtrasMap.get(key) ?? [];
-    const otherFee = extras.reduce((s, it) => s + (it.amount || 0), 0);
-
-    const total = experienceFee + laborFee + commission + couponFee + otherFee;
-    const status: SettleStatus = weekStatusMap.get(key) ?? '待结算';
-
-    return {
-      therapistId: therapist.id,
-      therapistName: therapist.name,
-      therapistType: therapist.therapistType,
-      starLevel: therapist.starLevel,
-      experienceFee,
-      laborFee,
-      commission,
-      couponFee,
-      otherFee,
-      total,
-      status,
-      extras,
-      expApptIds: expAppts.map(a => a.id),
-      laborDetails,
-      commissionDetails,
-      couponDetails,
+function ResizableHeader({ index, width, onResize, children, className = '', stickyLeft }: {
+  index: number;
+  width: number;
+  onResize: (index: number, width: number) => void;
+  children: React.ReactNode;
+  className?: string;
+  stickyLeft?: number;
+}) {
+  const startResize = (event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const startX = event.clientX;
+    const startWidth = width;
+    const move = (moveEvent: MouseEvent) => onResize(index, Math.max(44, startWidth + moveEvent.clientX - startX));
+    const stop = () => {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', stop);
     };
-  });
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', stop);
+  };
+  const frozen = stickyLeft !== undefined;
+  return <th
+    style={frozen ? { left: stickyLeft } : undefined}
+    className={`relative border-b border-r border-border px-2 py-3 ${frozen ? 'sticky z-40 bg-muted' : ''} ${index === FROZEN_COLUMN_COUNT - 1 ? 'shadow-[5px_0_7px_-5px_rgba(15,23,42,0.45)]' : ''} ${className}`}
+  >
+    {children}
+    <span
+      role="separator"
+      aria-label="拖动调整列宽"
+      onMouseDown={startResize}
+      className="absolute right-0 top-0 h-full w-1.5 cursor-col-resize select-none hover:bg-primary/40"
+    />
+  </th>;
 }
 
-// ─────────── 主组件 ───────────────────────────────────────────────────────────
+function TherapistMultiSelect({ rows, selected, onChange }: {
+  rows: Array<{ therapistId: string; therapistName: string; therapistType: string }>;
+  selected: string[] | null;
+  onChange: (value: string[] | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const selectedSet = new Set(selected ?? rows.map(row => row.therapistId));
+  const toggle = (id: string) => {
+    if (selected === null) return onChange([id]);
+    onChange(selectedSet.has(id)
+      ? [...selectedSet].filter(value => value !== id)
+      : [...selectedSet, id]);
+  };
+  const allSelected = selected === null;
+  const label = allSelected ? '全部技师' : selected.length === 0 ? '未选技师' : `已选${selected.length}人`;
+  useEffect(() => {
+    const close = (event: MouseEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, []);
+  return <div ref={rootRef} className="relative">
+    <button onClick={() => setOpen(value => !value)} className="inline-flex min-w-40 items-center justify-between gap-3 rounded-xl border border-border bg-card px-4 py-2.5 text-sm shadow-sm">
+      {label}<ChevronDownIcon size={15} />
+    </button>
+    {open && <div className="absolute left-0 top-full z-50 mt-2 w-72 rounded-xl border border-border bg-card p-2 shadow-xl">
+      <div className="max-h-80 overflow-y-auto py-1">
+        <button onClick={() => onChange(allSelected ? [] : null)} className="flex w-full items-center gap-2 border-b border-border px-2 py-2.5 text-left font-medium hover:bg-muted">
+          <span className={`flex h-4 w-4 items-center justify-center rounded border ${allSelected ? 'border-primary bg-primary text-white' : 'border-border'}`}>{allSelected && <CheckIcon size={12} />}</span>
+          全选
+        </button>
+        {therapistTypes.map(type => {
+          const group = rows.filter(row => (row.therapistType || '产康师') === type);
+          const groupSelected = group.length > 0 && group.every(row => selectedSet.has(row.therapistId));
+          return <div key={type} className="py-1">
+            <button disabled={!group.length} onClick={() => {
+              const next = new Set(selectedSet);
+              group.forEach(row => groupSelected ? next.delete(row.therapistId) : next.add(row.therapistId));
+              onChange([...next]);
+            }} className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left font-medium hover:bg-muted disabled:opacity-40">
+              <span className={`flex h-4 w-4 items-center justify-center rounded border ${groupSelected ? 'border-primary bg-primary text-white' : 'border-border'}`}>{groupSelected && <CheckIcon size={12} />}</span>
+              {type}<span className="ml-auto text-xs text-muted-foreground">{group.length}人</span>
+            </button>
+            {group.map(row => <button key={row.therapistId} onClick={() => toggle(row.therapistId)} className="flex w-full items-center gap-2 rounded-lg py-1.5 pl-8 pr-2 text-left text-sm hover:bg-muted">
+              <span className={`flex h-4 w-4 items-center justify-center rounded border ${selectedSet.has(row.therapistId) ? 'border-primary bg-primary text-white' : 'border-border'}`}>{selectedSet.has(row.therapistId) && <CheckIcon size={12} />}</span>{row.therapistName}
+            </button>)}
+          </div>;
+        })}
+      </div>
+    </div>}
+  </div>;
+}
+
+function SummaryCard({ label, value, note }: { label: string; value: string; note: string }) {
+  return (
+    <div className="min-w-0 rounded-xl border border-border bg-card px-3 py-2 shadow-sm">
+      <div className="truncate text-xs text-muted-foreground">{label}</div>
+      <div className="mt-0.5 text-lg font-bold leading-6 text-foreground">{value}</div>
+      <div className="mt-0.5 truncate text-[10px] leading-4 text-muted-foreground">{note}</div>
+    </div>
+  );
+}
+
+function Modal({ title, children, saving, onClose, onSave }: {
+  title: string;
+  children: React.ReactNode;
+  saving: boolean;
+  onClose: () => void;
+  onSave: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-xl rounded-2xl bg-card shadow-2xl">
+        <div className="flex items-center justify-between border-b border-border px-5 py-4">
+          <h3 className="font-semibold">{title}</h3>
+          <button onClick={onClose} className="rounded-lg p-1.5 hover:bg-muted"><XIcon size={18} /></button>
+        </div>
+        <div className="max-h-[68vh] overflow-y-auto p-5">{children}</div>
+        <div className="flex justify-end gap-2 border-t border-border px-5 py-4">
+          <button onClick={onClose} className="rounded-lg border border-border px-4 py-2 text-sm">取消</button>
+          <button disabled={saving} onClick={onSave} className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-60">
+            <SaveIcon size={15} />{saving ? '保存中…' : '保存'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function FinanceSalaryPage() {
-  const [weekOffset, setWeekOffset] = useState(0);
-  const [selectedTherapistIds, setSelectedTherapistIds] = useState<string[]>([]);
-  const [therapistDropOpen, setTherapistDropOpen] = useState(false);
-  const [refreshTick, setRefreshTick] = useState(0);
-
-  const therapistsQ = useTherapists({ page: 1, pageSize: 1000 });
-  const apptsQ = useAppointments({ page: 1, pageSize: 1000 });
-  const ordersQ = useOrders({ page: 1, pageSize: 1000 });
-  const THERAPISTS: any[] = therapistsQ.data?.data ?? [];
-  const APPOINTMENTS: any[] = apptsQ.data?.data ?? [];
-  const ORDERS: any[] = ordersQ.data?.data ?? [];
-
-  // 编辑弹窗状态
-  const [editingRow, setEditingRow] = useState<TherapistWeekRow | null>(null);
-  const [editExtras, setEditExtras] = useState<OtherFeeItem[]>([]);
-
-  // 明细弹窗
-  const [detailRow, setDetailRow] = useState<TherapistWeekRow | null>(null);
-
-  const { start: weekStart, end: weekEnd, label: weekLabel } = useMemo(
-    () => getWeekBounds(weekOffset),
-    [weekOffset]
+  const { currentUser } = useApp();
+  const [weekStart, setWeekStart] = useState(mondayOfCurrentWeek());
+  const [month, setMonth] = useState(currentMonth());
+  const [scope, setScope] = useState<'all' | 'month'>('month');
+  const [selectedTherapistIds, setSelectedTherapistIds] = useState<string[] | null>(null);
+  const [columnWidths, setColumnWidths] = useState<number[]>(initialColumnWidths);
+  const [editingEntry, setEditingEntry] = useState<SalarySettlementEntry | null>(null);
+  const [entryDraft, setEntryDraft] = useState<EntryDraft | null>(null);
+  const [editingCustomer, setEditingCustomer] = useState<SalaryCustomerLedger | null>(null);
+  const [adjustmentDraft, setAdjustmentDraft] = useState<AdjustmentDraft | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [confirmingWeek, setConfirmingWeek] = useState('');
+  const salaryQ = useSalary(month, weekStart, scope);
+  const mutations = useFinanceMutations();
+  const rows = salaryQ.data?.data || [];
+  const editable = Boolean(salaryQ.data?.editable) && ['admin', 'superadmin'].includes(currentUser.role);
+  const selectedWeek = useMemo(() => ({
+    key: weekStart,
+    label: weekLabel(weekStart).split(' ')[1],
+    start: weekStart,
+    end: shiftDate(weekStart, 6),
+    days: datesOfWeek(weekStart),
+  }), [weekStart]);
+  const visibleRows = selectedTherapistIds === null ? rows : rows.filter(row => selectedTherapistIds.includes(row.therapistId));
+  const visibleCustomers = visibleRows.flatMap(row => row.customers || []);
+  const summary = useMemo(
+    () => summaryFromCustomers(visibleCustomers, selectedWeek?.key || '', scope),
+    [visibleCustomers, selectedWeek?.key, scope]
   );
-  const weekStartStr = toDateStr(weekStart);
+  const confirmedWeekSubtotal = useMemo(
+    () => visibleCustomers.reduce(
+      (sum, customer) => sum + Number(customer.weekConfirmedSubtotals[selectedWeek.key] || 0),
+      0
+    ),
+    [visibleCustomers, selectedWeek.key]
+  );
+  const totalTableWidth = useMemo(() => columnWidths.reduce((sum, width) => sum + width, 0), [columnWidths]);
 
-  const rows = useMemo(
-    () => buildRows(weekStart, weekEnd, selectedTherapistIds, THERAPISTS, APPOINTMENTS, ORDERS),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [weekOffset, selectedTherapistIds, refreshTick, THERAPISTS, APPOINTMENTS, ORDERS]
+  useEffect(() => {
+    localStorage.setItem(SALARY_COLUMN_WIDTHS_KEY, JSON.stringify(columnWidths));
+  }, [columnWidths]);
+
+  const frozenOffsets = useMemo(
+    () => columnWidths.map((_, index) => columnWidths.slice(0, index).reduce((sum, width) => sum + width, 0)),
+    [columnWidths]
   );
 
-  // ── 汇总卡片 ──────────────────────────────────────────────────────────────
-  const summaryExpFee = rows.reduce((s, r) => s + r.experienceFee, 0);
-  const summaryLaborFee = rows.reduce((s, r) => s + r.laborFee, 0);
-  const summaryCommission = rows.reduce((s, r) => s + r.commission, 0);
-  const summaryTotal = rows.reduce((s, r) => s + r.total, 0);
-  const pendingCount = rows.filter(r => r.status === '待结算').length;
-
-  // ── 周日期条 ────────────────────────────────────────────────────────────────
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const weekDates = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(weekStart);
-    d.setDate(weekStart.getDate() + i);
-    return d;
-  });
-  const CN_DAYS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
-
-  // ── 技师多选下拉 ─────────────────────────────────────────────────────────
-  function toggleTherapist(id: string) {
-    setSelectedTherapistIds(prev =>
-      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
-    );
+  function resizeColumn(index: number, width: number) {
+    setColumnWidths(current => current.map((value, currentIndex) => currentIndex === index ? width : value));
   }
 
-  // ── 状态点击循环 ─────────────────────────────────────────────────────────
-  function cycleStatus(row: TherapistWeekRow) {
-    const key = `W-${weekStartStr}-${row.therapistId}`;
-    const cur = row.status;
-    const idx = STATUS_CYCLE.indexOf(cur);
-    const next = STATUS_CYCLE[(idx + 1) % STATUS_CYCLE.length];
-    weekStatusMap.set(key, next);
-    setRefreshTick(t => t + 1);
-    toast.success(`${row.therapistName} 结算状态已更新为「${next}」`);
+  function changeMonth(amount: number) {
+    const next = shiftMonth(month, amount);
+    setMonth(next);
+    setWeekStart(mondayOfMonth(next));
   }
 
-  // ── 打开编辑弹窗 ─────────────────────────────────────────────────────────
-  function openEdit(row: TherapistWeekRow) {
-    setEditingRow(row);
-    setEditExtras(row.extras.length > 0
-      ? row.extras.map(e => ({ ...e }))
-      : [{ label: '路补', amount: 0, note: '' }]
-    );
+  function changeWeek(amount: number) {
+    const next = shiftDate(weekStart, amount * 7);
+    setWeekStart(next);
   }
 
-  function saveEdit() {
-    if (!editingRow) return;
-    const key = `W-${weekStartStr}-${editingRow.therapistId}`;
-    weekExtrasMap.set(key, editExtras.filter(e => e.label || e.amount));
-    setEditingRow(null);
-    setRefreshTick(t => t + 1);
-    toast.success('其他费用已保存');
+  function openEntry(entry: SalarySettlementEntry) {
+    if (!editable) return;
+    setEditingEntry(entry);
+    setEntryDraft({
+      experienceFee: entry.experienceFee,
+      laborFee: entry.laborFee,
+      commission: entry.commission,
+      couponFee: entry.couponFee,
+      otherFee: entry.otherFee,
+      deduction: entry.deduction,
+      settlementStatus: entry.settlementStatus,
+      settlementNote: entry.settlementNote,
+    });
   }
 
-  // ── 下载明细（模拟） ────────────────────────────────────────────────────
+  function openCustomer(customer: SalaryCustomerLedger) {
+    if (!editable) return;
+    setEditingCustomer(customer);
+    setAdjustmentDraft({
+      couponFee: customer.couponFee,
+      otherFee: customer.manualOtherFee,
+      commissionRate: customer.commissionRate,
+      adjustmentNote: customer.adjustmentNote,
+    });
+  }
+
+  async function saveEntry() {
+    if (!editingEntry || !entryDraft) return;
+    setSaving(true);
+    try {
+      await mutations.updateEntry({ id: editingEntry.id, body: entryDraft });
+      toast.success('本次服务费用和备注已保存');
+      setEditingEntry(null);
+      setEntryDraft(null);
+    } catch (error: any) {
+      toast.error(error?.message || '保存失败');
+    } finally { setSaving(false); }
+  }
+
+  async function saveAdjustment() {
+    if (!editingCustomer || !adjustmentDraft) return;
+    if (!Number.isFinite(adjustmentDraft.commissionRate) || adjustmentDraft.commissionRate < 0 || adjustmentDraft.commissionRate > 100) {
+      toast.error('提成比例须在0至100之间');
+      return;
+    }
+    setSaving(true);
+    try {
+      await mutations.updateCustomerAdjustment({
+        therapistId: editingCustomer.therapistId,
+        customerId: editingCustomer.customerDbId,
+        month,
+        paidAmount: 0,
+        ...adjustmentDraft,
+      });
+      toast.success('客户抵扣券和其他费用已保存');
+      setEditingCustomer(null);
+      setAdjustmentDraft(null);
+    } catch (error: any) {
+      toast.error(error?.message || '保存失败');
+    } finally { setSaving(false); }
+  }
+
+  async function toggleWeekConfirmation(customer: SalaryCustomerLedger, confirmed: boolean) {
+    const key = `${customer.therapistId}:${customer.customerDbId}:${selectedWeek.key}`;
+    setConfirmingWeek(key);
+    try {
+      const result = await mutations.confirmWeek({
+        therapistId: customer.therapistId,
+        customerId: customer.customerDbId,
+        weekStart: selectedWeek.key,
+        confirmed,
+      });
+      toast.success(result.message);
+    } catch (error: any) {
+      toast.error(error?.message || '本周结算确认失败');
+    } finally {
+      setConfirmingWeek('');
+    }
+  }
+
   function downloadDetail() {
-    toast.success(`${weekLabel} 薪酬明细已导出`);
+    if (!visibleCustomers.length) return toast.info('当前没有可下载的客户结算明细');
+    const headers = ['技师', '工种', '分档', '提成比例', '升单率', '客户ID', '客户姓名', '体验卡', '体验卡服务时间', '升单时间', '项目数', '套餐金额', '已服务/总数', '抵扣券', '手工费', '提成', '其他费用', '总费用', '已付小计', '未付小计', '当周小计'];
+    const lines = [headers.map(csvCell).join(','), ...visibleCustomers.map(customer => [
+      customer.therapistName,
+      visibleRows.find(row => row.therapistId === customer.therapistId)?.therapistType || '产康师',
+      visibleRows.find(row => row.therapistId === customer.therapistId)?.tier || '',
+      customer.commissionRate,
+      visibleRows.find(row => row.therapistId === customer.therapistId)?.upgradeRate || 0,
+      customer.customerId, customer.customerName, customer.experienceStatus, customer.experienceServiceDate,
+      customer.upgradeDate, customer.itemCount, customer.packageAmount,
+      `${customer.servedTimes}/${customer.totalTimes}`, customer.couponFee, customer.laborFee, customer.commission, customer.otherFee, customer.totalFee,
+      customer.paidSubtotal, customer.unpaidSubtotal, customer.weekSubtotals[selectedWeek?.key || ''] || 0,
+    ].map(csvCell).join(','))];
+    const blob = new Blob([`\uFEFF${lines.join('\r\n')}`], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `${weekStart}-工资结算客户明细.csv`;
+    anchor.click();
+    URL.revokeObjectURL(url);
   }
 
-  // ── 状态标签 ────────────────────────────────────────────────────────────
-  function StatusBadge({ status }: { status: SettleStatus }) {
-    const cfg = {
-      '待结算': { bg: 'bg-warning/10 text-warning', icon: <ClockIcon size={12} /> },
-      '审核中': { bg: 'bg-brand/10 text-brand', icon: <AlertCircleIcon size={12} /> },
-      '已结算': { bg: 'bg-success/10 text-success', icon: <CheckCircleIcon size={12} /> },
-    }[status];
-    return (
-      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${cfg.bg}`}>
-        {cfg.icon}{status}
-      </span>
-    );
-  }
-
-  // ── 星级 ────────────────────────────────────────────────────────────────
-  function StarBadge({ level }: { level: 1 | 2 | 3 | 4 | 5 }) {
-    return (
-      <span className="text-warning text-xs font-semibold">
-        {'★'.repeat(level)}{'☆'.repeat(5 - level)}
-      </span>
-    );
-  }
-
+  const inputClass = 'w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary';
   return (
-    <div data-cmp="FinanceSalaryPage" className="p-6 flex flex-col gap-5">
-
-      {/* ── 顶部操作栏 ──────────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div className="flex items-center gap-3 flex-wrap">
-          {/* 周切换 */}
-          <div className="flex items-center gap-1 bg-card border border-border rounded-lg px-2 py-1.5 shadow-custom">
-            <button
-              onClick={() => setWeekOffset(o => o - 1)}
-              className="p-1 rounded hover:bg-accent transition-colors"
-            >
-              <ChevronLeftIcon size={16} className="text-muted-foreground" />
-            </button>
-            <CalendarIcon size={14} className="text-brand ml-1" />
-            <span className="text-sm font-semibold text-foreground px-2 min-w-[160px] text-center">
-              {weekLabel}
-            </span>
-            <button
-              onClick={() => setWeekOffset(o => o + 1)}
-              className="p-1 rounded hover:bg-accent transition-colors"
-            >
-              <ChevronRightIcon size={16} className="text-muted-foreground" />
-            </button>
-            <button
-              onClick={() => setWeekOffset(0)}
-              className="text-xs text-brand hover:underline px-1"
-            >
-              本周
-            </button>
-          </div>
-
-          {/* 技师多选 */}
-          <div className="relative">
-            <button
-              onClick={() => setTherapistDropOpen(o => !o)}
-              className="flex items-center gap-2 bg-card border border-border rounded-lg px-3 py-1.5 text-sm text-foreground hover:bg-accent transition-colors shadow-custom min-w-[140px]"
-            >
-              <span className="flex-1 text-left">
-                {selectedTherapistIds.length === 0
-                  ? '全部技师'
-                  : `已选 ${selectedTherapistIds.length} 位`}
-              </span>
-              <ChevronRightIcon size={14} className={`text-muted-foreground transition-transform ${therapistDropOpen ? 'rotate-90' : ''}`} />
-            </button>
-            <div className={`absolute top-full mt-1 left-0 z-20 bg-popover border border-border rounded-lg shadow-custom w-52 py-1 ${therapistDropOpen ? '' : 'hidden'}`}>
-              <button
-                onClick={() => setSelectedTherapistIds([])}
-                className="w-full text-left px-3 py-1.5 text-sm hover:bg-accent transition-colors text-brand"
-              >
-                全部技师
-              </button>
-              {THERAPISTS.map(t => (
-                <button
-                  key={t.id}
-                  onClick={() => toggleTherapist(t.id)}
-                  className="w-full flex items-center justify-between px-3 py-1.5 text-sm hover:bg-accent transition-colors"
-                >
-                  <span>{t.name}</span>
-                  <span className={`w-4 h-4 rounded border text-xs flex items-center justify-center
-                    ${selectedTherapistIds.includes(t.id) ? 'bg-brand border-brand text-white' : 'border-border'}`}>
-                    {selectedTherapistIds.includes(t.id) ? '✓' : ''}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
+    <div className="flex h-[calc(100vh-86px)] min-h-0 flex-col gap-2 overflow-hidden p-3">
+      <div className="flex flex-shrink-0 flex-wrap items-center gap-2">
+        <div className="flex rounded-xl border border-border bg-card p-1 shadow-sm">
+          <button onClick={() => setScope('all')} className={`rounded-lg px-4 py-2 text-sm ${scope === 'all' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'}`}>全部</button>
+          <button onClick={() => setScope('month')} className={`rounded-lg px-4 py-2 text-sm ${scope === 'month' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'}`}>本月</button>
         </div>
-
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => { setRefreshTick(t => t + 1); toast.success('数据已刷新'); }}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-card border border-border rounded-lg text-sm text-foreground hover:bg-accent shadow-custom transition-colors"
-          >
-            <RefreshCwIcon size={14} />刷新数据
-          </button>
-          <button
-            onClick={downloadDetail}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-brand text-white rounded-lg text-sm hover:opacity-90 shadow-custom transition-colors"
-          >
-            <DownloadIcon size={14} />下载明细
-          </button>
+        {scope === 'month' && <div className="flex items-center rounded-xl border border-border bg-card shadow-sm">
+          <button aria-label="上一月" onClick={() => changeMonth(-1)} className="px-3 py-2.5 text-muted-foreground">‹</button>
+          <div className="flex min-w-36 items-center justify-center gap-2 px-3 font-semibold"><CalendarDaysIcon size={17} className="text-primary" />{month.replace('-', '年')}月</div>
+          <button aria-label="下一月" onClick={() => changeMonth(1)} className="px-3 py-2.5 text-muted-foreground">›</button>
+        </div>}
+        <TherapistMultiSelect rows={rows} selected={selectedTherapistIds} onChange={setSelectedTherapistIds} />
+        <span className="rounded-full bg-emerald-50 px-3 py-2 text-xs text-emerald-700">自动同步排期已完成服务</span>
+        <details className="relative">
+          <summary className="cursor-pointer list-none rounded-full border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700">数据来源与计算口径</summary>
+          <div className="absolute left-0 top-11 z-50 w-[520px] rounded-xl border border-border bg-card p-4 text-xs leading-6 text-foreground shadow-xl">
+            <div>客户、套餐金额、项目数及总次数来自客户订单；已服务次数和每日完成记录来自排期管理。</div>
+            <div>抵扣券默认 ¥300，可手动调整；其他费用默认 ¥0，可手动填写。</div>
+            <div>产康师单次手工费：2项 ¥300、3项 ¥400、4项 ¥500、5项及以上 ¥600；总手工费＝单次手工费×订单总次数。</div>
+            <div>提成比例初始读取技师档案（观察池0%、A档6%、B档8%、S档12%、王牌15%），支持客户级手动纠偏；提成＝套餐金额×提成比例。</div>
+            <div>总费用＝抵扣券＋手工费＋提成＋其他费用。</div>
+            <div>每日费用由排期“已完成”服务生成并可纠偏；确认本周结算后，才累计到已付金额。</div>
+          </div>
+        </details>
+        <div className="ml-auto flex gap-2">
+          <button onClick={() => salaryQ.refetch()} className="inline-flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2.5 text-sm"><RefreshCwIcon size={16} />同步排期</button>
+          <button onClick={downloadDetail} className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm text-primary-foreground"><DownloadIcon size={16} />下载明细</button>
         </div>
       </div>
 
-      {/* ── 周日期条 ────────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-2 bg-card border border-border rounded-xl px-4 py-3 shadow-custom flex-wrap">
-        <span className="text-xs text-muted-foreground font-medium mr-2">排期周</span>
-        {weekDates.map((d, i) => {
-          const isPast = d <= today;
-          const isToday = d.getTime() === today.getTime();
-          const dayStr = toDateStr(d);
-          return (
-            <div
-              key={dayStr}
-              className={`flex flex-col items-center rounded-lg px-3 py-1.5 text-xs font-medium transition-colors
-                ${isPast
-                  ? 'bg-brand text-white shadow-custom'
-                  : 'bg-muted text-muted-foreground'}`}
-            >
-              <span className="text-[10px] mb-0.5 opacity-80">{CN_DAYS[i]}</span>
-              <span>{`${d.getMonth() + 1}/${d.getDate()}`}</span>
-              {isToday && (
-                <span className="text-[9px] mt-0.5 bg-white text-brand rounded px-1 font-bold">今天</span>
-              )}
-            </div>
-          );
-        })}
-        <span className="ml-auto text-xs text-muted-foreground">
-          {weekDates.filter(d => d <= today).length} 天已过
-        </span>
+      <div className="grid flex-shrink-0 grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-8">
+        <SummaryCard label="客户总数" value={`${summary.customerCount}人`} note="当前技师累计关联客户" />
+        <SummaryCard label="服务总次数" value={`${summary.totalServiceTimes}次`} note="客户订单累计总次数" />
+        <SummaryCard label="已服务总次数" value={`${summary.servedTimes}次`} note="排期已完成累计" />
+        <SummaryCard label="总费用小计" value={money(summary.totalFee)} note="抵扣券+手工+提成+其他" />
+        <SummaryCard label="已付小计" value={money(summary.paidSubtotal)} note="每周确认后累计" />
+        <SummaryCard label="未付小计" value={money(summary.unpaidSubtotal)} note="总费用减已付" />
+        <SummaryCard label="本周费用小计" value={money(summary.currentWeekSubtotal)} note={`已确认 ${money(confirmedWeekSubtotal)}`} />
+        <SummaryCard label={scope === 'all' ? '总升单率' : '本月升单率'} value={`${summary.upgradeRate}%`} note="升单客户/全部客户" />
       </div>
 
-      {/* ── 汇总卡片 ────────────────────────────────────────────────────── */}
-      <div className="flex gap-4 flex-wrap">
-        {[
-          { label: '体验卡手工费', value: summaryExpFee, color: 'text-orange-500', bg: 'bg-orange-50 dark:bg-orange-950/20' },
-          { label: '套餐手工费', value: summaryLaborFee, color: 'text-brand', bg: 'bg-brand/5' },
-          { label: '提成合计', value: summaryCommission, color: 'text-success', bg: 'bg-success/5' },
-          { label: '合计应付', value: summaryTotal, color: 'text-foreground', bg: 'bg-card', bold: true },
-          { label: '待结算人数', value: pendingCount, color: 'text-warning', bg: 'bg-warning/5', unit: '人' },
-        ].map(card => (
-          <div
-            key={card.label}
-            className={`flex flex-col gap-1 px-5 py-3 rounded-xl border border-border shadow-custom min-w-[130px] flex-1 ${card.bg}`}
-          >
-            <span className="text-xs text-muted-foreground">{card.label}</span>
-            <span className={`text-xl font-bold ${card.color} ${card.bold ? 'text-2xl' : ''}`}>
-              {card.unit
-                ? `${card.value}${card.unit}`
-                : fmtMoney(card.value)}
-            </span>
+      <div className="flex min-h-0 flex-1 flex-col rounded-xl border border-border bg-card shadow-sm">
+        <div className="flex flex-shrink-0 flex-wrap items-center gap-2 border-b border-border px-4 py-2">
+          <div className="mr-auto text-xs text-muted-foreground">每日服务与费用来自排期已完成凭证；确认当周结算后累计至已付，管理员、超管可点击金额纠偏。</div>
+          <span className="text-xs font-medium text-muted-foreground">每周结算</span>
+          <div className="flex items-center rounded-lg border border-border bg-background">
+            <button aria-label="上一周" onClick={() => changeWeek(-1)} className="px-3 py-2 text-muted-foreground">‹</button>
+            <div className="min-w-48 px-3 text-center text-sm font-semibold">{weekLabel(weekStart)}</div>
+            <button aria-label="下一周" onClick={() => changeWeek(1)} className="px-3 py-2 text-muted-foreground">›</button>
+            <button onClick={() => { setWeekStart(mondayOfCurrentWeek()); if (scope === 'month') setMonth(currentMonth()); }} className="border-l border-border px-3 py-2 text-xs text-primary">本周</button>
           </div>
-        ))}
-      </div>
-
-      {/* ── 主表格 ──────────────────────────────────────────────────────── */}
-      <div className="bg-card border border-border rounded-xl shadow-custom overflow-x-auto">
-        <table className="w-full text-sm text-center">
-          <thead>
-            <tr className="border-b border-border bg-muted/50">
-              {[
-                '技师ID', '技师名称', '类型', '星级',
-                '体验卡费用', '手工费用', '提成', '抵扣券',
-                '其他费用', '合计应付', '结算状态', '操作'
-              ].map(col => (
-                <th key={col} className="px-3 py-3 text-xs font-semibold text-muted-foreground whitespace-nowrap">
-                  {col}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map(row => (
-              <tr key={row.therapistId} className="border-b border-border hover:bg-accent/40 transition-colors">
-                <td className="px-3 py-3 text-xs text-muted-foreground font-mono">{row.therapistId}</td>
-                <td className="px-3 py-3 font-semibold text-foreground">{row.therapistName}</td>
-                <td className="px-3 py-3">
-                  <span className="text-xs bg-muted text-muted-foreground rounded px-1.5 py-0.5">{row.therapistType}</span>
-                </td>
-                <td className="px-3 py-3"><StarBadge level={row.starLevel} /></td>
-                <td className="px-3 py-3 text-orange-500 font-medium">
-                  {fmtMoney(row.experienceFee)}
-                  {row.experienceFee > 0 && (
-                    <div className="text-[10px] text-muted-foreground">{row.expApptIds.length}次×¥200</div>
-                  )}
-                </td>
-                <td className="px-3 py-3 text-brand font-medium">
-                  {fmtMoney(row.laborFee)}
-                  {row.laborDetails.length > 0 && (
-                    <div className="text-[10px] text-muted-foreground">{row.laborDetails.length}次</div>
-                  )}
-                </td>
-                <td className="px-3 py-3 text-success font-medium">
-                  {fmtMoney(row.commission)}
-                  {row.commissionDetails.length > 0 && (
-                    <div className="text-[10px] text-muted-foreground">{(COMMISSION_RATE[row.starLevel] * 100).toFixed(0)}%</div>
-                  )}
-                </td>
-                <td className="px-3 py-3 text-purple-500 font-medium">
-                  {row.couponFee > 0 ? fmtMoney(row.couponFee) : <span className="text-muted-foreground">—</span>}
-                </td>
-                <td className="px-3 py-3 text-foreground">
-                  {fmtMoney(row.otherFee)}
-                  {row.extras.length > 0 && (
-                    <div className="text-[10px] text-muted-foreground">{row.extras.length}项</div>
-                  )}
-                </td>
-                <td className="px-3 py-3 font-bold text-foreground text-base">{fmtMoney(row.total)}</td>
-                <td className="px-3 py-3">
-                  <button onClick={() => cycleStatus(row)}>
-                    <StatusBadge status={row.status} />
-                  </button>
-                </td>
-                <td className="px-3 py-3">
-                  <div className="flex items-center justify-center gap-1.5">
-                    <button
-                      onClick={() => setDetailRow(row)}
-                      className="p-1.5 rounded hover:bg-brand/10 text-brand transition-colors"
-                      title="查看明细"
-                    >
-                      <CalendarIcon size={14} />
-                    </button>
-                    <button
-                      onClick={() => openEdit(row)}
-                      className="p-1.5 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
-                      title="编辑其他费用"
-                    >
-                      <EditIcon size={14} />
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-            {rows.length === 0 && (
+        </div>
+        <div className="min-h-0 flex-1 overflow-auto">
+          <table className="table-fixed border-collapse text-center text-xs" style={{ width: totalTableWidth, minWidth: totalTableWidth }}>
+            <colgroup>
+              {columnWidths.map((width, index) => <col key={index} style={{ width }} />)}
+            </colgroup>
+            <thead className="sticky top-0 z-30 bg-muted text-muted-foreground shadow-sm">
               <tr>
-                <td colSpan={12} className="py-12 text-muted-foreground text-sm">
-                  本周暂无技师数据
-                </td>
+                {['客户ID', '客户姓名', '体验卡', '升单时间', '项目', '套餐金额', '已服务/总数', '抵扣券', '手工费', '提成比例', '提成', '其他费用', '总费用', '已付', '未付'].map((label, index) => (
+                  <ResizableHeader
+                    key={label}
+                    index={index}
+                    width={columnWidths[index]}
+                    onResize={resizeColumn}
+                    stickyLeft={index < FROZEN_COLUMN_COUNT ? frozenOffsets[index] : undefined}
+                    className="whitespace-nowrap text-center"
+                  >{label}</ResizableHeader>
+                ))}
+                <ResizableHeader index={15} width={columnWidths[15]} onResize={resizeColumn}>行别</ResizableHeader>
+                {(selectedWeek?.days || []).map((date, index) => (
+                  <ResizableHeader key={date} index={16 + index} width={columnWidths[16 + index]} onResize={resizeColumn}>
+                    <div>{weekdays[index]}</div><div className="mt-0.5 text-foreground">{date.slice(5).replace('-', '/')}</div>
+                  </ResizableHeader>
+                ))}
+                <ResizableHeader index={23} width={columnWidths[23]} onResize={resizeColumn}>{weekStart === mondayOfCurrentWeek() ? '本周' : '当周'}结算</ResizableHeader>
               </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {/* ── 编辑其他费用弹窗 ────────────────────────────────────────────── */}
-      <div className={`fixed inset-0 z-40 flex items-center justify-center ${editingRow ? '' : 'hidden'}`}>
-        <div className="absolute inset-0 bg-black/40" onClick={() => setEditingRow(null)} />
-        <div className="relative bg-card rounded-2xl shadow-custom border border-border w-[480px] max-h-[80vh] overflow-y-auto z-50">
-          <div className="flex items-center justify-between px-6 py-4 border-b border-border">
-            <div>
-              <h3 className="font-semibold text-foreground">{editingRow?.therapistName} · 其他费用</h3>
-              <p className="text-xs text-muted-foreground mt-0.5">{weekLabel}　路补 / 耗材 / 其他</p>
-            </div>
-            <button onClick={() => setEditingRow(null)} className="p-1.5 rounded hover:bg-accent transition-colors">
-              <XIcon size={16} className="text-muted-foreground" />
-            </button>
-          </div>
-          <div className="px-6 py-4 flex flex-col gap-3">
-            {editExtras.map((item, idx) => (
-              <div key={idx} className="flex items-center gap-2 flex-wrap">
-                <select
-                  value={item.label}
-                  onChange={e => {
-                    const next = [...editExtras];
-                    next[idx] = { ...next[idx], label: e.target.value };
-                    setEditExtras(next);
-                  }}
-                  className="flex-none w-28 border border-border rounded-lg px-2 py-1.5 text-sm bg-background text-foreground"
-                >
-                  {['路补', '耗材费用', '其他'].map(o => (
-                    <option key={o} value={o}>{o}</option>
-                  ))}
-                </select>
-                <input
-                  type="number"
-                  placeholder="金额"
-                  value={item.amount || ''}
-                  onChange={e => {
-                    const next = [...editExtras];
-                    next[idx] = { ...next[idx], amount: Number(e.target.value) || 0 };
-                    setEditExtras(next);
-                  }}
-                  className="flex-none w-24 border border-border rounded-lg px-2 py-1.5 text-sm bg-background text-foreground"
-                />
-                <input
-                  type="text"
-                  placeholder="备注"
-                  value={item.note}
-                  onChange={e => {
-                    const next = [...editExtras];
-                    next[idx] = { ...next[idx], note: e.target.value };
-                    setEditExtras(next);
-                  }}
-                  className="flex-1 min-w-0 border border-border rounded-lg px-2 py-1.5 text-sm bg-background text-foreground"
-                />
-                <button
-                  onClick={() => setEditExtras(prev => prev.filter((_, i) => i !== idx))}
-                  className="p-1.5 rounded hover:bg-destructive/10 text-destructive transition-colors"
-                >
-                  <Trash2Icon size={14} />
-                </button>
-              </div>
+            </thead>
+            {salaryQ.isLoading ? (
+              <tbody><tr><td colSpan={24} className="p-12 text-center text-muted-foreground">正在同步结算台账…</td></tr></tbody>
+            ) : visibleRows.length === 0 ? (
+              <tbody><tr><td colSpan={24} className="p-12 text-center text-muted-foreground">当前暂无技师客户数据</td></tr></tbody>
+            ) : visibleRows.map(row => (
+              <tbody key={row.therapistId}>
+                <tr className="bg-primary/10 font-semibold">
+                  <td
+                    colSpan={5}
+                    style={{ left: 0 }}
+                    className="sticky z-20 border-y border-r border-border bg-blue-50 px-3 py-2 text-center text-primary shadow-[5px_0_7px_-5px_rgba(15,23,42,0.45)]"
+                  >
+                    <div>{row.therapistName} · {row.customers.length}位客户小结 · 升单率 {row.upgradeRate}%</div>
+                    <div className="mt-1 text-[11px] font-normal text-muted-foreground">档案定档 {row.tier} · 提成比例 {row.commissionRate}% · {row.therapistType}</div>
+                  </td>
+                  <td className="border-y border-r border-border px-2 py-3">{money(row.customers.reduce((sum, item) => sum + item.packageAmount, 0))}</td>
+                  <td className="border-y border-r border-border px-2 py-3 text-emerald-700">{row.customers.reduce((sum, item) => sum + item.servedTimes, 0)}/{row.customers.reduce((sum, item) => sum + item.totalTimes, 0)}</td>
+                  <td className="border-y border-r border-border px-2 py-3">{money(row.customers.reduce((sum, item) => sum + item.couponFee, 0))}</td>
+                  <td className="border-y border-r border-border px-2 py-3 text-blue-700">{money(row.customers.reduce((sum, item) => sum + item.laborFee, 0))}</td>
+                  <td className="border-y border-r border-border px-2 py-3 text-purple-700">{row.commissionRate}%</td>
+                  <td className="border-y border-r border-border px-2 py-3 text-purple-700">{money(row.customers.reduce((sum, item) => sum + item.commission, 0))}</td>
+                  <td className="border-y border-r border-border px-2 py-3 text-amber-700">{money(row.customers.reduce((sum, item) => sum + item.otherFee, 0))}</td>
+                  <td className="border-y border-r border-border px-2 py-3">{money(row.customers.reduce((sum, item) => sum + item.totalFee, 0))}</td>
+                  <td className="border-y border-r border-border px-2 py-3">{money(row.customers.reduce((sum, item) => sum + item.paidSubtotal, 0))}</td>
+                  <td className="border-y border-r border-border px-2 py-3 text-orange-600">{money(row.customers.reduce((sum, item) => sum + item.unpaidSubtotal, 0))}</td>
+                  <td className="border-y border-r border-border px-1 py-3 text-center text-primary">小结</td>
+                  {selectedWeek.days.map(date => {
+                    const entries = row.customers.flatMap(customer => customer.days[date]?.entries || []);
+                    return <td key={date} className="border-y border-r border-border px-2 py-2 text-center"><div>{entries.length}次</div><div className="text-emerald-700">{money(entries.reduce((sum, entry) => sum + entry.payableAmount, 0))}</div></td>;
+                  })}
+                  <td className="border-y border-border px-2 py-2 text-center">
+                    <div className="font-semibold text-emerald-700">{money(row.customers.reduce((sum, item) => sum + Number(item.weekSubtotals[selectedWeek.key] || 0), 0))}</div>
+                    <div className="mt-1 text-[10px] text-muted-foreground">已确认 {money(row.customers.reduce((sum, item) => sum + Number(item.weekConfirmedSubtotals[selectedWeek.key] || 0), 0))}</div>
+                  </td>
+                </tr>
+                {row.customers.map(customer => (
+                  <Fragment key={`${row.therapistId}-${customer.customerDbId}`}>
+                    <tr className="align-top hover:bg-muted/20">
+                      <td rowSpan={3} style={{ left: frozenOffsets[0] }} className="sticky z-20 border-b border-r border-border bg-card px-1 py-3 text-center font-mono text-primary">{customer.customerId}</td>
+                      <td rowSpan={3} style={{ left: frozenOffsets[1] }} className="sticky z-20 break-all border-b border-r border-border bg-card px-1 py-3 text-center font-medium leading-5">{customer.customerName}</td>
+                      <td rowSpan={3} style={{ left: frozenOffsets[2] }} className={`sticky z-20 max-w-0 overflow-hidden border-b border-r border-border bg-card px-1 py-3 text-center leading-5 ${customer.experienceStatus === '已服务' ? 'text-emerald-700' : customer.experienceStatus === '待服务' ? 'text-amber-700' : 'text-muted-foreground'}`}>
+                        <div className="truncate">{customer.experienceStatus}</div>
+                        {customer.experienceStatus === '已服务' && <div className="mt-1 max-w-full break-all text-[10px] leading-4 text-muted-foreground">{customer.experienceServiceDate || '时间待补录'}</div>}
+                      </td>
+                      <td rowSpan={3} style={{ left: frozenOffsets[3] }} className="sticky z-20 border-b border-r border-border bg-card px-1 py-3 text-center">{customer.upgradeDate || '—'}</td>
+                      <td rowSpan={3} style={{ left: frozenOffsets[4] }} className="sticky z-20 border-b border-r border-border bg-card px-1 py-3 text-center font-medium shadow-[5px_0_7px_-5px_rgba(15,23,42,0.45)]">{customer.itemCount ? `${customer.itemCount}项` : '—'}</td>
+                      <td rowSpan={3} className="border-b border-r border-border px-3 py-3 font-medium">{money(customer.packageAmount)}</td>
+                      <td rowSpan={3} className="border-b border-r border-border px-2 py-3 text-center font-semibold text-emerald-600">{customer.servedTimes}/{customer.totalTimes}</td>
+                      <td rowSpan={3} className="border-b border-r border-border px-3 py-3"><button onClick={() => openCustomer(customer)} className={editable ? 'text-primary hover:underline' : ''}>{money(customer.couponFee)}</button></td>
+                      <td rowSpan={3} className="border-b border-r border-border px-2 py-3 font-semibold text-blue-700">{money(customer.laborFee)}</td>
+                      <td rowSpan={3} className="border-b border-r border-border px-2 py-3 font-semibold text-purple-700"><button onClick={() => openCustomer(customer)} className={editable ? 'hover:underline' : ''}>{customer.commissionRate}%</button></td>
+                      <td rowSpan={3} className="border-b border-r border-border px-2 py-3 font-semibold text-purple-700">{money(customer.commission)}</td>
+                      <td rowSpan={3} title="路补、耗材等其他费用，默认0元，支持手动调整" className="border-b border-r border-border px-2 py-3 font-semibold text-amber-700"><button onClick={() => openCustomer(customer)} className={editable ? 'text-amber-700 hover:underline' : ''}>{money(customer.otherFee)}</button></td>
+                      <td rowSpan={3} className="border-b border-r border-border px-3 py-3 font-semibold">{money(customer.totalFee)}</td>
+                      <td rowSpan={3} className="border-b border-r border-border px-3 py-3"><button onClick={() => openCustomer(customer)} className={editable ? 'text-primary hover:underline' : ''}>{money(customer.paidSubtotal)}</button></td>
+                      <td rowSpan={3} className="border-b border-r border-border px-3 py-3 font-semibold text-orange-600">{money(customer.unpaidSubtotal)}</td>
+                      <td className="border-b border-r border-border bg-blue-50/30 px-2 py-2 text-center text-blue-700">服务</td>
+                      {(selectedWeek?.days || []).map(date => {
+                        const day = customer.days[date];
+                        return <td key={date} className="border-b border-r border-border px-2 py-2 text-center">{day?.entries.map(entry => <div key={entry.id} className="mb-1 rounded bg-blue-50 px-2 py-1 text-center text-blue-700">已完成 · {entry.itemCount || 0}项</div>) || '—'}</td>;
+                      })}
+                      <td className="border-b border-border px-2 py-2 text-center text-muted-foreground">完成{(selectedWeek?.days || []).reduce((sum, date) => sum + (customer.days[date]?.entries.length || 0), 0)}次</td>
+                    </tr>
+                    <tr className="align-top hover:bg-muted/20">
+                      <td className="border-b border-r border-border bg-emerald-50/30 px-2 py-2 text-center text-emerald-700">费用</td>
+                      {(selectedWeek?.days || []).map(date => {
+                        const day = customer.days[date];
+                        return <td key={date} className="border-b border-r border-border px-2 py-2 text-center">{day ? day.entries.map(entry => <button key={entry.id} onClick={() => openEntry(entry)} className={`mb-1 block w-full rounded px-1 py-1 text-center ${entry.settlementStatus === '待确认' ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'} ${editable ? 'hover:brightness-95' : ''}`}><span className="inline-flex items-center justify-center gap-1">{money(entry.payableAmount)}{editable && <Edit3Icon size={11} />}</span><span className="block text-[10px]">{entry.settlementStatus}</span></button>) : '—'}</td>;
+                      })}
+                      <td className="border-b border-border px-1 py-2 text-center">
+                        {(() => {
+                          const entries = selectedWeek.days.flatMap(date => customer.days[date]?.entries || []);
+                          const total = Number(customer.weekSubtotals[selectedWeek.key] || 0);
+                          const confirmed = Number(customer.weekConfirmedSubtotals[selectedWeek.key] || 0);
+                          const allConfirmed = entries.length > 0 && entries.every(entry => entry.settlementStatus !== '待确认');
+                          const confirmationKey = `${customer.therapistId}:${customer.customerDbId}:${selectedWeek.key}`;
+                          if (!entries.length) return <span className="text-muted-foreground">—</span>;
+                          return <div className="space-y-1">
+                            <div className="font-semibold text-emerald-700">{money(total)}</div>
+                            <div className="text-[10px] text-muted-foreground">已确认 {money(confirmed)}</div>
+                            {editable && <button
+                              disabled={confirmingWeek === confirmationKey}
+                              onClick={() => toggleWeekConfirmation(customer, !allConfirmed)}
+                              className={`rounded px-2 py-1 text-[10px] disabled:opacity-50 ${allConfirmed ? 'bg-muted text-muted-foreground' : 'bg-primary text-primary-foreground'}`}
+                            >{confirmingWeek === confirmationKey ? '处理中…' : allConfirmed ? '撤销确认' : '确认本周'}</button>}
+                          </div>;
+                        })()}
+                      </td>
+                    </tr>
+                    <tr className="align-top hover:bg-muted/20">
+                      <td className="border-b border-r border-border bg-amber-50/30 px-2 py-2 text-center text-amber-700">备注</td>
+                      {(selectedWeek?.days || []).map(date => {
+                        const day = customer.days[date];
+                        return <td key={date} className="border-b border-r border-border px-2 py-2 text-center text-muted-foreground">{day?.entries.map(entry => <button key={entry.id} onClick={() => openEntry(entry)} className={`block w-full rounded px-1 text-center ${editable ? 'hover:bg-muted' : ''}`}>{entry.settlementNote || (editable ? '点击添加备注' : '—')}</button>) || '—'}</td>;
+                      })}
+                      <td className="border-b border-border px-2 py-2 text-center text-muted-foreground">{customer.adjustmentNote || '—'}</td>
+                    </tr>
+                  </Fragment>
+                ))}
+              </tbody>
             ))}
-            <button
-              onClick={() => setEditExtras(prev => [...prev, { label: '路补', amount: 0, note: '' }])}
-              className="flex items-center gap-1.5 text-sm text-brand hover:underline mt-1"
-            >
-              <PlusIcon size={14} />添加费用项
-            </button>
-            <div className="flex items-center justify-between pt-2 border-t border-border mt-1">
-              <span className="text-sm text-muted-foreground">
-                合计其他费用：<strong className="text-foreground">{fmtMoney(editExtras.reduce((s, e) => s + (e.amount || 0), 0))}</strong>
-              </span>
-            </div>
-          </div>
-          <div className="flex justify-end gap-2 px-6 py-4 border-t border-border">
-            <button
-              onClick={() => setEditingRow(null)}
-              className="px-4 py-2 rounded-lg border border-border text-sm text-foreground hover:bg-accent transition-colors"
-            >
-              取消
-            </button>
-            <button
-              onClick={saveEdit}
-              className="px-4 py-2 rounded-lg bg-brand text-white text-sm hover:opacity-90 transition-colors"
-            >
-              保存
-            </button>
-          </div>
+          </table>
         </div>
       </div>
 
-      {/* ── 明细弹窗 ────────────────────────────────────────────────────── */}
-      <div className={`fixed inset-0 z-40 flex items-center justify-center ${detailRow ? '' : 'hidden'}`}>
-        <div className="absolute inset-0 bg-black/40" onClick={() => setDetailRow(null)} />
-        <div className="relative bg-card rounded-2xl shadow-custom border border-border w-[600px] max-h-[85vh] overflow-y-auto z-50">
-          <div className="flex items-center justify-between px-6 py-4 border-b border-border">
-            <div>
-              <h3 className="font-semibold text-foreground">{detailRow?.therapistName} · 费用明细</h3>
-              <p className="text-xs text-muted-foreground mt-0.5">{weekLabel}</p>
-            </div>
-            <button onClick={() => setDetailRow(null)} className="p-1.5 rounded hover:bg-accent transition-colors">
-              <XIcon size={16} className="text-muted-foreground" />
-            </button>
-          </div>
-          {detailRow && (
-            <div className="px-6 py-4 flex flex-col gap-5">
-
-              {/* 体验卡 */}
-              <div>
-                <h4 className="text-xs font-semibold text-muted-foreground uppercase mb-2 flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-orange-400 inline-block" />
-                  体验卡费用 · {fmtMoney(detailRow.experienceFee)}
-                </h4>
-                {detailRow.expApptIds.length === 0 ? (
-                  <p className="text-xs text-muted-foreground pl-4">本周无体验卡预约</p>
-                ) : (
-                  <div className="pl-4 flex flex-col gap-1">
-                    {detailRow.expApptIds.map(id => {
-                      const a = APPOINTMENTS.find(x => x.id === id);
-                      return (
-                        <div key={id} className="flex justify-between text-sm">
-                          <span className="text-foreground">{a?.customerName} · {a?.date} · {a?.service}</span>
-                          <span className="text-orange-500 font-medium">¥200</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
-              {/* 套餐手工费 */}
-              <div>
-                <h4 className="text-xs font-semibold text-muted-foreground uppercase mb-2 flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-brand inline-block" />
-                  套餐手工费 · {fmtMoney(detailRow.laborFee)}
-                </h4>
-                {detailRow.laborDetails.length === 0 ? (
-                  <p className="text-xs text-muted-foreground pl-4">本周无套餐服务</p>
-                ) : (
-                  <div className="pl-4 flex flex-col gap-1">
-                    {detailRow.laborDetails.map(d => (
-                      <div key={d.apptId} className="flex justify-between text-sm">
-                        <span className="text-foreground">{d.customerName} · {d.date} · {d.count >= 3 ? '三项+' : d.count === 2 ? '两项' : '单项'}</span>
-                        <span className="text-brand font-medium">{fmtMoney(d.fee)}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* 提成 */}
-              <div>
-                <h4 className="text-xs font-semibold text-muted-foreground uppercase mb-2 flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-success inline-block" />
-                  提成 · {fmtMoney(detailRow.commission)}
-                  <span className="normal-case text-[10px]">（{detailRow.starLevel}星·{(COMMISSION_RATE[detailRow.starLevel] * 100).toFixed(0)}%）</span>
-                </h4>
-                {detailRow.commissionDetails.length === 0 ? (
-                  <p className="text-xs text-muted-foreground pl-4">本周无完结订单提成</p>
-                ) : (
-                  <div className="pl-4 flex flex-col gap-1">
-                    {detailRow.commissionDetails.map(d => (
-                      <div key={d.orderId} className="flex justify-between text-sm">
-                        <span className="text-foreground">{d.customerName} · {fmtMoney(d.amount)} × {(d.rate * 100).toFixed(0)}%</span>
-                        <span className="text-success font-medium">{fmtMoney(d.fee)}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* 抵扣券 */}
-              <div>
-                <h4 className="text-xs font-semibold text-muted-foreground uppercase mb-2 flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-purple-400 inline-block" />
-                  抵扣券 · {fmtMoney(detailRow.couponFee)}
-                </h4>
-                {detailRow.couponDetails.length === 0 ? (
-                  <p className="text-xs text-muted-foreground pl-4">本周无抵扣券发放</p>
-                ) : (
-                  <div className="pl-4 flex flex-col gap-1">
-                    {detailRow.couponDetails.map(d => (
-                      <div key={d.orderId} className="flex justify-between text-sm">
-                        <span className="text-foreground">{d.customerName} · 服务完结抵扣券</span>
-                        <span className="text-purple-500 font-medium">{fmtMoney(d.fee)}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* 其他费用 */}
-              <div>
-                <h4 className="text-xs font-semibold text-muted-foreground uppercase mb-2 flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-muted-foreground inline-block" />
-                  其他费用 · {fmtMoney(detailRow.otherFee)}
-                </h4>
-                {detailRow.extras.length === 0 ? (
-                  <p className="text-xs text-muted-foreground pl-4">暂无其他费用</p>
-                ) : (
-                  <div className="pl-4 flex flex-col gap-1">
-                    {detailRow.extras.map((e, i) => (
-                      <div key={i} className="flex justify-between text-sm">
-                        <span className="text-foreground">{e.label}{e.note ? ` · ${e.note}` : ''}</span>
-                        <span className="text-foreground font-medium">{fmtMoney(e.amount)}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* 合计 */}
-              <div className="border-t border-border pt-3 flex justify-between items-center">
-                <span className="font-semibold text-foreground">合计应付</span>
-                <span className="text-xl font-bold text-foreground">{fmtMoney(detailRow.total)}</span>
-              </div>
-            </div>
-          )}
-          <div className="flex justify-end px-6 py-4 border-t border-border">
-            <button
-              onClick={() => setDetailRow(null)}
-              className="px-4 py-2 rounded-lg bg-brand text-white text-sm hover:opacity-90 transition-colors"
-            >
-              关闭
-            </button>
-          </div>
+      {editingEntry && entryDraft && <Modal title={`${editingEntry.customerName} · ${editingEntry.serviceDate.slice(0, 10)} 服务费用`} saving={saving} onClose={() => setEditingEntry(null)} onSave={saveEntry}>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="col-span-2 rounded-lg bg-blue-50 p-3 text-xs leading-5 text-blue-800">来源：排期管理“已完成”服务；{editingEntry.itemCount}项默认费用已按项目数生成，管理员、超管可在此纠偏。</div>
+          {editingEntry.serviceType === '体验卡' ? <label className="space-y-1.5 text-sm"><span>体验卡服务费用</span><input type="number" min="0" value={entryDraft.experienceFee} onChange={event => setEntryDraft({ ...entryDraft, experienceFee: Number(event.target.value) })} className={inputClass} /></label> : <label className="space-y-1.5 text-sm"><span>本次手工费</span><input type="number" min="0" value={entryDraft.laborFee} onChange={event => setEntryDraft({ ...entryDraft, laborFee: Number(event.target.value) })} className={inputClass} /></label>}
+          <label className="space-y-1.5 text-sm"><span>本次其他费用（路补/耗材）</span><input type="number" min="0" value={entryDraft.otherFee} onChange={event => setEntryDraft({ ...entryDraft, otherFee: Number(event.target.value) })} className={inputClass} /></label>
+          <label className="space-y-1.5 text-sm"><span>凭证状态</span><select value={entryDraft.settlementStatus} onChange={event => setEntryDraft({ ...entryDraft, settlementStatus: event.target.value as EntryDraft['settlementStatus'] })} className={inputClass}><option>待确认</option><option>已确认</option><option>已结算</option></select></label>
+          <label className="col-span-2 space-y-1.5 text-sm"><span>备注</span><textarea rows={3} value={entryDraft.settlementNote} onChange={event => setEntryDraft({ ...entryDraft, settlementNote: event.target.value })} placeholder="可填写额外路补、耗材或特殊情况" className={inputClass} /></label>
         </div>
-      </div>
+      </Modal>}
 
+      {editingCustomer && adjustmentDraft && <Modal title={`${editingCustomer.therapistName} · ${editingCustomer.customerName} 月度结算`} saving={saving} onClose={() => setEditingCustomer(null)} onSave={saveAdjustment}>
+        <div className="space-y-4">
+          <div className="rounded-lg bg-muted p-3 text-sm leading-6">当前总费用：<b>{money(editingCustomer.totalFee)}</b>，已付：<b className="text-emerald-700">{money(editingCustomer.paidSubtotal)}</b>，未付：<b className="text-orange-600">{money(editingCustomer.unpaidSubtotal)}</b><br /><span className="text-xs text-muted-foreground">手工费 {money(editingCustomer.laborUnitFee)} × {editingCustomer.totalTimes}次＝{money(editingCustomer.laborFee)}；已付金额仅由每周已确认费用累计。</span></div>
+          <label className="block space-y-1.5 text-sm"><span>抵扣券（默认 ¥300，计入总费用）</span><input type="number" min="0" value={adjustmentDraft.couponFee} onChange={event => setAdjustmentDraft({ ...adjustmentDraft, couponFee: Number(event.target.value) })} className={inputClass} /></label>
+          <label className="block space-y-1.5 text-sm"><span>提成比例（初始读取技师档案，支持单独纠偏）</span><input type="number" min="0" max="100" step="0.01" value={adjustmentDraft.commissionRate} onChange={event => setAdjustmentDraft({ ...adjustmentDraft, commissionRate: Number(event.target.value) })} className={inputClass} /><span className="text-xs text-muted-foreground">提成＝{money(editingCustomer.packageAmount)} × {adjustmentDraft.commissionRate}% ＝ {money(editingCustomer.packageAmount * adjustmentDraft.commissionRate / 100)}</span></label>
+          <label className="block space-y-1.5 text-sm"><span>其他费用（默认 ¥0，路补/耗材等）</span><input type="number" min="0" value={adjustmentDraft.otherFee} onChange={event => setAdjustmentDraft({ ...adjustmentDraft, otherFee: Number(event.target.value) })} className={inputClass} /></label>
+          <label className="block space-y-1.5 text-sm"><span>月度结算备注</span><textarea rows={3} value={adjustmentDraft.adjustmentNote} onChange={event => setAdjustmentDraft({ ...adjustmentDraft, adjustmentNote: event.target.value })} className={inputClass} /></label>
+        </div>
+      </Modal>}
     </div>
   );
 }

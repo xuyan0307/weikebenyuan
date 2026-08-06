@@ -12,7 +12,7 @@ export interface UserInfo {
 }
 export interface SystemUserDto {
   id: string; username: string; name: string; role: string; phone?: string;
-  email?: string; wechat?: string; avatar?: string; status: 'active' | 'disabled';
+  email?: string; wechat?: string; wecomUserId?: string; avatar?: string; status: 'active' | 'disabled';
   permissions?: string[] | null; createdAt: string;
 }
 export const authApi = {
@@ -37,12 +37,16 @@ export interface CustomerListParams extends QueryParams {
   pageSize?: number;
   keyword?: string;
   dateRange?: 'all' | 'today' | 'week' | 'month';
+  startDate?: string;
+  endDate?: string;
   areas?: string;
   sources?: string;
   statuses?: string;
+  followTimes?: string;
   tags?: string;
   advisors?: string;
   includeOrdered?: number | boolean;
+  dueFollowUp?: number | boolean;
 }
 export const customersApi = {
   list: (params: CustomerListParams) => api.get<Paged<Customer>>('/customers', params),
@@ -63,6 +67,13 @@ export const usersApi = {
   create: (body: Partial<SystemUserDto> & { password?: string }) => api.post<{ id: string }>('/users', body),
   update: (id: string, body: Partial<SystemUserDto> & { password?: string }) => api.put<{ message: string }>(`/users/${id}`, body),
   remove: (id: string) => api.delete<{ message: string }>(`/users/${id}`),
+};
+
+// ====== Platform Settings ======
+export const settingsApi = {
+  get: <T>(key: string) => api.get<{ key: string; value: T | null; updatedAt: string | null }>(`/settings/${encodeURIComponent(key)}`),
+  update: <T>(key: string, value: T) => api.put<{ message: string; key: string }>(`/settings/${encodeURIComponent(key)}`, { value }),
+  remove: (key: string) => api.delete<{ message: string; key: string }>(`/settings/${encodeURIComponent(key)}`),
 };
 
 // ====== Uploads ======
@@ -94,6 +105,7 @@ export interface Order {
   usedTimes: number; totalTimes: number;
   isUpgrade: boolean; contractSigned: boolean; hasCoupon: boolean; serviceItemCount: number;
   serviceItems?: string; servicePeople?: unknown; appointmentTime?: string; serviceNote?: string;
+  purchaseRangeProjection?: { active: boolean; displayPurchaseDate: string; visibleStageKeys: string[] };
   contractAttachments?: unknown[]; servicePhotoRecords?: unknown[];
 }
 export const ordersApi = {
@@ -111,15 +123,38 @@ export const ordersApi = {
 export interface Appointment {
   id: string; _id?: string;
   customerId: string; customerName: string;
+  customerPhone?: string;
+  advisorId?: string; advisorName?: string;
   therapistId: string; therapistName: string;
   date: string; timeSlot: string; service: string;
-  status: string; area: string; remark: string;
+  serviceContent?: string;
+  status: string; rawStatus?: string;
+  orderType?: '体验卡' | '套餐';
+  area: string; remark: string;
+  notifyStatus?: '需通知' | '已通知' | '延迟' | '遗漏' | null;
+  notifyManualStatus?: '需通知' | '已通知' | '延迟' | '遗漏' | null;
+  notifySentAt?: string | null;
+  notifyError?: string;
+}
+export interface AppointmentCompletion {
+  signaturePhotos?: unknown[];
 }
 export const appointmentsApi = {
   list: (params: QueryParams) => api.get<Paged<Appointment>>('/appointments', params),
   create: (body: Partial<Appointment>) => api.post<{ id: string; no: string }>('/appointments', body),
-  patchStatus: (id: string, status: string) =>
-    api.patch<{ message: string }>(`/appointments/${id}/status`, { status }),
+  update: (id: string, body: Partial<Appointment>) =>
+    api.put<{ message: string }>(`/appointments/${id}`, body),
+  patchStatus: (id: string, status: string, completion: AppointmentCompletion = {}) =>
+    api.patch<{ message: string }>(`/appointments/${id}/status`, { status, ...completion }),
+  replyNotified: (id: string) =>
+    api.post<{ status: string }>(`/appointments/${id}/notification-reply`, { reply: '已通知' }),
+  patchNotificationStatus: (
+    id: string,
+    status: '需通知' | '已通知' | '延迟' | '遗漏'
+  ) => api.patch<{ message: string; status: string }>(
+    `/appointments/${id}/notification-status`,
+    { status }
+  ),
   remove: (id: string) => api.delete<{ message: string }>(`/appointments/${id}`),
 };
 
@@ -128,7 +163,7 @@ export interface Therapist {
   id: string; name: string; therapistType: string; birthYear?: string;
   phone: string; area: string; city: string; detailAddress: string;
   services: string[]; serviceMethod: string; characteristics: string; transport: string;
-  status: string; orders: number; rating: number; upgradeRate: number; starLevel: number;
+  status: string; orders: number; rating: number; upgradeRate: number; starLevel: number; commissionRate: number;
   healthCert: unknown; firstAidCert: unknown; laborCert: unknown; associationCert: unknown; remark?: string;
 }
 export const therapistsApi = {
@@ -146,18 +181,111 @@ export interface ServiceRecord {
   id: string; appointmentId: string; customerId: string; customerName: string;
   therapistId: string; therapistName: string;
   serviceDate: string; serviceItems: string; duration: number;
-  feedback: string; photos: unknown[];
+  feedback: string; photos: unknown[]; signaturePhotos: unknown[];
 }
 export const serviceRecordsApi = {
   list: (params: QueryParams) => api.get<Paged<ServiceRecord>>('/service-records', params),
   create: (body: Partial<ServiceRecord>) => api.post<{ id: string }>('/service-records', body),
+  update: (id: string, body: Pick<Partial<ServiceRecord>, 'photos'>) =>
+    api.put<{ message: string }>(`/service-records/${id}`, body),
 };
 
 // ====== Finance ======
+export interface SalarySettlementEntry {
+  id: string;
+  serviceRecordId: string;
+  appointmentId: string;
+  appointmentNo: string;
+  customerId: string;
+  customerName: string;
+  therapistId: string;
+  therapistName: string;
+  serviceDate: string;
+  serviceItems: string;
+  serviceType: '体验卡' | '套餐';
+  itemCount: number;
+  experienceFee: number;
+  laborFee: number;
+  commission: number;
+  couponFee: number;
+  otherFee: number;
+  deduction: number;
+  payableAmount: number;
+  sourceType: string;
+  evidence: Record<string, unknown>;
+  settlementStatus: '待确认' | '已确认' | '已结算';
+  settlementNote: string;
+  manualAdjusted: boolean;
+  adjustedByName: string;
+  adjustedAt?: string | null;
+  confirmedByName: string;
+  confirmedAt?: string | null;
+}
+export interface SalaryLedgerDay {
+  date: string;
+  entries: SalarySettlementEntry[];
+  fee: number;
+  notes: string;
+}
+export interface SalaryCustomerLedger {
+  therapistId: string;
+  therapistName: string;
+  customerDbId: string;
+  customerId: string;
+  customerName: string;
+  experienceStatus: '待服务' | '已服务' | '无体验卡';
+  experienceServiceDate: string;
+  upgradeDate: string;
+  hasUpgrade: boolean;
+  upgradedThisMonth: boolean;
+  projectLabel: string;
+  itemCount: number;
+  packageAmount: number;
+  totalTimes: number;
+  servedTimes: number;
+  servedThisMonth: boolean;
+  couponFee: number;
+  experienceFee: number;
+  laborFee: number;
+  laborUnitFee: number;
+  otherFee: number;
+  manualOtherFee: number;
+  commissionRate: number;
+  commission: number;
+  totalFee: number;
+  paidSubtotal: number;
+  unpaidSubtotal: number;
+  adjustmentNote: string;
+  days: Record<string, SalaryLedgerDay>;
+  weekSubtotals: Record<string, number>;
+  weekConfirmedSubtotals: Record<string, number>;
+}
+export interface SalaryLedgerWeek {
+  key: string;
+  label: string;
+  start: string;
+  end: string;
+  days: string[];
+}
+export interface SalaryLedgerSummary {
+  customerCount: number;
+  totalServiceTimes: number;
+  servedTimes: number;
+  totalFee: number;
+  paidSubtotal: number;
+  unpaidSubtotal: number;
+  currentWeekSubtotal: number;
+  upgradeRate: number;
+}
 export interface SalaryRecord {
   id: string; therapistId: string; therapistName: string; month: string;
-  serviceCount: number; laborFee: number; commission: number; total: number;
-  status: string; settledAt?: string | null;
+  therapistType: string; tier: string; tierKey: string;
+  commissionRate: number; upgradeRate: number; profileUpgradeRate: number; upgradedCustomerCount: number;
+  serviceCount: number; experienceFee: number; laborFee: number;
+  commission: number; couponFee: number; otherFee: number; deduction: number; total: number;
+  status: string; confirmedAt?: string | null; confirmedByName: string;
+  settledAt?: string | null; settlementNote: string; entries: SalarySettlementEntry[];
+  customers: SalaryCustomerLedger[];
 }
 export interface MonthlyIncome {
   month: string;
@@ -172,8 +300,43 @@ export interface IncomeSummary {
   done_appointments: number;
 }
 export const financeApi = {
-  salary: (month: string) => api.get<{ month: string; data: SalaryRecord[] }>('/finance/salary', { month }),
-  settle: (id: string) => api.post<{ message: string }>(`/finance/salary/${id}/settle`),
+  salary: (month: string, weekStart?: string, scope: 'all' | 'month' = 'month') => api.get<{
+    month: string;
+    scope: 'all' | 'month';
+    weekStart: string;
+    weekEnd: string;
+    editable: boolean;
+    source: string;
+    weeks: SalaryLedgerWeek[];
+    summary: SalaryLedgerSummary;
+    data: SalaryRecord[];
+  }>('/finance/salary', { month, weekStart, scope }),
+  updateSalaryEntry: (
+    id: string,
+    body: Pick<
+      SalarySettlementEntry,
+      'experienceFee' | 'laborFee' | 'commission' | 'couponFee' |
+      'otherFee' | 'deduction' | 'settlementStatus' | 'settlementNote'
+    >
+  ) => api.patch<{ message: string; payableAmount: number }>(`/finance/salary/entries/${id}`, body),
+  updateSalaryCustomerAdjustment: (body: {
+    therapistId: string;
+    customerId: string;
+    month: string;
+    couponFee: number;
+    otherFee: number;
+    commissionRate: number;
+    paidAmount: number;
+    adjustmentNote: string;
+  }) => api.patch<{ message: string }>('/finance/salary/customer-adjustments', body),
+  confirmSalaryWeek: (body: {
+    therapistId: string;
+    customerId: string;
+    weekStart: string;
+    confirmed: boolean;
+  }) => api.patch<{ message: string; updatedCount: number }>('/finance/salary/week-confirmation', body),
+  settle: (id: string, status: '审核中' | '已结算', settlementNote = '') =>
+    api.post<{ message: string }>(`/finance/salary/${id}/settle`, { status, settlementNote }),
   income: () => api.get<{ monthly: MonthlyIncome[]; summary: IncomeSummary }>('/finance/income'),
   exportSalary: (month: string) => api.download('/finance/salary/export', { month }),
   exportIncome: () => api.download('/finance/income/export'),
@@ -193,20 +356,22 @@ export const contractsApi = {
 
 // ====== Dashboard ======
 export interface DashboardStats {
-  total_customers: number;
-  pending_follow: number;
-  following: number;
-  dealt: number;
-  total_orders: number;
-  pending_pay: number;
-  paid_orders: number;
-  pending_contract: number;
-  pending_appt: number;
-  today_appt: number;
-  active_therapists: number;
-  service_records: number;
+  period: DashboardPeriod;
+  new_customers: number;
   total_revenue: number;
+  experience_revenue: number;
+  upgrade_revenue: number;
+  experience_cards: number;
+  purchase_rate: number;
+  upgrades: number;
+  first_upgrade_customers: number;
+  upgrade_rate: number;
+  second_upgrade_count: number;
+  second_upgrade_customers: number;
+  second_upgrade_rate: number;
+  second_upgrade_revenue: number;
 }
+export type DashboardPeriod = 'today' | 'week' | 'month' | 'year' | 'all';
 export interface DashboardRecent {
   customers: unknown[];
   orders: unknown[];
@@ -221,23 +386,30 @@ export interface DashboardTodo {
   urgency: string;
 }
 export interface DashboardChartPoint {
-  month: string;
+  period: string;
+  label: string;
   revenue: number;
   new_customers: number;
   experience_cards: number;
   upgrades: number;
+  second_upgrades: number;
 }
+export type DashboardChartGranularity = 'day' | 'week' | 'month';
 export const dashboardApi = {
-  stats: () => api.get<DashboardStats>('/dashboard/stats'),
+  stats: (period: DashboardPeriod = 'month', startDate = '', endDate = '') =>
+    api.get<DashboardStats>('/dashboard/stats', { period, startDate, endDate }),
   recent: () => api.get<DashboardRecent>('/dashboard/recent'),
   todos: () => api.get<DashboardTodo[]>('/dashboard/todos'),
-  chart: () => api.get<DashboardChartPoint[]>('/dashboard/chart'),
+  chart: (startDate = '', endDate = '', granularity: DashboardChartGranularity = 'month') =>
+    api.get<DashboardChartPoint[]>('/dashboard/chart', { startDate, endDate, granularity }),
 };
 
 // ====== Operation Logs ======
 export interface OperationLog {
   id: string; user_id: string; username: string; action: string;
   module: string; description: string; ip_address: string; created_at: string;
+  entity_id?: string | null; request_id?: string | null;
+  request_payload?: Record<string, unknown> | null; response_status?: number | null;
 }
 export const operationLogsApi = {
   list: (params: QueryParams) => api.get<Paged<OperationLog>>('/operation-logs', params),

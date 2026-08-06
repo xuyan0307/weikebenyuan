@@ -18,18 +18,39 @@ const SEED_USERS: SeedUser[] = [
   { id: '00000000-0000-0000-0000-000000000005', username: 'zhao', password: 'zhao1234', name: '赵财务', role: 'finance', phone: '13800000005' },
 ];
 
+function productionBootstrapUser(): SeedUser {
+  const username = process.env.BOOTSTRAP_ADMIN_USERNAME?.trim();
+  const password = process.env.BOOTSTRAP_ADMIN_PASSWORD;
+  const name = process.env.BOOTSTRAP_ADMIN_NAME?.trim() || '超级管理员';
+  if (!username || !password || password.length < 12) {
+    throw new Error(
+      'Empty production database requires BOOTSTRAP_ADMIN_USERNAME and a BOOTSTRAP_ADMIN_PASSWORD of at least 12 characters'
+    );
+  }
+  return {
+    id: '00000000-0000-0000-0000-000000000001',
+    username,
+    password,
+    name,
+    role: 'superadmin',
+  };
+}
+
 export async function seedIfEmpty(pool: Pool): Promise<void> {
   const [rows] = await pool.query('SELECT COUNT(*) AS cnt FROM users');
   const count = (rows as Array<{ cnt: number }>)[0]?.cnt || 0;
   if (Number(count) > 0) return;
 
-  console.log('🌱 Seeding initial users...');
-  for (const u of SEED_USERS) {
+  const users = process.env.NODE_ENV === 'production'
+    ? [productionBootstrapUser()]
+    : SEED_USERS;
+  console.log(`🌱 Seeding ${process.env.NODE_ENV === 'production' ? 'production bootstrap' : 'development'} users...`);
+  for (const u of users) {
     await pool.execute(
       `INSERT INTO users (id, username, password_hash, name, role, phone, status)
        VALUES (?, ?, ?, ?, ?, ?, 'active')`,
       [u.id, u.username, hashPassword(u.password), u.name, u.role, u.phone || null]
     );
   }
-  console.log(`✅ Seeded ${SEED_USERS.length} users (admin / admin123)`);
+  console.log(`✅ Seeded ${users.length} initial user(s)`);
 }

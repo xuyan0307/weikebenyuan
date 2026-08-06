@@ -1,6 +1,17 @@
 const test = require('node:test');
+require('./orderPurchaseRangeService.test.cjs');
+require('./followHistoryService.test.cjs');
+require('./formStability.test.cjs');
 const assert = require('node:assert/strict');
-const { normalizePayStatus } = require('../dist/services/orderService');
+const { applyCanonicalCustomerTag, normalizePayStatus } = require('../dist/services/orderService');
+
+test('applyCanonicalCustomerTag replaces the only mutable customer tag', () => {
+  const original = { id: 'customer-1', name: 'Test', tag: 'D1', area: 'Xiamen' };
+  const updated = applyCanonicalCustomerTag(original, 'C1');
+
+  assert.deepEqual(updated, { ...original, tag: 'C1' });
+  assert.equal(original.tag, 'D1');
+});
 
 test('normalizePayStatus accepts current and legacy paid values', () => {
   assert.equal(normalizePayStatus('已支付'), '已付款');

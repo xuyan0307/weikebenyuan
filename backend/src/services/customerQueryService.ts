@@ -2,16 +2,22 @@ import type { Pool, RowDataPacket } from 'mysql2/promise';
 import { formatDateOnly, parseJson } from '../utils/serialization';
 
 export type CustomerDateRange = 'all' | 'today' | 'week' | 'month';
+export type CustomerFollowTime = 'today' | 'overdue' | 'pending' | 'none';
 
 export interface CustomerListFilters {
   keyword?: string;
   dateRange?: CustomerDateRange;
+  startDate?: string;
+  endDate?: string;
   areas?: string[];
   sources?: string[];
   statuses?: string[];
+  followTimes?: CustomerFollowTime[];
   tags?: string[];
   advisors?: string[];
   includeOrdered?: boolean;
+  dueFollowUp?: boolean;
+  advisorId?: string;
 }
 
 export interface CustomerListInput extends CustomerListFilters {
@@ -80,6 +86,17 @@ export function buildCustomerWhere(filters: CustomerListFilters) {
     where.push("c.tag IN ('D1','D2','D3') AND COALESCE(c.total_orders, 0) = 0");
   }
 
+  if (filters.advisorId) {
+    where.push('c.advisor_id = ?');
+    params.push(filters.advisorId);
+  }
+
+  if (filters.dueFollowUp) {
+    where.push(`c.follow_date IS NOT NULL
+      AND DATE(c.follow_date) <= CURDATE()
+      AND c.follow_status NOT IN ('已完成','已成交','已预约','已流失')`);
+  }
+
   const keyword = filters.keyword?.trim();
   if (keyword) {
     const pattern = `%${keyword}%`;
@@ -87,7 +104,16 @@ export function buildCustomerWhere(filters: CustomerListFilters) {
     params.push(pattern, pattern, pattern, pattern);
   }
 
-  if (filters.dateRange === 'today') {
+  if (filters.startDate || filters.endDate) {
+    if (filters.startDate) {
+      where.push('DATE(c.acquired_at) >= ?');
+      params.push(filters.startDate);
+    }
+    if (filters.endDate) {
+      where.push('DATE(c.acquired_at) <= ?');
+      params.push(filters.endDate);
+    }
+  } else if (filters.dateRange === 'today') {
     where.push('DATE(c.acquired_at) = CURDATE()');
   } else if (filters.dateRange === 'week') {
     where.push('YEARWEEK(c.acquired_at, 1) = YEARWEEK(CURDATE(), 1)');
@@ -109,6 +135,25 @@ export function buildCustomerWhere(filters: CustomerListFilters) {
   if (statuses.length > 0) {
     where.push(`(${DISPLAY_STATUS_SQL}) IN (${statuses.map(() => '?').join(',')})`);
     params.push(...statuses);
+  }
+
+  const followTimes = filters.followTimes ?? [];
+  if (followTimes.includes('none')) {
+    where.push('1=0');
+  } else if (followTimes.length > 0 && followTimes.length < 3) {
+    const followTimeConditions: string[] = [];
+    if (followTimes.includes('today')) {
+      followTimeConditions.push('DATE(c.follow_date) = CURDATE()');
+    }
+    if (followTimes.includes('overdue')) {
+      followTimeConditions.push('DATE(c.follow_date) < CURDATE()');
+    }
+    if (followTimes.includes('pending')) {
+      followTimeConditions.push('DATE(c.follow_date) > CURDATE()');
+    }
+    if (followTimeConditions.length > 0) {
+      where.push(`(${followTimeConditions.join(' OR ')})`);
+    }
   }
 
   return {

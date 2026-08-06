@@ -27,6 +27,7 @@ function mapRow(r: any) {
     rating: Number(r.rating) || 0,
     upgradeRate: r.upgrade_rate || 0,
     starLevel: r.star_level || 1,
+    commissionRate: Number(r.commission_rate) || 0,
     healthCert: parseJson(r.health_cert, { state: '无证书' }),
     firstAidCert: parseJson(r.first_aid_cert, { state: '无' }),
     laborCert: parseJson(r.labor_cert, { state: '无' }),
@@ -77,14 +78,15 @@ router.post('/', authenticateToken, auditLog('therapists'), async (req, res, nex
     const db = getDb();
     const id = b.id || randomUUID();
     await db.execute(
-      `INSERT INTO therapists (id, name, therapist_type, birth_year, phone, area, city, detail_address, services, service_method, characteristics, transport, status, orders, rating, upgrade_rate, star_level, health_cert, first_aid_cert, labor_cert, association_cert, remark)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      `INSERT INTO therapists (id, name, therapist_type, birth_year, phone, area, city, detail_address, services, service_method, characteristics, transport, status, orders, rating, upgrade_rate, star_level, commission_rate, health_cert, first_aid_cert, labor_cert, association_cert, remark)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [
         id, b.name || '', b.therapistType || '产康师', b.birthYear || null, b.phone || '',
         b.area || null, b.city || '厦门', b.detailAddress || null,
         b.services ? JSON.stringify(b.services) : null,
         b.serviceMethod || null, b.characteristics || null, b.transport || null,
         b.status || '在职', b.orders || 0, b.rating || 5.0, b.upgradeRate || 0, b.starLevel || 1,
+        b.commissionRate ?? 0,
         b.healthCert ? JSON.stringify(b.healthCert) : null,
         b.firstAidCert ? JSON.stringify(b.firstAidCert) : null,
         b.laborCert ? JSON.stringify(b.laborCert) : null,
@@ -104,7 +106,7 @@ router.put('/:id', authenticateToken, auditLog('therapists'), async (req, res, n
       `UPDATE therapists SET
         name=?, therapist_type=?, birth_year=?, phone=?, area=?, city=?, detail_address=?,
         services=?, service_method=?, characteristics=?, transport=?, status=?,
-        orders=?, rating=?, upgrade_rate=?, star_level=?,
+        orders=?, rating=?, upgrade_rate=?, star_level=?, commission_rate=?,
         health_cert=?, first_aid_cert=?, labor_cert=?, association_cert=?, remark=?
        WHERE id=?`,
       [
@@ -113,6 +115,7 @@ router.put('/:id', authenticateToken, auditLog('therapists'), async (req, res, n
         b.services ? JSON.stringify(b.services) : null,
         b.serviceMethod ?? null, b.characteristics ?? null, b.transport ?? null, b.status ?? '在职',
         b.orders ?? 0, b.rating ?? 5.0, b.upgradeRate ?? 0, b.starLevel ?? 1,
+        b.commissionRate ?? 0,
         b.healthCert ? JSON.stringify(b.healthCert) : null,
         b.firstAidCert ? JSON.stringify(b.firstAidCert) : null,
         b.laborCert ? JSON.stringify(b.laborCert) : null,
