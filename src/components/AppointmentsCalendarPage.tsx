@@ -7,7 +7,7 @@ import {
 import { uploadsApi } from '../api/endpoints';
 import type { Appointment, UploadedFile } from '../api/endpoints';
 import { useApp } from '../hooks/useApp';
-import { useAppointments, useTherapists, useOrders, useCustomers, useAppointmentMutations } from '../api/hooks';
+import { useAppointments, useTherapists, useOrders, useCustomers, useCustomerFilterOptions, useAppointmentMutations } from '../api/hooks';
 import { toast } from 'sonner';
 import {
   bookingWeekRangeLabel,
@@ -24,6 +24,11 @@ import {
   hasBlockingAppointmentExcluding,
   isCancelledAppointment,
 } from '../utils/appointmentSlotAvailability';
+import {
+  GlobalMultiSelectFilter,
+  matchesGlobalMultiSelect,
+  type GlobalFilterOption,
+} from './ui/global-multi-select-filter';
 
 type ApptStatus = '待确认' | '已确认' | '已取消' | '已完成';
 
@@ -1422,6 +1427,7 @@ export default function AppointmentsCalendarPage() {
   const apptsQ = useAppointments({ page: 1, pageSize: 1000 });
   const therapistsQ = useTherapists({ page: 1, pageSize: 1000 });
   const ordersQ = useOrders({ page: 1, pageSize: 1000 });
+  const customerFilterOptionsQ = useCustomerFilterOptions();
   const APPOINTMENTS: Appointment[] = apptsQ.data?.data ?? [];
   const THERAPISTS: any[] = therapistsQ.data?.data ?? [];
   const ORDERS: any[] = ordersQ.data?.data ?? [];
@@ -1430,6 +1436,15 @@ export default function AppointmentsCalendarPage() {
   const [weekOffset, setWeekOffset] = useState(0);
   const [showWeekPicker, setShowWeekPicker] = useState(false);
   const [selectedTherapistIds, setSelectedTherapistIds] = useState<string[]>([]);
+  const [selectedAdvisorNames, setSelectedAdvisorNames] = useState<string[]>(() =>
+    currentUser.role === 'service' && currentUser.name ? [currentUser.name] : []
+  );
+  useEffect(() => {
+    if (currentUser.role === 'service' && currentUser.name) {
+      setSelectedAdvisorNames([currentUser.name]);
+    }
+  }, [currentUser.name, currentUser.role]);
+  const [selectedAreas, setSelectedAreas] = useState<string[]>([]);
   const [localAppts, setLocalAppts] = useState<Appointment[]>([]);
   const [slotStatus, setSlotStatus] = useState<Record<string, ScheduleState>>({});
   const [editMode, setEditMode] = useState(false);
@@ -1446,6 +1461,22 @@ export default function AppointmentsCalendarPage() {
     () => getBoundTherapists(THERAPISTS, ORDERS, APPOINTMENTS),
     [THERAPISTS, ORDERS, APPOINTMENTS]
   );
+  const advisorOptions = useMemo<GlobalFilterOption[]>(() => {
+    const names = [
+      ...APPOINTMENTS.map(item => item.advisorName),
+      ...ORDERS.map(item => item.advisor),
+      ...(customerFilterOptionsQ.data?.advisors || []),
+    ].filter(Boolean) as string[];
+    if (currentUser.role === 'service' && currentUser.name) names.push(currentUser.name);
+    return Array.from(new Set(names))
+      .sort()
+      .map(name => ({ value: name, label: name }));
+  }, [APPOINTMENTS, ORDERS, currentUser.name, currentUser.role, customerFilterOptionsQ.data?.advisors]);
+  const areaOptions = useMemo<GlobalFilterOption[]>(() =>
+    Array.from(new Set(APPOINTMENTS.map(item => item.area).filter(Boolean)))
+      .sort()
+      .map(area => ({ value: area, label: area })),
+  [APPOINTMENTS]);
 
   useEffect(() => {
     if (calendarTherapists.length === 0) return;
@@ -1516,7 +1547,11 @@ export default function AppointmentsCalendarPage() {
   });
 
   function getDisplayedAppts(): Appointment[] {
-    return localAppts.filter(a => activeTherapistIds.includes(a.therapistId));
+    return localAppts.filter(a =>
+      activeTherapistIds.includes(a.therapistId)
+      && matchesGlobalMultiSelect(a.advisorName || '', selectedAdvisorNames)
+      && matchesGlobalMultiSelect(a.area || '', selectedAreas)
+    );
   }
 
   function getApptsForCell(date: string, slot: SlotLabel): Appointment[] {
@@ -1734,6 +1769,21 @@ export default function AppointmentsCalendarPage() {
             }}
           />
         )}
+
+        <GlobalMultiSelectFilter
+          label="归属客服"
+          options={advisorOptions}
+          selected={selectedAdvisorNames}
+          onChange={setSelectedAdvisorNames}
+          width={200}
+        />
+        <GlobalMultiSelectFilter
+          label="区域"
+          options={areaOptions}
+          selected={selectedAreas}
+          onChange={setSelectedAreas}
+          width={180}
+        />
 
         {/* Legend */}
         <div className="flex items-center gap-3 text-xs">

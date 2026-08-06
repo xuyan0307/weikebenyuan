@@ -35,7 +35,10 @@ export function GlobalMultiSelectFilter({
   const effectiveSelected = selected.filter(value => value !== GLOBAL_FILTER_NONE);
   const noneSelected = selected.includes(GLOBAL_FILTER_NONE);
   const optionValues = options.map(option => option.value);
-  const allSelected = isGlobalMultiSelectAll(selected, optionValues);
+  // An empty value is the canonical "all" state. Keep an explicit one-item
+  // selection visible even when it happens to be the only currently loaded
+  // option (for example, a service advisor with no other appointments yet).
+  const allSelected = !noneSelected && selected.length === 0;
 
   useEffect(() => {
     const close = (event: MouseEvent) => {
@@ -54,6 +57,10 @@ export function GlobalMultiSelectFilter({
         : `已选 ${effectiveSelected.length} 项`;
 
   const toggleAll = () => {
+    if (!noneSelected && effectiveSelected.length > 0) {
+      onChange([]);
+      return;
+    }
     onChange(toggleGlobalMultiSelectAll(selected, optionValues));
   };
 

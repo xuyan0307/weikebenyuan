@@ -34,7 +34,9 @@ test('activeReminderHour selects each reminder window once', () => {
   const now = new Date('2026-07-28T00:00:00.000Z');
   const startAfter = (hours) => new Date(now.getTime() + hours * 60 * 60 * 1000);
 
-  assert.equal(activeReminderHour(startAfter(13), now), null);
+  assert.equal(activeReminderHour(startAfter(25), now), null);
+  assert.equal(activeReminderHour(startAfter(24), now), 24);
+  assert.equal(activeReminderHour(startAfter(13), now), 24);
   assert.equal(activeReminderHour(startAfter(12), now), 12);
   assert.equal(activeReminderHour(startAfter(7), now), 12);
   assert.equal(activeReminderHour(startAfter(6), now), 6);
@@ -56,23 +58,23 @@ test('notification reply earlier than or exactly two hours is on time', () => {
   );
 });
 
-test('notification reply in the final two hours is delayed', () => {
+test('a valid Enterprise WeChat reply always marks the appointment notified', () => {
   const start = appointmentStartAt('2026-07-28', '10:00');
   assert.equal(
     deriveNotificationStatus(start, new Date('2026-07-28T08:00:01+08:00')),
-    '延迟',
+    '已通知',
   );
   assert.equal(
     deriveNotificationStatus(start, new Date('2026-07-28T09:59:59+08:00')),
-    '延迟',
+    '已通知',
   );
 });
 
-test('reply at or after service start and no reply after start are missed', () => {
+test('a valid reply stays notified while no reply after start is missed', () => {
   const start = appointmentStartAt('2026-07-28', '10:00');
   assert.equal(
     deriveNotificationStatus(start, new Date('2026-07-28T10:00:00+08:00')),
-    '遗漏',
+    '已通知',
   );
   assert.equal(
     deriveNotificationStatus(start, null, new Date('2026-07-28T10:00:00+08:00')),
@@ -84,14 +86,14 @@ test('reply at or after service start and no reply after start are missed', () =
   );
 });
 
-test('notification status follows the 12-hour and 2-hour no-reply boundaries', () => {
+test('notification status follows the 24-hour and 2-hour no-reply boundaries', () => {
   const start = appointmentStartAt('2026-07-28', '20:00');
   assert.equal(
-    deriveNotificationStatus(start, null, new Date('2026-07-28T07:59:59+08:00')),
-    null,
+    deriveNotificationStatus(start, null, new Date('2026-07-27T19:59:59+08:00')),
+    '待通知',
   );
   assert.equal(
-    deriveNotificationStatus(start, null, new Date('2026-07-28T08:00:00+08:00')),
+    deriveNotificationStatus(start, null, new Date('2026-07-27T20:00:00+08:00')),
     '需通知',
   );
   assert.equal(

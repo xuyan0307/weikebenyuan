@@ -99,7 +99,7 @@ export function useAppointmentMutations() {
         status,
       }: {
         id: string;
-        status: '需通知' | '已通知' | '延迟' | '遗漏';
+        status: '待通知' | '需通知' | '已通知' | '延迟' | '遗漏';
       }) => appointmentsApi.patchNotificationStatus(id, status),
       onSuccess: invalidate,
     }).mutateAsync,

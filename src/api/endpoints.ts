@@ -131,8 +131,8 @@ export interface Appointment {
   status: string; rawStatus?: string;
   orderType?: '体验卡' | '套餐';
   area: string; remark: string;
-  notifyStatus?: '需通知' | '已通知' | '延迟' | '遗漏' | null;
-  notifyManualStatus?: '需通知' | '已通知' | '延迟' | '遗漏' | null;
+  notifyStatus?: '待通知' | '需通知' | '已通知' | '延迟' | '遗漏' | null;
+  notifyManualStatus?: '待通知' | '需通知' | '已通知' | '延迟' | '遗漏' | null;
   notifySentAt?: string | null;
   notifyError?: string;
 }
@@ -150,7 +150,7 @@ export const appointmentsApi = {
     api.post<{ status: string }>(`/appointments/${id}/notification-reply`, { reply: '已通知' }),
   patchNotificationStatus: (
     id: string,
-    status: '需通知' | '已通知' | '延迟' | '遗漏'
+    status: '待通知' | '需通知' | '已通知' | '延迟' | '遗漏'
   ) => api.patch<{ message: string; status: string }>(
     `/appointments/${id}/notification-status`,
     { status }

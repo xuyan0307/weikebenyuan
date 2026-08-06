@@ -45,7 +45,7 @@ export function buildDashboardTodoQueries(scope: DashboardTodoQueryScope) {
             a.notify_manual_status IS NULL
             AND a.notify_replied_at IS NULL
             AND ${appointmentStartSql} > DATE_ADD(${chinaNowSql}, INTERVAL 2 HOUR)
-            AND ${appointmentStartSql} <= DATE_ADD(${chinaNowSql}, INTERVAL 12 HOUR)
+            AND ${appointmentStartSql} <= DATE_ADD(${chinaNowSql}, INTERVAL 24 HOUR)
           )
         )`,
   };

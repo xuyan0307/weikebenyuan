@@ -17,6 +17,8 @@ import type { Appointment } from '../api/endpoints';
 import {
   useAppointmentMutations,
   useAppointments,
+  useCustomerFilterOptions,
+  useOrders,
 } from '../api/hooks';
 import { useApp } from '../hooks/useApp';
 import { RecordActionButtons } from './ui/record-action-buttons';
@@ -35,7 +37,7 @@ import { GLOBAL_DATE_RANGE_QUICK_OPTIONS, quickDateRange, type DateRangeValue } 
 import { useGlobalDateRange } from '../utils/useGlobalDateRange';
 
 type TimeRange = 'all' | 'today' | 'week' | 'month' | 'custom';
-type NotifyStatus = '需通知' | '已通知' | '延迟' | '遗漏';
+type NotifyStatus = '待通知' | '需通知' | '已通知' | '延迟' | '遗漏';
 
 const APPOINTMENT_STATUS_OPTIONS: GlobalFilterOption[] = [
   { value: '待服务', label: '待服务' },
@@ -43,6 +45,7 @@ const APPOINTMENT_STATUS_OPTIONS: GlobalFilterOption[] = [
   { value: '取消', label: '取消' },
 ];
 const NOTIFY_STATUS_OPTIONS: GlobalFilterOption[] = [
+  { value: '待通知', label: '待通知' },
   { value: '需通知', label: '需通知' },
   { value: '已通知', label: '已通知' },
   { value: '延迟', label: '延迟' },
@@ -86,6 +89,7 @@ function loadColumnWidths() {
 }
 
 const notifyStyles: Record<NotifyStatus, string> = {
+  待通知: 'border-slate-200 bg-slate-50 text-slate-600',
   需通知: 'border-amber-200 bg-amber-50 text-amber-700',
   已通知: 'border-green-200 bg-green-50 text-green-700',
   延迟: 'border-orange-200 bg-orange-50 text-orange-700',
@@ -302,19 +306,22 @@ function AppointmentModal({
 export function AppointmentsListPage() {
   const { currentUser } = useApp();
   const canEditNotification = ['superadmin', 'admin', 'service'].includes(currentUser.role);
+  const dashboardFilter = useMemo(() => readDashboardFilter(), []);
   const [timeRange, setTimeRange] = useState<TimeRange>('all');
   const [appointmentDateRange, setAppointmentDateRange] = useGlobalDateRange('all');
-  const [notifyFilters, setNotifyFilters] = useState<string[]>(() => {
-    const filter = readDashboardFilter();
-    if (filter.appointmentNotifyStatus === '需通知') {
-      clearDashboardFilter();
-      return ['需通知'];
-    }
-    return [];
-  });
+  const [notifyFilters, setNotifyFilters] = useState<string[]>(() =>
+    dashboardFilter.appointmentNotifyStatus === '需通知' ? ['需通知'] : []
+  );
   const [appointmentFilters, setAppointmentFilters] = useState<string[]>([]);
   const [therapistFilters, setTherapistFilters] = useState<string[]>([]);
-  const [selectedAdvisors, setSelectedAdvisors] = useState<string[]>([]);
+  const [selectedAdvisors, setSelectedAdvisors] = useState<string[]>(() =>
+    currentUser.role === 'service' && currentUser.name ? [currentUser.name] : []
+  );
+  useEffect(() => {
+    if (currentUser.role === 'service' && currentUser.name) {
+      setSelectedAdvisors([currentUser.name]);
+    }
+  }, [currentUser.name, currentUser.role]);
   const [appointmentModal, setAppointmentModal] = useState<{
     appointment: Appointment;
     mode: 'view' | 'edit';
@@ -337,8 +344,15 @@ export function AppointmentsListPage() {
     [appointmentDateRange.start, appointmentDateRange.end]
   );
   const query = useAppointments({ page: 1, pageSize: 2000, ...range });
+  const ordersQuery = useOrders({ page: 1, pageSize: 2000 });
+  const customerFilterOptionsQuery = useCustomerFilterOptions();
   const appointmentMutations = useAppointmentMutations();
   const appointments = query.data?.data || [];
+  const orders = ordersQuery.data?.data || [];
+
+  useEffect(() => {
+    if (dashboardFilter.appointmentNotifyStatus) clearDashboardFilter();
+  }, [dashboardFilter.appointmentNotifyStatus]);
 
   useEffect(() => {
     window.localStorage.setItem(APPOINTMENT_COLUMN_WIDTHS_KEY, JSON.stringify(columnWidths));
@@ -403,10 +417,15 @@ export function AppointmentsListPage() {
     setResizingColumn(index);
   };
 
-  const advisors = useMemo(
-    () => Array.from(new Set(appointments.map(item => item.advisorName).filter(Boolean) as string[])).sort(),
-    [appointments]
-  );
+  const advisors = useMemo(() => {
+    const names = [
+      ...appointments.map(item => item.advisorName),
+      ...orders.map(item => item.advisor),
+      ...(customerFilterOptionsQuery.data?.advisors || []),
+    ].filter(Boolean) as string[];
+    if (currentUser.role === 'service' && currentUser.name) names.push(currentUser.name);
+    return Array.from(new Set(names)).sort();
+  }, [appointments, currentUser.name, currentUser.role, customerFilterOptionsQuery.data?.advisors, orders]);
   const therapistNames = useMemo(
     () => Array.from(new Set(appointments.map(item => item.therapistName).filter(Boolean))).sort(),
     [appointments]
@@ -428,6 +447,7 @@ export function AppointmentsListPage() {
   }), [appointments, notifyFilters, appointmentFilters, therapistFilters, selectedAdvisors]);
 
   const notifyCounts = useMemo(() => ({
+    待通知: filtered.filter(item => item.notifyStatus === '待通知').length,
     需通知: filtered.filter(item => item.notifyStatus === '需通知').length,
     已通知: filtered.filter(item => item.notifyStatus === '已通知').length,
     延迟: filtered.filter(item => item.notifyStatus === '延迟').length,
@@ -436,6 +456,7 @@ export function AppointmentsListPage() {
 
   const summaryCards = [
     { label: '预约总数', value: filtered.length, icon: CalendarDaysIcon, color: 'text-blue-600', bg: 'bg-blue-50' },
+    { label: '待通知', value: notifyCounts.待通知, icon: ClockIcon, color: 'text-slate-600', bg: 'bg-slate-50' },
     { label: '需通知', value: notifyCounts.需通知, icon: ClockIcon, color: 'text-amber-600', bg: 'bg-amber-50' },
     { label: '已通知', value: notifyCounts.已通知, icon: BellIcon, color: 'text-green-600', bg: 'bg-green-50' },
     { label: '延迟', value: notifyCounts.延迟, icon: AlertTriangleIcon, color: 'text-orange-600', bg: 'bg-orange-50' },
@@ -467,7 +488,7 @@ export function AppointmentsListPage() {
 
   return (
     <div data-cmp="AppointmentsListPage" className="space-y-5">
-      <div className="mobile-summary-grid grid grid-cols-5 gap-4">
+      <div className="mobile-summary-grid grid grid-cols-6 gap-4">
         {summaryCards.map(card => (
           <div key={card.label} className="rounded-lg bg-white p-5 shadow-sm">
             <div className="flex items-start justify-between">

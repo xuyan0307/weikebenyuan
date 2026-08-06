@@ -695,6 +695,15 @@ const migrations: Migration[] = [
       );
     },
   },
+  {
+    id: '025_appointment_pending_notification_status',
+    description: 'Use pending notification as the default state for newly created appointments',
+    up: async db => {
+      await db.execute(
+        "ALTER TABLE appointments MODIFY notify_status varchar(20) NOT NULL DEFAULT '待通知'"
+      );
+    },
+  },
 ];
 
 export async function runMigrations(db: mysql.Pool) {

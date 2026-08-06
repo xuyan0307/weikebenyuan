@@ -8,7 +8,7 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "lint": "eslint src --ext .ts",
-    "test": "pnpm run build && node --test tests/serialization.test.cjs tests/orderService.test.cjs tests/customerQueryService.test.cjs tests/followTimeFilter.test.mjs tests/orderContractFilter.test.mjs tests/multiSelectFilter.test.mjs tests/appointmentEdit.test.mjs tests/appointmentBookingWeeks.test.mjs tests/appointmentServiceSync.test.mjs tests/appointmentSlotAvailability.test.mjs tests/appointmentService.test.cjs tests/appointmentNotificationService.test.cjs tests/wecomCallbackService.test.cjs tests/dashboardMetrics.test.cjs tests/dashboardDataScope.test.cjs tests/dashboardTodoService.test.cjs tests/dashboardTodoNavigation.test.mjs tests/salarySettlementService.test.cjs tests/salaryCustomerLedgerService.test.cjs tests/productionSeed.test.cjs tests/baseSchema.test.cjs"
+    "test": "pnpm run build && node --test tests/serialization.test.cjs tests/orderService.test.cjs tests/customerQueryService.test.cjs tests/followTimeFilter.test.mjs tests/orderContractFilter.test.mjs tests/multiSelectFilter.test.mjs tests/appointmentAdvisorFilter.test.mjs tests/appointmentEdit.test.mjs tests/appointmentBookingWeeks.test.mjs tests/appointmentServiceSync.test.mjs tests/appointmentSlotAvailability.test.mjs tests/appointmentService.test.cjs tests/appointmentNotificationService.test.cjs tests/wecomCallbackService.test.cjs tests/dashboardMetrics.test.cjs tests/dashboardDataScope.test.cjs tests/dashboardTodoService.test.cjs tests/dashboardTodoNavigation.test.mjs tests/salarySettlementService.test.cjs tests/salaryCustomerLedgerService.test.cjs tests/productionSeed.test.cjs tests/baseSchema.test.cjs"
   },
   "dependencies": {
     "ali-oss": "^6.23.0",

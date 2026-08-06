@@ -3,8 +3,9 @@ import { getDb } from '../config/database';
 import { randomUUID } from 'crypto';
 import { formatDateOnly } from '../utils/serialization';
 
-export type AppointmentNotifyStatus = '需通知' | '已通知' | '延迟' | '遗漏';
+export type AppointmentNotifyStatus = '待通知' | '需通知' | '已通知' | '延迟' | '遗漏';
 export const APPOINTMENT_NOTIFY_STATUSES: AppointmentNotifyStatus[] = [
+  '待通知',
   '需通知',
   '已通知',
   '延迟',
@@ -25,7 +26,7 @@ interface ReminderRow {
   notify_manual_status: AppointmentNotifyStatus | null;
 }
 
-export const REMINDER_HOURS = [12, 6, 3] as const;
+export const REMINDER_HOURS = [24, 12, 6, 3] as const;
 
 let timer: NodeJS.Timeout | null = null;
 let accessToken = '';
@@ -69,7 +70,8 @@ export function appointmentStartAt(date: string | Date, timeSlot: string) {
 
 export function activeReminderHour(startAt: Date, now = new Date()) {
   const remainingHours = (startAt.getTime() - now.getTime()) / (60 * 60 * 1000);
-  if (remainingHours <= 0 || remainingHours > 12) return null;
+  if (remainingHours <= 0 || remainingHours > 24) return null;
+  if (remainingHours > 12) return 24;
   if (remainingHours > 6) return 12;
   if (remainingHours > 3) return 6;
   return 3;
@@ -80,16 +82,12 @@ export function deriveNotificationStatus(
   repliedAt?: Date | null,
   now = new Date()
 ): AppointmentNotifyStatus | null {
-  if (repliedAt) {
-    if (repliedAt.getTime() >= startAt.getTime()) return '遗漏';
-    if (repliedAt.getTime() > startAt.getTime() - 2 * 60 * 60 * 1000) return '延迟';
-    return '已通知';
-  }
+  if (repliedAt) return '已通知';
   const remainingHours = (startAt.getTime() - now.getTime()) / (60 * 60 * 1000);
   if (remainingHours <= 0) return '遗漏';
   if (remainingHours <= 2) return '延迟';
-  if (remainingHours <= 12) return '需通知';
-  return null;
+  if (remainingHours <= 24) return '需通知';
+  return '待通知';
 }
 
 export function parseNotificationReply(content: string) {
@@ -223,10 +221,7 @@ export async function recordNotificationReply(
     });
   }
 
-  const status = deriveNotificationStatus(
-    appointmentStartAt(row.date, row.time_slot),
-    repliedAt
-  );
+  const status: AppointmentNotifyStatus = '已通知';
   await db.execute(
     `UPDATE appointments
      SET notify_status = ?, notify_manual_status = NULL,
@@ -385,7 +380,7 @@ export async function syncAppointmentNotificationStates(now = new Date()) {
 
   for (const row of rows as ReminderRow[]) {
     const start = appointmentStartAt(row.date, row.time_slot);
-    const firstReminderAt = new Date(start.getTime() - 12 * 60 * 60 * 1000);
+    const firstReminderAt = new Date(start.getTime() - 24 * 60 * 60 * 1000);
     await db.execute(
       'UPDATE appointments SET notify_scheduled_at = ? WHERE id = ?',
       [firstReminderAt, row.id]

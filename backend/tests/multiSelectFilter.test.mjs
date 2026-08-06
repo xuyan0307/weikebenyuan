@@ -7,7 +7,7 @@ import {
   toggleGlobalMultiSelectOption,
 } from '../../src/utils/multiSelectFilter.ts';
 
-const options = ['需通知', '已通知', '延迟', '遗漏'];
+const options = ['待通知', '需通知', '已通知', '延迟', '遗漏'];
 
 test('global multi-select defaults to all and supports all-none toggling', () => {
   assert.equal(matchesGlobalMultiSelect('需通知', []), true);

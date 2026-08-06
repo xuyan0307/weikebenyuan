@@ -184,7 +184,7 @@ router.post('/notifications/wecom-reply', async (req, res, next) => {
     const status = appointmentId
       ? await recordNotificationReply(appointmentId, new Date(), sender || undefined)
       : sender
-        ? await recordNotificationReplyFromWecom(sender, reply, new Date())
+        ? await recordNotificationReplyFromWecom(reply, sender, new Date())
         : null;
 
     if (!status) {
@@ -231,7 +231,10 @@ router.get('/', authenticateToken, async (req: AuthRequest, res, next) => {
       )`);
       params.push(customerId, customerId, customerId);
     }
-    if (req.userRole !== 'superadmin' && req.userRole !== 'admin') {
+    // Customer-service users may switch the advisor filter after entering with
+    // themselves selected by default. Keep the legacy restricted scope for any
+    // other non-administrator roles.
+    if (!['superadmin', 'admin', 'service'].includes(req.userRole || '')) {
       where.push(`(
         a.customer_id IN (SELECT c.id FROM customers c WHERE c.advisor_id = ?)
         OR a.customer_id IN (
