@@ -6,11 +6,13 @@ import { formatDateOnly, parseJson } from '../utils/serialization';
 
 export interface AppointmentWriteBody {
   id?: string;
+  orderId?: string;
   customerId?: string;
   therapistId?: string;
   date?: string;
   timeSlot?: string;
   service?: string;
+  serviceSequence?: number | null;
   status?: string;
   area?: string;
   remark?: string;
@@ -28,6 +30,8 @@ interface AppointmentRow {
   date: string | Date;
   time_slot: string;
   service: string | null;
+  service_sequence?: number | null;
+  service_total_times?: number | null;
   status: string;
   area?: string | null;
   remark?: string | null;
@@ -82,7 +86,8 @@ export function isAppointmentTimePast(date: unknown, timeSlot: unknown, now = ne
 export function incrementAssignedServicePeople(
   value: unknown,
   therapistName: string,
-  fallbackTotal: number
+  fallbackTotal: number,
+  targetSequence?: number | null
 ): { changed: boolean; value: ServicePeople } {
   const servicePeople = parseJson<ServicePeople>(value, {});
   let changed = false;
@@ -92,11 +97,31 @@ export function incrementAssignedServicePeople(
     if (!person || person.assign !== therapistName) continue;
     const total = Math.max(1, Number(person.totalTimes) || fallbackTotal || 1);
     const used = Math.max(0, Number(person.usedTimes) || 0);
-    servicePeople[key] = { ...person, usedTimes: String(Math.min(total, used + 1)) };
+    const nextUsed = targetSequence == null
+      ? used + 1
+      : Math.max(used, Math.trunc(targetSequence));
+    servicePeople[key] = { ...person, usedTimes: String(Math.min(total, nextUsed)) };
     changed = true;
   }
 
   return { changed, value: servicePeople };
+}
+
+export function resolveAppointmentServiceSequence(
+  requested: unknown,
+  completedTimes: unknown,
+  totalTimes: unknown
+): number {
+  const total = Math.max(1, Math.trunc(Number(totalTimes) || 1));
+  const completed = Math.max(0, Math.min(total, Math.trunc(Number(completedTimes) || 0)));
+  if (requested === undefined || requested === null || requested === '') {
+    return Math.min(total, completed + 1);
+  }
+  const sequence = Number(requested);
+  if (!Number.isInteger(sequence) || sequence < 1 || sequence > total) {
+    throw createError(`本次服务次数应为 1-${total} 之间的整数`, 400);
+  }
+  return sequence;
 }
 
 async function resolveCustomerId(connection: PoolConnection, requestedId: string): Promise<string> {
@@ -139,9 +164,41 @@ export async function createAppointment(body: AppointmentWriteBody, pool: Pool =
     const id = randomUUID();
     const no = body.id || ('A' + Date.now());
     const customerId = await resolveCustomerId(connection, body.customerId || '');
+    const requestedOrderId = String(body.orderId || '').trim();
+    const [orderRows] = await connection.execute(
+      `SELECT id, used_times, total_times, type
+       FROM orders
+       WHERE customer_id = ? AND pay_status <> '已退款'
+         ${requestedOrderId ? 'AND (id = ? OR order_no = ?)' : ''}
+       ORDER BY created_at DESC
+       LIMIT 1 FOR UPDATE`,
+      requestedOrderId ? [customerId, requestedOrderId, requestedOrderId] : [customerId]
+    );
+    const currentOrder = (orderRows as Array<{
+      id: string;
+      used_times: number;
+      total_times: number;
+      type: string;
+    }>)[0];
+    if (requestedOrderId && !currentOrder) {
+      throw createError('所选订单不存在、已退款或不属于当前客户，请刷新后重试', 400);
+    }
+    const isPackageOrder = currentOrder?.type === '套餐';
+    const serviceSequence = isPackageOrder
+      ? resolveAppointmentServiceSequence(
+        body.serviceSequence,
+        currentOrder.used_times,
+        currentOrder.total_times
+      )
+      : null;
+    const serviceTotalTimes = isPackageOrder
+      ? Math.max(1, Number(currentOrder.total_times) || 1)
+      : null;
     await connection.execute(
-      `INSERT INTO appointments (id, appointment_no, customer_id, therapist_id, date, time_slot, service, status, area, remark)
-       VALUES (?,?,?,?,?,?,?,?,?,?)`,
+      `INSERT INTO appointments
+        (id, appointment_no, customer_id, therapist_id, date, time_slot, service,
+         service_sequence, service_total_times, status, area, remark)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
       [
         id,
         no,
@@ -150,13 +207,15 @@ export async function createAppointment(body: AppointmentWriteBody, pool: Pool =
         date,
         timeSlot,
         body.service || '',
+        serviceSequence,
+        serviceTotalTimes,
         body.status || '待确认',
         body.area || null,
         body.remark || null,
       ]
     );
     await connection.commit();
-    return { id, no };
+    return { id, no, serviceSequence, serviceTotalTimes };
   } catch (error) {
     await connection.rollback();
     throw error;
@@ -175,7 +234,8 @@ export async function updateAppointment(
     await connection.beginTransaction();
     const [rows] = await connection.execute(
       `SELECT a.id, a.appointment_no, a.customer_id, a.therapist_id, a.date, a.time_slot,
-              a.service, a.status, a.area, a.remark, a.progress_applied_at,
+              a.service, a.service_sequence, a.service_total_times,
+              a.status, a.area, a.remark, a.progress_applied_at,
               EXISTS(SELECT 1 FROM service_records sr WHERE sr.appointment_id = a.id) AS has_service_record
        FROM appointments a
        WHERE a.id = ? OR a.appointment_no = ?
@@ -259,7 +319,8 @@ export async function updateAppointmentStatus(
   try {
     await connection.beginTransaction();
     const [rows] = await connection.execute(
-      `SELECT a.id, a.customer_id, a.therapist_id, a.date, a.time_slot, a.service, a.status,
+      `SELECT a.id, a.customer_id, a.therapist_id, a.date, a.time_slot, a.service,
+              a.service_sequence, a.service_total_times, a.status,
               a.progress_applied_at,
               EXISTS(SELECT 1 FROM service_records sr WHERE sr.appointment_id = a.id) AS has_service_record
        FROM appointments a WHERE a.id = ? OR a.appointment_no = ? LIMIT 1 FOR UPDATE`,
@@ -358,7 +419,8 @@ async function applyOrderProgress(connection: PoolConnection, appointment: Appoi
   const servicePeople = incrementAssignedServicePeople(
     order.service_people,
     therapistName,
-    Number(order.total_times) || 1
+    Number(order.total_times) || 1,
+    appointment.service_sequence
   );
   const servicePeopleValue = servicePeople.changed
     ? JSON.stringify(servicePeople.value)
@@ -367,7 +429,18 @@ async function applyOrderProgress(connection: PoolConnection, appointment: Appoi
       : JSON.stringify(order.service_people ?? {});
 
   await connection.execute(
-    'UPDATE orders SET used_times = LEAST(used_times + 1, total_times), service_people = ? WHERE id = ?',
-    [servicePeopleValue, order.id]
+    `UPDATE orders
+     SET used_times = CASE
+       WHEN ? IS NULL THEN LEAST(used_times + 1, total_times)
+       ELSE LEAST(GREATEST(used_times, ?), total_times)
+     END,
+     service_people = ?
+     WHERE id = ?`,
+    [
+      appointment.service_sequence ?? null,
+      appointment.service_sequence ?? null,
+      servicePeopleValue,
+      order.id,
+    ]
   );
 }

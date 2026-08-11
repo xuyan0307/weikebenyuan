@@ -57,6 +57,8 @@ interface AppointmentListRow {
   date: string | Date | null;
   time_slot: string | null;
   service: string | null;
+  service_sequence: number | null;
+  service_total_times: number | null;
   status: string | null;
   area: string | null;
   remark: string | null;
@@ -103,6 +105,8 @@ function mapRow(r: AppointmentListRow) {
     timeSlot: r.time_slot || '',
     service: r.service || '',
     serviceContent: r.service || r.order_service_items || '',
+    serviceSequence: r.service_sequence == null ? null : Number(r.service_sequence),
+    serviceTotalTimes: r.service_total_times == null ? null : Number(r.service_total_times),
     status: appointmentStatus(r.status),
     rawStatus: r.status || '',
     orderType: orderType(r.order_type),

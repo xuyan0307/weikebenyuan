@@ -372,6 +372,11 @@ function AppointmentCard({
   }
 
   const displayUsedTimes = usedTimes !== undefined ? usedTimes : (order?.usedTimes ?? 0);
+  const displayServiceSequence = appt.serviceSequence
+    ?? (appt.status === '已完成'
+      ? displayUsedTimes
+      : Math.min(Number(order?.totalTimes) || 1, displayUsedTimes + 1));
+  const displayServiceTotal = appt.serviceTotalTimes ?? order?.totalTimes ?? 1;
   const area = appt.area;
   const canComplete = !editMode && !isCancelled && appt.status !== '已完成' && appt.date <= getLocalDateKey();
 
@@ -426,7 +431,7 @@ function AppointmentCard({
       )}
       {isPackage && order && (
         <div style={{ opacity: 0.8 }}>
-          第{displayUsedTimes}次/共{order.totalTimes}次
+          第{displayServiceSequence}次/共{displayServiceTotal}次
         </div>
       )}
       {appt.status === '已完成' && <div className="mt-1 font-medium" style={{ color: '#16A34A' }}>已完成服务</div>}
@@ -876,6 +881,7 @@ function CreateModal({
   const [startHour, setStartHour] = useState('09');
   const [startMin, setStartMin] = useState('00');
   const [remark, setRemark] = useState('');
+  const [serviceSequenceInput, setServiceSequenceInput] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const selectedOrder = ORDERS.find(o => o.id === selectedOrderId) ?? null;
@@ -893,6 +899,7 @@ function CreateModal({
       setStartHour('09');
       setStartMin('00');
       setRemark('');
+      setServiceSequenceInput('');
       setIsSubmitting(false);
     }
   }, [visible]);
@@ -939,6 +946,16 @@ function CreateModal({
   const currentUsedTimes = selectedOrder
     ? (localOrderUsedTimes[selectedOrder.id] ?? selectedOrder.usedTimes)
     : 0;
+
+  useEffect(() => {
+    if (!selectedOrder || !isPackageOrder) {
+      setServiceSequenceInput('');
+      return;
+    }
+    const total = Math.max(1, Number(selectedOrder.totalTimes) || 1);
+    const completed = Math.max(0, Number(currentUsedTimes) || 0);
+    setServiceSequenceInput(String(Math.min(total, completed + 1)));
+  }, [selectedOrderId, isPackageOrder, currentUsedTimes, selectedOrder?.totalTimes]);
 
   function isSlotFree(date: string, slot: SlotLabel): boolean {
     const slotDefinition = TIME_SLOTS.find(item => item.label === slot);
@@ -989,10 +1006,17 @@ function CreateModal({
       toast.error('已经过去的时间不能预约，请重新选择');
       return;
     }
+    const totalTimes = Math.max(1, Number(selectedOrder.totalTimes) || 1);
+    const serviceSequence = Number(serviceSequenceInput);
+    if (isPackageOrder && (!Number.isInteger(serviceSequence) || serviceSequence < 1 || serviceSequence > totalTimes)) {
+      toast.error(`本次服务次数应填写 1-${totalTimes} 之间的整数`);
+      return;
+    }
     const area = selectedOrder?.area || selectedCustomer?.area || '';
     const service = syncedService;
     const newAppt: Appointment = {
       id: `A${Date.now()}`,
+      orderId: selectedOrder.id,
       customerId: selectedOrder.customerId,
       customerName: selectedOrder.customerName,
       therapistId: therapist.id,
@@ -1001,6 +1025,8 @@ function CreateModal({
       date: selectedDate,
       timeSlot: `${startHour}:${startMin}`,
       service,
+      serviceSequence: isPackageOrder ? serviceSequence : null,
+      serviceTotalTimes: isPackageOrder ? totalTimes : null,
       status: '待确认' as ApptStatus,
       area,
       remark,
@@ -1161,10 +1187,41 @@ function CreateModal({
                     )}
                     <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
                       {selectedOrder.type} · {selectedOrder.payStatus}
-                      {isPackageOrder && ` · 即将服务第${currentUsedTimes + 1}次/共${selectedOrder.totalTimes}次`}
+                      {isPackageOrder && ` · 已完成${currentUsedTimes}次/共${selectedOrder.totalTimes}次`}
                     </span>
                   </div>
                 </div>
+
+                {isPackageOrder && (
+                  <div
+                    className="rounded-xl px-4 py-3"
+                    style={{ background: '#EFF6FF', border: '1px solid #BFDBFE' }}
+                  >
+                    <div className="flex items-center justify-between gap-4 flex-wrap">
+                      <div>
+                        <div className="text-sm font-semibold" style={{ color: '#1D4ED8' }}>本次服务序号</div>
+                        <div className="text-xs mt-1" style={{ color: 'var(--muted-foreground)' }}>
+                          默认按已完成次数 +1，可由管理员或客服顾问人工纠偏
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-foreground">第</span>
+                        <input
+                          type="number"
+                          min={1}
+                          max={Math.max(1, Number(selectedOrder.totalTimes) || 1)}
+                          step={1}
+                          value={serviceSequenceInput}
+                          onChange={event => setServiceSequenceInput(event.target.value)}
+                          className="rounded-lg px-3 py-2 text-center text-sm font-semibold outline-none"
+                          style={{ width: 72, border: '1px solid #93C5FD', background: 'var(--card)', color: '#1D4ED8' }}
+                          aria-label="本次服务序号"
+                        />
+                        <span className="text-sm text-foreground">次 / 共 {selectedOrder.totalTimes} 次</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Service is authoritative customer/order record data, never edited during booking. */}
                 <div>
@@ -1619,6 +1676,7 @@ export default function AppointmentsCalendarPage() {
 
     try {
       const created = await apptMutations.create({
+      orderId,
       customerId: newAppt.customerId,
       customerName: newAppt.customerName,
       therapistId: newAppt.therapistId,
@@ -1626,11 +1684,19 @@ export default function AppointmentsCalendarPage() {
       date: newAppt.date,
       timeSlot: newAppt.timeSlot,
       service: newAppt.service,
+      serviceSequence: newAppt.serviceSequence,
+      serviceTotalTimes: newAppt.serviceTotalTimes,
       status: newAppt.status,
       area: newAppt.area,
       remark: newAppt.remark,
       });
-      const persisted = { ...newAppt, id: created.no || created.id, _id: created.id };
+      const persisted = {
+        ...newAppt,
+        id: created.no || created.id,
+        _id: created.id,
+        serviceSequence: created.serviceSequence ?? newAppt.serviceSequence,
+        serviceTotalTimes: created.serviceTotalTimes ?? newAppt.serviceTotalTimes,
+      };
       setLocalAppts(prev => prev.some(appointment => appointment.id === persisted.id) ? prev : [persisted, ...prev]);
 
       setShowCreateModal(false);

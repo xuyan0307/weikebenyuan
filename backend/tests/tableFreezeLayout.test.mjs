@@ -4,6 +4,7 @@ import test from 'node:test';
 
 const customersSource = readFileSync(new URL('../../src/components/CustomersListPage.tsx', import.meta.url), 'utf8');
 const ordersSource = readFileSync(new URL('../../src/components/OrdersListPage.tsx', import.meta.url), 'utf8');
+const compactAreaSource = readFileSync(new URL('../../src/utils/compactArea.ts', import.meta.url), 'utf8');
 
 function assertSharedFreezeContract(source, timeLabel) {
   assert.match(source, /const COL_W = \[82, 110\]/, 'left freeze pane must contain exactly two columns');
@@ -26,4 +27,11 @@ test('order table freezes only purchase time/name and places id after advisor', 
     'right-frozen action pane must render above horizontally scrolled table content');
   assert.match(ordersSource, /STICKY_RIGHT_TD_STYLE\('var\(--card\)'\)/,
     'summary-row action cell must use an opaque background');
+});
+
+test('customer areas show two characters while retaining the full hover value', () => {
+  assert.match(compactAreaSource, /Array\.from\(fullValue\)/);
+  assert.match(compactAreaSource, /characters\.slice\(0, visibleCharacters\)/);
+  assert.match(customersSource, /title=\{c\.area && c\.area !== '—' \? c\.area : undefined\}[\s\S]*?compactAreaLabel\(c\.area\)/);
+  assert.match(ordersSource, /title=\{o\.area\}[\s\S]*?compactAreaLabel\(o\.area\)/);
 });

@@ -5,6 +5,7 @@ const {
   getSlotPeriod,
   isAppointmentTimePast,
   incrementAssignedServicePeople,
+  resolveAppointmentServiceSequence,
   updateAppointment,
   updateAppointmentStatus,
 } = require('../dist/services/appointmentService');
@@ -57,6 +58,33 @@ test('incrementAssignedServicePeople leaves unassigned service rows unchanged', 
 
   assert.equal(result.changed, false);
   assert.equal(result.value.sp1.usedTimes, '0');
+});
+
+test('resolveAppointmentServiceSequence defaults to completed times plus one', () => {
+  assert.equal(resolveAppointmentServiceSequence(undefined, 2, 5), 3);
+  assert.equal(resolveAppointmentServiceSequence(null, 0, 5), 1);
+  assert.equal(resolveAppointmentServiceSequence('', 5, 5), 5);
+});
+
+test('resolveAppointmentServiceSequence accepts manual correction and rejects invalid ranges', () => {
+  assert.equal(resolveAppointmentServiceSequence(4, 2, 5), 4);
+  assert.throws(
+    () => resolveAppointmentServiceSequence(6, 2, 5),
+    error => error.statusCode === 400
+  );
+  assert.throws(
+    () => resolveAppointmentServiceSequence(2.5, 2, 5),
+    error => error.statusCode === 400
+  );
+});
+
+test('incrementAssignedServicePeople can synchronize to an explicit appointment sequence', () => {
+  const result = incrementAssignedServicePeople({
+    sp1: { assign: '张技师', usedTimes: '2', totalTimes: '5' },
+  }, '张技师', 5, 4);
+
+  assert.equal(result.changed, true);
+  assert.equal(result.value.sp1.usedTimes, '4');
 });
 
 function fakePool(executeResults) {

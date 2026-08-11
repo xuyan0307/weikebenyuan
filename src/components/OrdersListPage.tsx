@@ -35,6 +35,7 @@ import {
   readOrderAppointmentDraft,
   saveOrderAppointmentDraft,
 } from '../utils/orderAppointmentFlow';
+import { compactAreaLabel } from '../utils/compactArea';
 
 /* ─── Types ─────────────────────────────────────────── */
 type NewPayStatus = '已支付' | '待支付' | '已付定金' | '已退款';
@@ -1443,7 +1444,11 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
   const canChooseFollower = currentUser.role === 'superadmin' || currentUser.role === 'admin';
   const canChooseAdvisor = canChooseFollower;
   const canDeleteOrder = canChooseFollower && mode === 'edit';
-  const canEditServiceProgress = canChooseFollower && mode !== 'view';
+  const canEditServiceProgress = (
+    currentUser.role === 'superadmin'
+    || currentUser.role === 'admin'
+    || currentUser.role === 'service'
+  ) && mode !== 'view';
   const usersQuery = useSystemUsers(canChooseFollower);
   const followerOptions = canChooseFollower
     ? (usersQuery.data?.data ?? [])
@@ -4025,7 +4030,7 @@ export default function OrdersListPage() {
                           }}
                           title={o.area}
                         >
-                          {o.area || '—'}
+                          {compactAreaLabel(o.area)}
                         </span>
                       </td>
 

@@ -122,12 +122,16 @@ export const ordersApi = {
 // ====== Appointments ======
 export interface Appointment {
   id: string; _id?: string;
+  orderId?: string;
   customerId: string; customerName: string;
   customerPhone?: string;
   advisorId?: string; advisorName?: string;
   therapistId: string; therapistName: string;
   date: string; timeSlot: string; service: string;
   serviceContent?: string;
+  /** 本次预约对应的套餐服务序号及预约时的总次数快照。 */
+  serviceSequence?: number | null;
+  serviceTotalTimes?: number | null;
   status: string; rawStatus?: string;
   orderType?: '体验卡' | '套餐';
   area: string; remark: string;
@@ -141,7 +145,12 @@ export interface AppointmentCompletion {
 }
 export const appointmentsApi = {
   list: (params: QueryParams) => api.get<Paged<Appointment>>('/appointments', params),
-  create: (body: Partial<Appointment>) => api.post<{ id: string; no: string }>('/appointments', body),
+  create: (body: Partial<Appointment>) => api.post<{
+    id: string;
+    no: string;
+    serviceSequence?: number | null;
+    serviceTotalTimes?: number | null;
+  }>('/appointments', body),
   update: (id: string, body: Partial<Appointment>) =>
     api.put<{ message: string }>(`/appointments/${id}`, body),
   patchStatus: (id: string, status: string, completion: AppointmentCompletion = {}) =>

@@ -51,6 +51,10 @@ interface OrderActor {
   role?: string;
 }
 
+export function canManuallyEditServiceProgress(role?: string): boolean {
+  return role === 'superadmin' || role === 'admin' || role === 'service';
+}
+
 interface CustomerSnapshot extends Record<string, unknown> {
   id: string;
   customerCode: string;
@@ -471,9 +475,9 @@ export async function updateOrder(orderId: string, body: OrderWriteBody, actor: 
     if (!existing) throw createError('订单不存在', 404);
 
     const manualProgressEdit = body.manualProgressEdit === true;
-    const canEditProgress = actor.role === 'superadmin' || actor.role === 'admin';
+    const canEditProgress = canManuallyEditServiceProgress(actor.role);
     if (manualProgressEdit && !canEditProgress) {
-      throw createError('仅超级管理员和管理员可以人工校正服务情况', 403);
+      throw createError('当前账号无权人工校正服务状态和次数', 403);
     }
 
     const requestedCustomerId = body.customerId || existing.customer_id;

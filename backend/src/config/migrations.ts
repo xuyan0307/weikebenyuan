@@ -704,6 +704,24 @@ const migrations: Migration[] = [
       );
     },
   },
+  {
+    id: '026_appointment_service_sequence',
+    description: 'Persist the planned package service sequence on every appointment',
+    up: async db => {
+      await addColumn(
+        db,
+        'appointments',
+        'service_sequence',
+        "int DEFAULT NULL COMMENT '本次预约对应的套餐服务序号' AFTER service"
+      );
+      await addColumn(
+        db,
+        'appointments',
+        'service_total_times',
+        "int DEFAULT NULL COMMENT '预约时套餐总次数快照' AFTER service_sequence"
+      );
+    },
+  },
 ];
 
 export async function runMigrations(db: mysql.Pool) {

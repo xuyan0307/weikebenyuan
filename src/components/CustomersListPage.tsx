@@ -20,6 +20,7 @@ import {
   clearDashboardFilter,
   readDashboardFilter,
 } from '../utils/dashboardTodoNavigation';
+import { compactAreaLabel } from '../utils/compactArea';
 
 // ─────────────────────────── Tag system ───────────────────────────
 interface TagDef {
@@ -1721,7 +1722,23 @@ export default function CustomersListPage() {
                         {!c.wechat && !c.phone && <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>—</span>}
                       </div>
                     </td>
-                    <td className="text-sm text-center">{c.area}</td>
+                    <td className="text-center">
+                      <span
+                        className="text-sm"
+                        style={{
+                          color: c.area && c.area !== '—' ? 'var(--foreground)' : 'var(--muted-foreground)',
+                          display: 'inline-block',
+                          maxWidth: 64,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                          verticalAlign: 'middle',
+                        }}
+                        title={c.area && c.area !== '—' ? c.area : undefined}
+                      >
+                        {compactAreaLabel(c.area)}
+                      </span>
+                    </td>
                     <td className="text-center"><span className="badge badge-info text-xs" style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={c.source}>{c.source}</span></td>
                     <td className="text-center">
                       <span className="text-xs" style={{ color: 'var(--muted-foreground)', lineHeight: 1.6, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={profileSummary(c.profile)}>
