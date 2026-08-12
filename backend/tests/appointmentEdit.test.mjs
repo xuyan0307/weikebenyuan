@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import {
   hasAppointmentDetailsChanged,
   mutationErrorMessage,
@@ -50,5 +51,21 @@ test('mutation error helper exposes API object messages', () => {
   assert.equal(
     mutationErrorMessage({ status: 403, message: '无权限修改该预约' }, '保存失败'),
     '无权限修改该预约',
+  );
+});
+
+test('customer-service advisors may reschedule without broader appointment edits', async () => {
+  const routeSource = await readFile(
+    new URL('../src/routes/appointments.ts', import.meta.url),
+    'utf8',
+  );
+
+  assert.match(
+    routeSource,
+    /router\.put\([\s\S]*?authorizeRoles\('superadmin', 'admin', 'service'\)/,
+  );
+  assert.match(
+    routeSource,
+    /req\.userRole === 'service'[\s\S]*?\{ date: body\.date, timeSlot: body\.timeSlot \}/,
   );
 });

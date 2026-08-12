@@ -291,11 +291,17 @@ router.post('/', authenticateToken, auditLog('appointments'), async (req, res, n
 router.put(
   '/:id',
   authenticateToken,
-  authorizeRoles('superadmin', 'admin'),
+  authorizeRoles('superadmin', 'admin', 'service'),
   auditLog('appointments'),
-  async (req, res, next) => {
+  async (req: AuthRequest, res, next) => {
     try {
-      await updateAppointment(req.params.id, (req.body || {}) as AppointmentWriteBody);
+      const body = (req.body || {}) as AppointmentWriteBody;
+      // Advisors may reschedule, without inheriting administrators' broader
+      // appointment-edit permission.
+      const permittedBody = req.userRole === 'service'
+        ? { date: body.date, timeSlot: body.timeSlot }
+        : body;
+      await updateAppointment(req.params.id, permittedBody);
       res.json({ message: '预约已更新' });
     } catch (err) {
       next(err);
