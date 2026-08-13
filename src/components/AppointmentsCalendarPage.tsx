@@ -29,6 +29,10 @@ import {
   matchesGlobalMultiSelect,
   type GlobalFilterOption,
 } from './ui/global-multi-select-filter';
+import {
+  APPOINTMENT_CITY_OPTIONS,
+  matchesAppointmentCities,
+} from '../utils/appointmentCalendarFilters';
 
 type ApptStatus = '待确认' | '已确认' | '已取消' | '已完成';
 
@@ -1530,10 +1534,8 @@ export default function AppointmentsCalendarPage() {
       .map(name => ({ value: name, label: name }));
   }, [APPOINTMENTS, ORDERS, currentUser.name, currentUser.role, customerFilterOptionsQ.data?.advisors]);
   const areaOptions = useMemo<GlobalFilterOption[]>(() =>
-    Array.from(new Set(APPOINTMENTS.map(item => item.area).filter(Boolean)))
-      .sort()
-      .map(area => ({ value: area, label: area })),
-  [APPOINTMENTS]);
+    APPOINTMENT_CITY_OPTIONS.map(city => ({ value: city, label: city })),
+  []);
 
   useEffect(() => {
     if (calendarTherapists.length === 0) return;
@@ -1605,9 +1607,10 @@ export default function AppointmentsCalendarPage() {
 
   function getDisplayedAppts(): Appointment[] {
     return localAppts.filter(a =>
-      activeTherapistIds.includes(a.therapistId)
+      !isCancelledAppointment(a)
+      && activeTherapistIds.includes(a.therapistId)
       && matchesGlobalMultiSelect(a.advisorName || '', selectedAdvisorNames)
-      && matchesGlobalMultiSelect(a.area || '', selectedAreas)
+      && matchesAppointmentCities(a.area, selectedAreas)
     );
   }
 
@@ -1860,10 +1863,6 @@ export default function AppointmentsCalendarPage() {
           <div className="flex items-center gap-1">
             <div className="w-3 h-3 rounded" style={{ background: '#EFF6FF', border: '1px solid #93C5FD' }} />
             <span style={{ color: 'var(--muted-foreground)' }}>套餐</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <div className="w-3 h-3 rounded" style={{ background: '#F5F5F5', border: '1px solid #E0E0E0' }} />
-            <span style={{ color: 'var(--muted-foreground)' }}>已取消</span>
           </div>
         </div>
 

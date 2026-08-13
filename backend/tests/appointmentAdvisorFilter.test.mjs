@@ -19,7 +19,7 @@ test('calendar exposes global advisor and area multi-select filters', () => {
   assert.match(calendarSource, /label="归属客服"/);
   assert.match(calendarSource, /label="区域"/);
   assert.match(calendarSource, /matchesGlobalMultiSelect\(a\.advisorName/);
-  assert.match(calendarSource, /matchesGlobalMultiSelect\(a\.area/);
+  assert.match(calendarSource, /matchesAppointmentCities\(a\.area/);
 });
 
 test('service users default appointment pages to their own advisor name', () => {
