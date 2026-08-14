@@ -47,6 +47,7 @@ interface AppointmentListRow {
   id: string;
   appointment_no: string;
   customer_id: string;
+  order_id: string | null;
   customer_code: string | null;
   customer_name: string | null;
   customer_phone: string | null;
@@ -59,6 +60,7 @@ interface AppointmentListRow {
   service: string | null;
   service_sequence: number | null;
   service_total_times: number | null;
+  order_total_times: number | null;
   status: string | null;
   area: string | null;
   remark: string | null;
@@ -94,6 +96,7 @@ function mapRow(r: AppointmentListRow) {
   return {
     id: r.appointment_no || r.id,
     _id: r.id,
+    orderId: r.order_id || undefined,
     customerId: r.customer_code || r.customer_id,
     customerName: r.customer_name || '',
     customerPhone: r.customer_phone || '',
@@ -106,7 +109,9 @@ function mapRow(r: AppointmentListRow) {
     service: r.service || '',
     serviceContent: r.service || r.order_service_items || '',
     serviceSequence: r.service_sequence == null ? null : Number(r.service_sequence),
-    serviceTotalTimes: r.service_total_times == null ? null : Number(r.service_total_times),
+    serviceTotalTimes: r.order_total_times == null
+      ? (r.service_total_times == null ? null : Number(r.service_total_times))
+      : Number(r.order_total_times),
     status: appointmentStatus(r.status),
     rawStatus: r.status || '',
     orderType: orderType(r.order_type),
@@ -263,13 +268,24 @@ router.get('/', authenticateToken, async (req: AuthRequest, res, next) => {
               COALESCE(u.name, JSON_UNQUOTE(JSON_EXTRACT(o.customer_snapshot, '$.advisor'))) AS advisor_name,
               o.type AS order_type,
               o.service_items AS order_service_items,
+              o.total_times AS order_total_times,
               t.name AS therapist_name
        FROM appointments a
        LEFT JOIN customers c ON c.id = a.customer_id
-       LEFT JOIN orders o ON o.id = (
-         SELECT recent_order.id FROM orders recent_order
-         WHERE recent_order.customer_id = a.customer_id
-         ORDER BY recent_order.created_at DESC LIMIT 1
+       LEFT JOIN orders o ON o.id = COALESCE(
+         a.order_id,
+         (
+           SELECT recent_order.id FROM orders recent_order
+           WHERE recent_order.customer_id = a.customer_id
+             AND (
+               (a.service_total_times IS NOT NULL AND recent_order.type = '套餐')
+               OR (a.service_total_times IS NULL AND recent_order.type = '体验卡')
+             )
+           ORDER BY
+             ABS(COALESCE(recent_order.total_times, 1) - COALESCE(a.service_total_times, 1)),
+             recent_order.created_at DESC
+           LIMIT 1
+         )
        )
        LEFT JOIN users u ON u.id = COALESCE(c.advisor_id, JSON_UNQUOTE(JSON_EXTRACT(o.customer_snapshot, '$.advisorId')))
        LEFT JOIN therapists t ON t.id = a.therapist_id

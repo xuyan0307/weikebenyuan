@@ -5,7 +5,7 @@ import {
   MessageSquareIcon, ImageIcon
 } from 'lucide-react';
 import { uploadsApi } from '../api/endpoints';
-import type { Appointment, UploadedFile } from '../api/endpoints';
+import type { Appointment, Order, UploadedFile } from '../api/endpoints';
 import { useApp } from '../hooks/useApp';
 import { useAppointments, useTherapists, useOrders, useCustomers, useCustomerFilterOptions, useAppointmentMutations } from '../api/hooks';
 import { toast } from 'sonner';
@@ -33,6 +33,10 @@ import {
   APPOINTMENT_CITY_OPTIONS,
   matchesAppointmentCities,
 } from '../utils/appointmentCalendarFilters';
+import {
+  appointmentProgressLabel,
+  formatAppointmentDistrict,
+} from '../utils/appointmentCalendarDisplay';
 
 type ApptStatus = '待确认' | '已确认' | '已取消' | '已完成';
 
@@ -175,10 +179,25 @@ function isSlotExpired(date: string, slot: (typeof TIME_SLOTS)[number], now = ne
   return !lastSelectableTime || lastSelectableTime.getTime() <= now.getTime();
 }
 
-function getOrderForAppointment(appt: Pick<Appointment, 'customerId' | 'customerName'>, orders: any[]) {
-  return orders.find(order => order.customerId === appt.customerId || order.customerCode === appt.customerId)
-    ?? orders.find(order => order.customerName === appt.customerName)
-    ?? null;
+function getOrderForAppointment(appt: Pick<Appointment, 'orderId' | 'customerId' | 'customerName' | 'orderType' | 'service'>, orders: Order[]) {
+  const exactOrder = appt.orderId
+    ? orders.find(order => order.id === appt.orderId || order._id === appt.orderId)
+    : null;
+  if (exactOrder) return exactOrder;
+
+  const customerOrders = orders.filter(order => (
+    order.customerId === appt.customerId
+    || order.customerCode === appt.customerId
+    || order.customerName === appt.customerName
+  ));
+  const sameStageOrders = customerOrders.filter(order => (
+    appt.orderType === '套餐'
+      ? order.type === '套餐' || order.isUpgrade
+      : order.type === '体验卡' && !order.isUpgrade
+  ));
+  return sameStageOrders.find(order => (
+    !appt.service || !order.serviceItems || order.serviceItems.includes(appt.service)
+  )) ?? sameStageOrders[0] ?? customerOrders[0] ?? null;
 }
 
 // ─── TherapistMultiSelect ─────────────────────────────────────────────────────
@@ -320,6 +339,7 @@ function TherapistMultiSelect({ therapists, selectedIds, onChange, disabled = fa
 
 interface AppointmentCardProps {
   appt: Appointment;
+  order?: Order | null;
   showTherapist?: boolean;
   therapistColor?: string;
   usedTimes?: number;
@@ -336,10 +356,12 @@ interface AppointmentCardProps {
   onRemarkSave?: () => void;
   onReschedule?: () => void;
   onComplete?: () => void;
+  onView?: () => void;
 }
 
 function AppointmentCard({
   appt,
+  order = null,
   showTherapist = false,
   therapistColor = '#1E88E5',
   usedTimes,
@@ -355,10 +377,8 @@ function AppointmentCard({
   onRemarkSave = () => {},
   onReschedule = () => {},
   onComplete = () => {},
+  onView = () => {},
 }: AppointmentCardProps) {
-  const ordersQ = useOrders({ page: 1, pageSize: 1000 });
-  const ORDERS: any[] = ordersQ.data?.data ?? [];
-  const order = getOrderForAppointment(appt, ORDERS);
   const isCancelled = isCancelledAppointment(appt);
   const isExperience = !isCancelled && order?.type === '体验卡' && !order?.isUpgrade;
   const isPackage = !isCancelled && (order?.type === '套餐' || order?.isUpgrade);
@@ -380,9 +400,18 @@ function AppointmentCard({
     ?? (appt.status === '已完成'
       ? displayUsedTimes
       : Math.min(Number(order?.totalTimes) || 1, displayUsedTimes + 1));
-  const displayServiceTotal = appt.serviceTotalTimes ?? order?.totalTimes ?? 1;
-  const area = appt.area;
-  const canComplete = !editMode && !isCancelled && appt.status !== '已完成' && appt.date <= getLocalDateKey();
+  const displayServiceTotal = order?.totalTimes ?? appt.serviceTotalTimes ?? 1;
+  const progressLabel = appointmentProgressLabel(displayServiceSequence, displayServiceTotal);
+  const area = formatAppointmentDistrict(appt.area);
+  const canComplete = !editMode
+    && !isCancelled
+    && appt.status !== '已完成'
+    && appt.date <= getLocalDateKey();
+  const truncateStyle = {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap' as const,
+  };
 
   return (
     <div
@@ -391,66 +420,64 @@ function AppointmentCard({
         background: bg,
         color: text,
         border: `1px solid ${border}`,
-        wordBreak: 'break-all',
-        whiteSpace: 'normal',
         width: '100%',
+        height: 210,
+        minHeight: 210,
+        maxHeight: 210,
         boxSizing: 'border-box',
-        display: 'block',
+        display: 'flex',
+        flexDirection: 'column',
+        cursor: 'pointer',
+        overflow: 'hidden',
+      }}
+      role="button"
+      tabIndex={0}
+      aria-label={`查看${appt.customerName}的预约详情`}
+      onClick={onView}
+      onKeyDown={event => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onView();
+        }
       }}
     >
       {/* Therapist tag when multi-select */}
       {showTherapist && (
         <div className="mb-0.5" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <div style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0, background: therapistColor }} />
-          <span style={{ opacity: 0.7, fontSize: 11 }}>{appt.therapistName}</span>
+          <span style={{ opacity: 0.7, fontSize: 11, ...truncateStyle }} title={appt.therapistName || '—'}>技师：{appt.therapistName || '—'}</span>
         </div>
       )}
-      {/* Row 1: area + name */}
-      <div className="mb-0.5">
-        {area && <span style={{ opacity: 0.6 }}>{area} </span>}
-        <span className="font-semibold">
-          {appt.customerName}{appt.advisorName ? `（${appt.advisorName}）` : ''}
-        </span>
+      <div className="mb-0.5 font-semibold" style={truncateStyle} title={appt.customerName || '—'}>
+        客户：{appt.customerName || '—'}
       </div>
-      {/* Row 2: time */}
-      <div style={{ opacity: 0.75 }} className="mb-0.5">{appt.timeSlot}</div>
-      <div
-        className="mb-0.5"
-        style={{ opacity: 0.85, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-        title={appt.service || '未填写服务项目'}
-      >
+      <div className="mb-0.5" style={{ opacity: 0.8, ...truncateStyle }} title={appt.advisorName || '—'}>
+        客服：{appt.advisorName || '—'}
+      </div>
+      <div className="mb-0.5" style={{ opacity: 0.8, ...truncateStyle }} title={area}>
+        区域：{area}
+      </div>
+      <div className="mb-0.5" style={{ opacity: 0.8, ...truncateStyle }} title={`${appt.date} ${appt.timeSlot}`}>
+        时间：{appt.timeSlot || '—'}
+      </div>
+      <div className="mb-0.5" style={{ opacity: 0.85, ...truncateStyle }} title={appt.service || '未填写服务项目'}>
         项目：{appt.service || '—'}
       </div>
-      {/* Row 3: type-specific info */}
-      {isCancelled && (
-        <div style={{ opacity: 0.72 }}>
-          <div>已取消</div>
-          <div style={{ color: '#16A34A' }}>时段已释放，可重新预约</div>
-        </div>
+      <div className="mb-0.5" style={{ opacity: 0.85, ...truncateStyle }} title={`第${displayServiceSequence}次，共${displayServiceTotal}次`}>
+        次数：{progressLabel}
+      </div>
+      {!editMode && appt.remark && (
+        <div className="mt-0.5" style={{ opacity: 0.65, fontSize: 10, ...truncateStyle }} title={appt.remark}>备注：{appt.remark}</div>
       )}
-      {isExperience && order && (
-        <div style={{ opacity: 0.8 }}>
-          {order.payStatus === '已付款' ? '已付款' : '待付款'}
-        </div>
-      )}
-      {isPackage && order && (
-        <div style={{ opacity: 0.8 }}>
-          第{displayServiceSequence}次/共{displayServiceTotal}次
-        </div>
-      )}
-      {appt.status === '已完成' && <div className="mt-1 font-medium" style={{ color: '#16A34A' }}>已完成服务</div>}
+      <div style={{ flex: 1 }} />
       {canComplete && (
         <button
           className="mt-1 px-2 py-1 rounded text-xs font-medium transition-colors hover:opacity-85"
           style={{ background: '#DCFCE7', color: '#15803D', border: '1px solid #86EFAC' }}
           onClick={e => { e.stopPropagation(); onComplete(); }}
         >
-          确认已完成
+          确认已服务
         </button>
-      )}
-      {/* Remark display (non-edit mode) */}
-      {!editMode && appt.remark && (
-        <div className="mt-0.5" style={{ opacity: 0.6, fontSize: 10 }}>备注：{appt.remark}</div>
       )}
 
       {/* Edit mode operation bar */}
@@ -872,7 +899,7 @@ function CreateModal({
   const ordersQ = useOrders({ page: 1, pageSize: 1000 });
   const customersQ = useCustomers({ page: 1, pageSize: 1000 });
   const THERAPISTS: any[] = therapistsQ.data?.data ?? [];
-  const ORDERS: any[] = ordersQ.data?.data ?? [];
+  const ORDERS: Order[] = ordersQ.data?.data ?? [];
   const CUSTOMERS: any[] = customersQ.data?.data ?? [];
 
   const therapist = THERAPISTS.find(t => t.id === therapistId);
@@ -1514,6 +1541,7 @@ export default function AppointmentsCalendarPage() {
   const [prefillCustomerId, setPrefillCustomerId] = useState('');
   const [returnToOrderEditor, setReturnToOrderEditor] = useState(false);
   const [completionTarget, setCompletionTarget] = useState<Appointment | null>(null);
+  const [detailTarget, setDetailTarget] = useState<Appointment | null>(null);
   const [completionSignaturePhotos, setCompletionSignaturePhotos] = useState<UploadedFile[]>([]);
   const [completionUploading, setCompletionUploading] = useState(false);
   const [completionSaving, setCompletionSaving] = useState(false);
@@ -1946,7 +1974,7 @@ export default function AppointmentsCalendarPage() {
       <div className="bg-card rounded-xl shadow-custom overflow-hidden flex-1" style={{ minHeight: 0 }}>
         <div className="overflow-auto" style={{ height: '100%' }}>
           <table style={{ minWidth: 720, width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
-            <thead>
+            <thead style={{ position: 'sticky', top: 0, zIndex: 20 }}>
               <tr style={{ background: 'var(--muted)' }}>
                 <th
                   className="text-left text-xs font-semibold px-3 py-3"
@@ -2052,6 +2080,7 @@ export default function AppointmentsCalendarPage() {
                               <AppointmentCard
                                 key={appt.id}
                                 appt={appt}
+                                order={order}
                                 showTherapist={showTherapistOnCard}
                                 therapistColor={therapistColorMap[appt.therapistId]}
                                 usedTimes={usedTimes}
@@ -2086,6 +2115,7 @@ export default function AppointmentsCalendarPage() {
                                   setConfirmCancelId(null);
                                 }}
                                 onComplete={() => handleCompleteAppt(appt.id)}
+                                onView={() => setDetailTarget(appt)}
                               />
                             );
                           })}
@@ -2109,6 +2139,53 @@ export default function AppointmentsCalendarPage() {
           </table>
         </div>
       </div>
+
+      {detailTarget && (() => {
+        const detailOrder = getOrderForAppointment(detailTarget, ORDERS);
+        const detailTotal = detailOrder?.totalTimes ?? detailTarget.serviceTotalTimes ?? 1;
+        const detailSequence = detailTarget.serviceSequence
+          ?? Math.min(detailTotal, (detailOrder?.usedTimes ?? 0) + (detailTarget.status === '已完成' ? 0 : 1));
+        const detailRows = [
+          ['客户姓名', detailTarget.customerName || '—'],
+          ['客户ID', detailTarget.customerId || '—'],
+          ['对应客服', detailTarget.advisorName || '—'],
+          ['服务技师', detailTarget.therapistName || '—'],
+          ['所在区域', formatAppointmentDistrict(detailTarget.area)],
+          ['预约时间', `${detailTarget.date} ${detailTarget.timeSlot}`],
+          ['服务项目', detailTarget.service || '—'],
+          ['服务次数', appointmentProgressLabel(detailSequence, detailTotal)],
+          ['预约状态', detailTarget.status || '—'],
+          ['备注', detailTarget.remark || '—'],
+        ];
+        return (
+          <div className="fixed inset-0 z-[55] flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.45)' }} role="dialog" aria-modal="true" aria-label="预约详情">
+            <div className="w-[560px] max-w-[calc(100vw-32px)] rounded-xl shadow-custom overflow-hidden" style={{ background: 'var(--card)' }}>
+              <div className="px-5 py-4 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border)' }}>
+                <div>
+                  <div className="font-semibold text-foreground">预约详情</div>
+                  <div className="text-xs mt-1" style={{ color: 'var(--muted-foreground)' }}>只读信息，数据与预约列表及订单实时同步</div>
+                </div>
+                <button type="button" className="p-2 rounded-lg hover:bg-muted" onClick={() => setDetailTarget(null)} aria-label="关闭预约详情">
+                  <XIcon size={18} />
+                </button>
+              </div>
+              <div className="p-5 grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-4 text-sm">
+                {detailRows.map(([label, value]) => (
+                  <div key={label} className={label === '备注' ? 'sm:col-span-2' : ''}>
+                    <div className="text-xs mb-1" style={{ color: 'var(--muted-foreground)' }}>{label}</div>
+                    <div className="text-foreground break-words">{value}</div>
+                  </div>
+                ))}
+              </div>
+              <div className="px-5 py-4 flex justify-end" style={{ borderTop: '1px solid var(--border)' }}>
+                <button type="button" className="px-4 py-2 rounded-lg text-sm text-white hover:opacity-90" style={{ background: 'var(--brand)' }} onClick={() => setDetailTarget(null)}>
+                  关闭
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {completionTarget && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.45)' }}>

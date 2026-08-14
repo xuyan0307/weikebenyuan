@@ -722,6 +722,40 @@ const migrations: Migration[] = [
       );
     },
   },
+  {
+    id: '027_appointment_order_link',
+    description: 'Link appointments to the exact order used for live service progress',
+    up: async db => {
+      await addColumn(
+        db,
+        'appointments',
+        'order_id',
+        "char(36) DEFAULT NULL COMMENT 'Order that owns this appointment' AFTER customer_id"
+      );
+      if (!(await indexExists(db, 'appointments', 'idx_appointments_order_id'))) {
+        await db.execute(
+          'ALTER TABLE appointments ADD INDEX idx_appointments_order_id (order_id)'
+        );
+      }
+      await db.execute(
+        `UPDATE appointments a
+         SET a.order_id = (
+           SELECT matched.id
+           FROM orders matched
+           WHERE matched.customer_id = a.customer_id
+             AND (
+               (a.service_total_times IS NOT NULL AND matched.type = '套餐')
+               OR (a.service_total_times IS NULL AND matched.type = '体验卡')
+             )
+           ORDER BY
+             ABS(COALESCE(matched.total_times, 1) - COALESCE(a.service_total_times, 1)),
+             matched.created_at DESC
+           LIMIT 1
+         )
+         WHERE a.order_id IS NULL`
+      );
+    },
+  },
 ];
 
 export async function runMigrations(db: mysql.Pool) {

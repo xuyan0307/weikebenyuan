@@ -10,6 +10,22 @@ const filterSource = await readFile(
   new URL('../../src/utils/appointmentCalendarFilters.ts', import.meta.url),
   'utf8'
 );
+const displaySource = await readFile(
+  new URL('../../src/utils/appointmentCalendarDisplay.ts', import.meta.url),
+  'utf8'
+);
+const appointmentRouteSource = await readFile(
+  new URL('../src/routes/appointments.ts', import.meta.url),
+  'utf8'
+);
+const appointmentServiceSource = await readFile(
+  new URL('../src/services/appointmentService.ts', import.meta.url),
+  'utf8'
+);
+const migrationSource = await readFile(
+  new URL('../src/config/migrations.ts', import.meta.url),
+  'utf8'
+);
 
 test('calendar hides cancelled appointments while appointment list keeps the history', () => {
   assert.match(calendarSource, /!isCancelledAppointment\(a\)/);
@@ -26,4 +42,27 @@ test('detailed district addresses are grouped into their parent city', () => {
   assert.match(filterSource, /厦门: \['厦门', '思明', '湖里', '集美', '海沧', '同安', '翔安'\]/);
   assert.match(filterSource, /泉州: \['泉州'.*'晋江'/s);
   assert.match(filterSource, /漳州: \['漳州'.*'漳浦'/s);
+});
+
+test('calendar cards use a stable compact read model and open details in place', () => {
+  assert.match(calendarSource, /height: 210/);
+  assert.match(calendarSource, /textOverflow: 'ellipsis'/);
+  assert.match(calendarSource, /onView=\{\(\) => setDetailTarget\(appt\)\}/);
+  assert.match(calendarSource, /detailTarget &&/);
+  assert.match(calendarSource, /<thead style=\{\{ position: 'sticky'/);
+  assert.match(displaySource, /formatAppointmentDistrict/);
+  assert.match(displaySource, /appointmentProgressLabel/);
+});
+
+test('service completion is offered only for today or an earlier date', () => {
+  assert.match(calendarSource, /appt\.date <= getLocalDateKey\(\)/);
+  assert.match(calendarSource, /appt\.status !== '已完成'/);
+});
+
+test('appointments retain an exact order link and display the live order total', () => {
+  assert.match(migrationSource, /027_appointment_order_link/);
+  assert.match(appointmentServiceSource, /currentOrder\?\.id \?\? null/);
+  assert.match(appointmentRouteSource, /o\.total_times AS order_total_times/);
+  assert.match(appointmentRouteSource, /r\.order_total_times == null/);
+  assert.match(calendarSource, /order\?\.totalTimes \?\? appt\.serviceTotalTimes/);
 });

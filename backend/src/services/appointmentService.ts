@@ -26,6 +26,7 @@ interface AppointmentRow {
   id: string;
   appointment_no?: string;
   customer_id: string;
+  order_id?: string | null;
   therapist_id: string;
   date: string | Date;
   time_slot: string;
@@ -196,13 +197,14 @@ export async function createAppointment(body: AppointmentWriteBody, pool: Pool =
       : null;
     await connection.execute(
       `INSERT INTO appointments
-        (id, appointment_no, customer_id, therapist_id, date, time_slot, service,
+        (id, appointment_no, customer_id, order_id, therapist_id, date, time_slot, service,
          service_sequence, service_total_times, status, area, remark)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [
         id,
         no,
         customerId,
+        currentOrder?.id ?? null,
         therapistId,
         date,
         timeSlot,
@@ -233,7 +235,7 @@ export async function updateAppointment(
   try {
     await connection.beginTransaction();
     const [rows] = await connection.execute(
-      `SELECT a.id, a.appointment_no, a.customer_id, a.therapist_id, a.date, a.time_slot,
+      `SELECT a.id, a.appointment_no, a.customer_id, a.order_id, a.therapist_id, a.date, a.time_slot,
               a.service, a.service_sequence, a.service_total_times,
               a.status, a.area, a.remark, a.progress_applied_at,
               EXISTS(SELECT 1 FROM service_records sr WHERE sr.appointment_id = a.id) AS has_service_record
@@ -319,7 +321,7 @@ export async function updateAppointmentStatus(
   try {
     await connection.beginTransaction();
     const [rows] = await connection.execute(
-      `SELECT a.id, a.customer_id, a.therapist_id, a.date, a.time_slot, a.service,
+      `SELECT a.id, a.customer_id, a.order_id, a.therapist_id, a.date, a.time_slot, a.service,
               a.service_sequence, a.service_total_times, a.status,
               a.progress_applied_at,
               EXISTS(SELECT 1 FROM service_records sr WHERE sr.appointment_id = a.id) AS has_service_record
@@ -402,11 +404,19 @@ async function ensureServiceRecord(
 async function applyOrderProgress(connection: PoolConnection, appointment: AppointmentRow) {
   const [orderRows] = await connection.query(
     `SELECT id, used_times, total_times, service_people FROM orders
-     WHERE customer_id = ? AND used_times < total_times
+     WHERE customer_id = ?
+       AND (? IS NULL OR id = ?)
+       AND used_times < total_times
        AND (manual_progress_at IS NULL OR TIMESTAMP(?, ?) > manual_progress_at)
      ORDER BY created_at DESC
      LIMIT 1 FOR UPDATE`,
-    [appointment.customer_id, appointment.date, appointment.time_slot]
+    [
+      appointment.customer_id,
+      appointment.order_id ?? null,
+      appointment.order_id ?? null,
+      appointment.date,
+      appointment.time_slot,
+    ]
   );
   const order = (orderRows as OrderProgressRow[])[0];
   if (!order) return;
