@@ -406,6 +406,7 @@ function AppointmentCard({
       : Math.min(Number(order?.totalTimes) || 1, displayUsedTimes + 1));
   const displayServiceTotal = order?.totalTimes ?? appt.serviceTotalTimes ?? 1;
   const progressLabel = appointmentProgressLabel(displayServiceSequence, displayServiceTotal);
+  const experiencePaymentLabel = order?.payStatus === '已付款' ? '已付款' : '未付款';
   const area = formatAppointmentDistrict(appt.area);
   const isCompleted = appt.status === '已完成';
   const canComplete = !editMode
@@ -477,7 +478,9 @@ function AppointmentCard({
           次数：{progressLabel}
         </div>
       ) : (
-        <div className="mb-0.5" style={{ minHeight: 16 }} aria-hidden="true" />
+        <div className="mb-0.5" style={{ opacity: 0.85, ...truncateStyle }} title={`付款：${experiencePaymentLabel}`}>
+          付款：{experiencePaymentLabel}
+        </div>
       )}
       {!editMode && (
         <div className="mt-0.5" style={{ opacity: 0.65, fontSize: 10, ...truncateStyle }} title={appt.remark || ''}>备注：{appt.remark || ''}</div>
@@ -1885,8 +1888,16 @@ export default function AppointmentsCalendarPage() {
 
       {/* Controls bar */}
       <div
-        className="mobile-page-toolbar bg-card rounded-xl px-4 py-3 shadow-custom flex flex-wrap items-center gap-3 flex-shrink-0"
-        style={{ position: 'sticky', top: 0, zIndex: 40 }}
+        className="mobile-page-toolbar bg-card rounded-xl px-3 py-2 shadow-custom flex flex-wrap items-center gap-2 flex-shrink-0"
+        style={{
+          position: 'sticky',
+          top: 0,
+          zIndex: 60,
+          background: 'var(--card)',
+          backgroundClip: 'padding-box',
+          isolation: 'isolate',
+          border: '1px solid var(--border)',
+        }}
       >
         {!isTherapist && (
           <TherapistMultiSelect
@@ -2003,14 +2014,35 @@ export default function AppointmentsCalendarPage() {
       </div>
 
       {/* Weekly Calendar */}
-      <div className="bg-card rounded-xl shadow-custom overflow-hidden flex-1" style={{ minHeight: 0 }}>
-        <div className="overflow-auto" style={{ height: '100%' }}>
+      <div
+        className="bg-card rounded-xl shadow-custom overflow-hidden flex-1"
+        style={{ minHeight: 0, position: 'relative', isolation: 'isolate', background: 'var(--card)' }}
+      >
+        <div
+          className="overflow-auto"
+          style={{
+            height: '100%',
+            position: 'relative',
+            isolation: 'isolate',
+            background: 'var(--card)',
+            overscrollBehavior: 'contain',
+          }}
+        >
           <table style={{ minWidth: 720, width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
-            <thead style={{ position: 'sticky', top: 0, zIndex: 20 }}>
+            <thead
+              style={{
+                position: 'sticky',
+                top: 0,
+                zIndex: 50,
+                background: 'var(--muted)',
+                backgroundClip: 'padding-box',
+                boxShadow: '0 1px 0 var(--border)',
+              }}
+            >
               <tr style={{ background: 'var(--muted)' }}>
                 <th
-                  className="text-left text-xs font-semibold px-3 py-3"
-                  style={{ color: 'var(--muted-foreground)', width: 88, borderRight: '1px solid var(--border)', position: 'sticky', top: 0, zIndex: 2, background: 'var(--muted)' }}
+                  className="text-left text-xs font-semibold px-3 py-2"
+                  style={{ color: 'var(--muted-foreground)', width: 80, height: 52, borderRight: '1px solid var(--border)', position: 'sticky', top: 0, zIndex: 52, background: 'var(--muted)', backgroundClip: 'padding-box' }}
                 >
                   时段
                 </th>
@@ -2020,17 +2052,19 @@ export default function AppointmentsCalendarPage() {
                   return (
                     <th
                       key={d}
-                      className="text-center text-xs font-semibold px-2 py-3"
+                      className="text-center text-xs font-semibold px-2 py-2"
                       style={{
                         color: 'var(--muted-foreground)',
+                        height: 52,
                         borderRight: i < 6 ? '1px solid var(--border)' : 'none',
-                        position: 'sticky', top: 0, zIndex: 2,
+                        position: 'sticky', top: 0, zIndex: 52,
                         background: 'var(--muted)',
+                        backgroundClip: 'padding-box',
                       }}
                     >
                       <div>{WEEK_DAYS[i]}</div>
                       <div
-                        className="text-sm font-bold mt-0.5 rounded-lg px-2 py-0.5 inline-block"
+                        className="text-sm font-bold rounded-lg px-2 inline-block"
                         style={{
                           color: isToday ? '#fff' : 'var(--foreground)',
                           background: isToday ? 'var(--brand)' : 'transparent',
@@ -2043,7 +2077,7 @@ export default function AppointmentsCalendarPage() {
                 })}
               </tr>
             </thead>
-            <tbody>
+            <tbody style={{ position: 'relative', zIndex: 1, background: 'var(--card)' }}>
               {TIME_SLOTS.map(slot => (
                 <tr key={slot.label} style={{ borderBottom: '1px solid var(--border)' }}>
                   <td

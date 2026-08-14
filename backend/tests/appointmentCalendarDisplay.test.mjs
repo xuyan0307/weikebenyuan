@@ -50,10 +50,12 @@ test('calendar cards use a stable compact read model and open details in place',
   assert.doesNotMatch(calendarSource, /类型：\{businessType\}/);
   assert.match(calendarSource, /\{isPackage \? \(/);
   assert.match(calendarSource, /次数：\{progressLabel\}/);
-  assert.match(calendarSource, /minHeight: 16/);
+  assert.match(calendarSource, /experiencePaymentLabel/);
+  assert.match(calendarSource, /order\?\.payStatus === '已付款'/);
+  assert.match(calendarSource, /付款：\{experiencePaymentLabel\}/);
   assert.match(calendarSource, /onView=\{\(\) => setDetailTarget\(appt\)\}/);
   assert.match(calendarSource, /detailTarget &&/);
-  assert.match(calendarSource, /<thead style=\{\{ position: 'sticky'/);
+  assert.match(calendarSource, /<thead[\s\S]*?position: 'sticky'/);
   assert.match(displaySource, /formatAppointmentDistrict/);
   assert.match(displaySource, /appointmentProgressLabel/);
 });
@@ -65,7 +67,11 @@ test('service completion is offered only for today or an earlier date', () => {
   assert.match(calendarSource, />\s*已完成服务\s*</);
   assert.match(calendarSource, />\s*已预约未做\s*</);
   assert.match(calendarSource, /备注：\{appt\.remark \|\| ''\}/);
-  assert.match(calendarSource, /position: 'sticky', top: 0, zIndex: 40/);
+  assert.match(calendarSource, /zIndex: 60/);
+  assert.match(calendarSource, /zIndex: 50/);
+  assert.match(calendarSource, /backgroundClip: 'padding-box'/);
+  assert.match(calendarSource, /overscrollBehavior: 'contain'/);
+  assert.match(calendarSource, /height: 52/);
 });
 
 test('appointments retain an exact order link and display the live order total', () => {
