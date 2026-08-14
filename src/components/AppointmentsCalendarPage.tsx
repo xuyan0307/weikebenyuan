@@ -386,7 +386,6 @@ function AppointmentCard({
     || (!order && appt.orderType === '套餐')
   );
   const isExperience = !isCancelled && !isPackage;
-  const businessType = isPackage ? '套餐' : '体验卡';
 
   let bg = '#F5F5F5';
   let text = '#757575';
@@ -408,10 +407,15 @@ function AppointmentCard({
   const displayServiceTotal = order?.totalTimes ?? appt.serviceTotalTimes ?? 1;
   const progressLabel = appointmentProgressLabel(displayServiceSequence, displayServiceTotal);
   const area = formatAppointmentDistrict(appt.area);
+  const isCompleted = appt.status === '已完成';
   const canComplete = !editMode
     && !isCancelled
-    && appt.status !== '已完成'
+    && !isCompleted
     && appt.date <= getLocalDateKey();
+  const isFutureAppointment = !editMode
+    && !isCancelled
+    && !isCompleted
+    && appt.date > getLocalDateKey();
   const truncateStyle = {
     overflow: 'hidden',
     textOverflow: 'ellipsis',
@@ -420,15 +424,15 @@ function AppointmentCard({
 
   return (
     <div
-      className="rounded-lg px-2 py-1.5 text-xs mb-1 transition-opacity"
+      className="rounded-lg px-2 py-1 text-xs mb-1 transition-opacity"
       style={{
         background: bg,
         color: text,
         border: `1px solid ${border}`,
         width: '100%',
-        height: 210,
-        minHeight: 210,
-        maxHeight: 210,
+        height: 168,
+        minHeight: 168,
+        maxHeight: 168,
         boxSizing: 'border-box',
         display: 'flex',
         flexDirection: 'column',
@@ -468,9 +472,6 @@ function AppointmentCard({
       <div className="mb-0.5" style={{ opacity: 0.85, ...truncateStyle }} title={appt.service || '未填写服务项目'}>
         项目：{appt.service || '—'}
       </div>
-      <div className="mb-0.5" style={{ opacity: 0.85, ...truncateStyle }} title={businessType}>
-        类型：{businessType}
-      </div>
       {isPackage ? (
         <div className="mb-0.5" style={{ opacity: 0.85, ...truncateStyle }} title={`第${displayServiceSequence}次，共${displayServiceTotal}次`}>
           次数：{progressLabel}
@@ -478,18 +479,34 @@ function AppointmentCard({
       ) : (
         <div className="mb-0.5" style={{ minHeight: 16 }} aria-hidden="true" />
       )}
-      {!editMode && appt.remark && (
-        <div className="mt-0.5" style={{ opacity: 0.65, fontSize: 10, ...truncateStyle }} title={appt.remark}>备注：{appt.remark}</div>
+      {!editMode && (
+        <div className="mt-0.5" style={{ opacity: 0.65, fontSize: 10, ...truncateStyle }} title={appt.remark || ''}>备注：{appt.remark || ''}</div>
       )}
       <div style={{ flex: 1 }} />
+      {!editMode && isCompleted && (
+        <div
+          className="mt-1 px-2 py-1 rounded text-xs font-medium text-center"
+          style={{ background: '#DCFCE7', color: '#15803D', border: '1px solid #86EFAC' }}
+        >
+          已完成服务
+        </div>
+      )}
       {canComplete && (
         <button
           className="mt-1 px-2 py-1 rounded text-xs font-medium transition-colors hover:opacity-85"
           style={{ background: '#DCFCE7', color: '#15803D', border: '1px solid #86EFAC' }}
           onClick={e => { e.stopPropagation(); onComplete(); }}
         >
-          确认已服务
+          确认服务
         </button>
+      )}
+      {isFutureAppointment && (
+        <div
+          className="mt-1 px-2 py-1 rounded text-xs font-medium text-center"
+          style={{ background: 'rgba(255,255,255,0.58)', color: text, border: `1px solid ${border}` }}
+        >
+          已预约未做
+        </div>
       )}
 
       {/* Edit mode operation bar */}
@@ -1867,7 +1884,10 @@ export default function AppointmentsCalendarPage() {
       )}
 
       {/* Controls bar */}
-      <div className="mobile-page-toolbar bg-card rounded-xl px-4 py-3 shadow-custom flex flex-wrap items-center gap-3 flex-shrink-0">
+      <div
+        className="mobile-page-toolbar bg-card rounded-xl px-4 py-3 shadow-custom flex flex-wrap items-center gap-3 flex-shrink-0"
+        style={{ position: 'sticky', top: 0, zIndex: 40 }}
+      >
         {!isTherapist && (
           <TherapistMultiSelect
             therapists={calendarTherapists}

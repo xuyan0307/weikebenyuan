@@ -45,9 +45,9 @@ test('detailed district addresses are grouped into their parent city', () => {
 });
 
 test('calendar cards use a stable compact read model and open details in place', () => {
-  assert.match(calendarSource, /height: 210/);
+  assert.match(calendarSource, /height: 168/);
   assert.match(calendarSource, /textOverflow: 'ellipsis'/);
-  assert.match(calendarSource, /类型：\{businessType\}/);
+  assert.doesNotMatch(calendarSource, /类型：\{businessType\}/);
   assert.match(calendarSource, /\{isPackage \? \(/);
   assert.match(calendarSource, /次数：\{progressLabel\}/);
   assert.match(calendarSource, /minHeight: 16/);
@@ -60,7 +60,12 @@ test('calendar cards use a stable compact read model and open details in place',
 
 test('service completion is offered only for today or an earlier date', () => {
   assert.match(calendarSource, /appt\.date <= getLocalDateKey\(\)/);
-  assert.match(calendarSource, /appt\.status !== '已完成'/);
+  assert.match(calendarSource, /isCompleted = appt\.status === '已完成'/);
+  assert.match(calendarSource, />\s*确认服务\s*</);
+  assert.match(calendarSource, />\s*已完成服务\s*</);
+  assert.match(calendarSource, />\s*已预约未做\s*</);
+  assert.match(calendarSource, /备注：\{appt\.remark \|\| ''\}/);
+  assert.match(calendarSource, /position: 'sticky', top: 0, zIndex: 40/);
 });
 
 test('appointments retain an exact order link and display the live order total', () => {
