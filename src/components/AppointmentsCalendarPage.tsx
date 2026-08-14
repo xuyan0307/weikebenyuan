@@ -380,8 +380,13 @@ function AppointmentCard({
   onView = () => {},
 }: AppointmentCardProps) {
   const isCancelled = isCancelledAppointment(appt);
-  const isExperience = !isCancelled && order?.type === '体验卡' && !order?.isUpgrade;
-  const isPackage = !isCancelled && (order?.type === '套餐' || order?.isUpgrade);
+  const isPackage = !isCancelled && (
+    order?.type === '套餐'
+    || order?.isUpgrade
+    || (!order && appt.orderType === '套餐')
+  );
+  const isExperience = !isCancelled && !isPackage;
+  const businessType = isPackage ? '套餐' : '体验卡';
 
   let bg = '#F5F5F5';
   let text = '#757575';
@@ -463,9 +468,16 @@ function AppointmentCard({
       <div className="mb-0.5" style={{ opacity: 0.85, ...truncateStyle }} title={appt.service || '未填写服务项目'}>
         项目：{appt.service || '—'}
       </div>
-      <div className="mb-0.5" style={{ opacity: 0.85, ...truncateStyle }} title={`第${displayServiceSequence}次，共${displayServiceTotal}次`}>
-        次数：{progressLabel}
+      <div className="mb-0.5" style={{ opacity: 0.85, ...truncateStyle }} title={businessType}>
+        类型：{businessType}
       </div>
+      {isPackage ? (
+        <div className="mb-0.5" style={{ opacity: 0.85, ...truncateStyle }} title={`第${displayServiceSequence}次，共${displayServiceTotal}次`}>
+          次数：{progressLabel}
+        </div>
+      ) : (
+        <div className="mb-0.5" style={{ minHeight: 16 }} aria-hidden="true" />
+      )}
       {!editMode && appt.remark && (
         <div className="mt-0.5" style={{ opacity: 0.65, fontSize: 10, ...truncateStyle }} title={appt.remark}>备注：{appt.remark}</div>
       )}
@@ -2142,6 +2154,10 @@ export default function AppointmentsCalendarPage() {
 
       {detailTarget && (() => {
         const detailOrder = getOrderForAppointment(detailTarget, ORDERS);
+        const detailIsPackage = detailOrder
+          ? detailOrder.type === '套餐' || detailOrder.isUpgrade
+          : detailTarget.orderType === '套餐';
+        const detailBusinessType = detailIsPackage ? '套餐' : '体验卡';
         const detailTotal = detailOrder?.totalTimes ?? detailTarget.serviceTotalTimes ?? 1;
         const detailSequence = detailTarget.serviceSequence
           ?? Math.min(detailTotal, (detailOrder?.usedTimes ?? 0) + (detailTarget.status === '已完成' ? 0 : 1));
@@ -2153,7 +2169,8 @@ export default function AppointmentsCalendarPage() {
           ['所在区域', formatAppointmentDistrict(detailTarget.area)],
           ['预约时间', `${detailTarget.date} ${detailTarget.timeSlot}`],
           ['服务项目', detailTarget.service || '—'],
-          ['服务次数', appointmentProgressLabel(detailSequence, detailTotal)],
+          ['业务类型', detailBusinessType],
+          ...(detailIsPackage ? [['服务次数', appointmentProgressLabel(detailSequence, detailTotal)]] : []),
           ['预约状态', detailTarget.status || '—'],
           ['备注', detailTarget.remark || '—'],
         ];

@@ -47,6 +47,10 @@ test('detailed district addresses are grouped into their parent city', () => {
 test('calendar cards use a stable compact read model and open details in place', () => {
   assert.match(calendarSource, /height: 210/);
   assert.match(calendarSource, /textOverflow: 'ellipsis'/);
+  assert.match(calendarSource, /类型：\{businessType\}/);
+  assert.match(calendarSource, /\{isPackage \? \(/);
+  assert.match(calendarSource, /次数：\{progressLabel\}/);
+  assert.match(calendarSource, /minHeight: 16/);
   assert.match(calendarSource, /onView=\{\(\) => setDetailTarget\(appt\)\}/);
   assert.match(calendarSource, /detailTarget &&/);
   assert.match(calendarSource, /<thead style=\{\{ position: 'sticky'/);
