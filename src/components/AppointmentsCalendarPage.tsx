@@ -2090,12 +2090,16 @@ export default function AppointmentsCalendarPage() {
               </tr>
             </thead>
             <tbody style={{ position: 'relative', zIndex: 1, background: 'var(--card)' }}>
-              {TIME_SLOTS.map(slot => (
-                <tr key={slot.label} style={{ borderBottom: '1px solid var(--border)' }}>
+              {TIME_SLOTS.map((slot, slotIndex) => {
+                const periodDivider = slotIndex > 0 ? '2px solid #111827' : undefined;
+
+                return (
+                  <tr key={slot.label} data-calendar-period={slot.label}>
                   <td
                     className="px-3 py-3 align-top text-xs font-medium"
                     style={{
                       color: 'var(--muted-foreground)',
+                      borderTop: periodDivider,
                       borderRight: '1px solid var(--border)',
                       verticalAlign: 'top',
                       whiteSpace: 'nowrap',
@@ -2121,6 +2125,7 @@ export default function AppointmentsCalendarPage() {
                         style={{
                           minHeight: 80,
                           verticalAlign: 'top',
+                          borderTop: periodDivider,
                           borderRight: di < 6 ? '1px solid var(--border)' : 'none',
                           background: showStatusBg ? sc.bg : 'transparent',
                           transition: 'background 0.2s',
@@ -2211,8 +2216,9 @@ export default function AppointmentsCalendarPage() {
                       </td>
                     );
                   })}
-                </tr>
-              ))}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

@@ -147,7 +147,7 @@ function AppShell() {
         <TopBar />
 
         {/* Page content */}
-        <main className="app-main-content flex flex-1 min-h-0 flex-col overflow-y-auto px-6 py-5">
+        <main className="app-main-content flex flex-1 min-h-0 flex-col overflow-y-auto px-6 pt-5 pb-0">
           <div className="flex flex-1 min-h-0 flex-col">
             <PageErrorBoundary pageKey={activePage} key={activePage}>
               <Suspense fallback={<PageLoading />}>
@@ -155,7 +155,7 @@ function AppShell() {
               </Suspense>
             </PageErrorBoundary>
           </div>
-          <RegulatoryFooter className="mt-4" />
+          <RegulatoryFooter />
         </main>
       </div>
     </div>

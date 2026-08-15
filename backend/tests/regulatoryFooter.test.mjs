@@ -15,3 +15,12 @@ test('the ICP filing is rendered globally and links to MIIT', () => {
   assert.match(shellSource, /<RegulatoryFooter/);
   assert.match(loginSource, /<RegulatoryFooter/);
 });
+
+test('the global ICP filing keeps a single compact bottom row', () => {
+  assert.match(footerSource, /h-6/);
+  assert.match(footerSource, /whitespace-nowrap/);
+  assert.match(footerSource, /leading-none/);
+  assert.doesNotMatch(footerSource, /py-2/);
+  assert.match(shellSource, /pt-5 pb-0/);
+  assert.doesNotMatch(shellSource, /RegulatoryFooter className="mt-4"/);
+});

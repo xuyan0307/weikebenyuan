@@ -12,7 +12,7 @@ export default function RegulatoryFooter({
   return (
     <footer
       data-cmp="RegulatoryFooter"
-      className={`flex items-center justify-center px-4 py-2 text-xs ${className}`}
+      className={`flex h-6 shrink-0 items-center justify-center whitespace-nowrap px-2 text-xs leading-none ${className}`}
       style={{ color }}
     >
       <a

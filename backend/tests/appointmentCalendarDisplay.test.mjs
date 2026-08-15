@@ -80,6 +80,12 @@ test('service completion is offered only for today or an earlier date', () => {
   assert.match(calendarSource, /background: '#F5F7FA'/);
 });
 
+test('morning afternoon and evening calendar sections use a clear dark divider', () => {
+  assert.match(calendarSource, /data-calendar-period=\{slot\.label\}/);
+  assert.match(calendarSource, /slotIndex > 0 \? '2px solid #111827'/);
+  assert.match(calendarSource, /borderTop: periodDivider/);
+});
+
 test('appointments retain an exact order link and display the live order total', () => {
   assert.match(migrationSource, /027_appointment_order_link/);
   assert.match(appointmentServiceSource, /currentOrder\?\.id \?\? null/);
