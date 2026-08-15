@@ -1876,7 +1876,11 @@ export default function AppointmentsCalendarPage() {
   const showTherapistOnCard = activeTherapistIds.length !== 1 && !isTherapist;
 
   return (
-    <div data-cmp="AppointmentsCalendarPage" className="flex flex-col gap-3" style={{ minHeight: 0, height: '100%' }}>
+    <div
+      data-cmp="AppointmentsCalendarPage"
+      className="flex flex-col gap-2"
+      style={{ minHeight: 0, height: '100%', maxHeight: '100%', overflow: 'hidden', isolation: 'isolate', background: '#F5F7FA' }}
+    >
       {/* Edit banner */}
       {editMode && selectedTherapist && (
         <EditScheduleBanner
@@ -1888,15 +1892,18 @@ export default function AppointmentsCalendarPage() {
 
       {/* Controls bar */}
       <div
+        data-calendar-sticky="filters"
         className="mobile-page-toolbar bg-card rounded-xl px-3 py-2 shadow-custom flex flex-wrap items-center gap-2 flex-shrink-0"
         style={{
           position: 'sticky',
           top: 0,
-          zIndex: 60,
-          background: 'var(--card)',
+          zIndex: 70,
+          background: '#FFFFFF',
           backgroundClip: 'padding-box',
           isolation: 'isolate',
           border: '1px solid var(--border)',
+          boxShadow: '0 2px 8px rgba(15, 23, 42, 0.08)',
+          transform: 'translateZ(0)',
         }}
       >
         {!isTherapist && (
@@ -2016,33 +2023,38 @@ export default function AppointmentsCalendarPage() {
       {/* Weekly Calendar */}
       <div
         className="bg-card rounded-xl shadow-custom overflow-hidden flex-1"
-        style={{ minHeight: 0, position: 'relative', isolation: 'isolate', background: 'var(--card)' }}
+        style={{ minHeight: 0, position: 'relative', isolation: 'isolate', background: '#FFFFFF' }}
       >
         <div
+          data-calendar-scroll-region
           className="overflow-auto"
           style={{
             height: '100%',
+            minHeight: 0,
             position: 'relative',
             isolation: 'isolate',
-            background: 'var(--card)',
+            background: '#FFFFFF',
             overscrollBehavior: 'contain',
           }}
         >
-          <table style={{ minWidth: 720, width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+          <table style={{ minWidth: 720, width: '100%', borderCollapse: 'separate', borderSpacing: 0, tableLayout: 'fixed' }}>
             <thead
+              data-calendar-sticky="dates"
               style={{
                 position: 'sticky',
                 top: 0,
-                zIndex: 50,
-                background: 'var(--muted)',
+                zIndex: 55,
+                background: '#F5F7FA',
                 backgroundClip: 'padding-box',
-                boxShadow: '0 1px 0 var(--border)',
+                boxShadow: '0 2px 5px rgba(15, 23, 42, 0.12)',
+                isolation: 'isolate',
+                transform: 'translateZ(0)',
               }}
             >
-              <tr style={{ background: 'var(--muted)' }}>
+              <tr style={{ background: '#F5F7FA' }}>
                 <th
-                  className="text-left text-xs font-semibold px-3 py-2"
-                  style={{ color: 'var(--muted-foreground)', width: 80, height: 52, borderRight: '1px solid var(--border)', position: 'sticky', top: 0, zIndex: 52, background: 'var(--muted)', backgroundClip: 'padding-box' }}
+                  className="text-left text-xs font-semibold px-3 py-1"
+                  style={{ color: 'var(--muted-foreground)', width: 80, height: 44, borderRight: '1px solid var(--border)', position: 'sticky', top: 0, zIndex: 56, background: '#F5F7FA', backgroundClip: 'padding-box' }}
                 >
                   时段
                 </th>
@@ -2052,13 +2064,13 @@ export default function AppointmentsCalendarPage() {
                   return (
                     <th
                       key={d}
-                      className="text-center text-xs font-semibold px-2 py-2"
+                      className="text-center text-xs font-semibold px-2 py-1"
                       style={{
                         color: 'var(--muted-foreground)',
-                        height: 52,
+                        height: 44,
                         borderRight: i < 6 ? '1px solid var(--border)' : 'none',
-                        position: 'sticky', top: 0, zIndex: 52,
-                        background: 'var(--muted)',
+                        position: 'sticky', top: 0, zIndex: 56,
+                        background: '#F5F7FA',
                         backgroundClip: 'padding-box',
                       }}
                     >

@@ -67,11 +67,17 @@ test('service completion is offered only for today or an earlier date', () => {
   assert.match(calendarSource, />\s*已完成服务\s*</);
   assert.match(calendarSource, />\s*已预约未做\s*</);
   assert.match(calendarSource, /备注：\{appt\.remark \|\| ''\}/);
-  assert.match(calendarSource, /zIndex: 60/);
-  assert.match(calendarSource, /zIndex: 50/);
+  assert.match(calendarSource, /data-calendar-sticky="filters"/);
+  assert.match(calendarSource, /data-calendar-sticky="dates"/);
+  assert.match(calendarSource, /data-calendar-scroll-region/);
+  assert.match(calendarSource, /zIndex: 70/);
+  assert.match(calendarSource, /zIndex: 55/);
   assert.match(calendarSource, /backgroundClip: 'padding-box'/);
   assert.match(calendarSource, /overscrollBehavior: 'contain'/);
-  assert.match(calendarSource, /height: 52/);
+  assert.match(calendarSource, /height: 44/);
+  assert.match(calendarSource, /borderCollapse: 'separate'/);
+  assert.match(calendarSource, /background: '#FFFFFF'/);
+  assert.match(calendarSource, /background: '#F5F7FA'/);
 });
 
 test('appointments retain an exact order link and display the live order total', () => {
