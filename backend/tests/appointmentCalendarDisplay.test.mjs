@@ -6,6 +6,10 @@ const calendarSource = await readFile(
   new URL('../../src/components/AppointmentsCalendarPage.tsx', import.meta.url),
   'utf8'
 );
+const globalCssSource = await readFile(
+  new URL('../../src/index.css', import.meta.url),
+  'utf8'
+);
 const filterSource = await readFile(
   new URL('../../src/utils/appointmentCalendarFilters.ts', import.meta.url),
   'utf8'
@@ -92,4 +96,19 @@ test('appointments retain an exact order link and display the live order total',
   assert.match(appointmentRouteSource, /o\.total_times AS order_total_times/);
   assert.match(appointmentRouteSource, /r\.order_total_times == null/);
   assert.match(calendarSource, /order\?\.totalTimes \?\? appt\.serviceTotalTimes/);
+});
+
+test('mobile calendar uses readable day widths and fully visible card fields', () => {
+  assert.match(calendarSource, /data-calendar-table/);
+  assert.match(calendarSource, /data-calendar-card/);
+  assert.match(calendarSource, /data-calendar-day-column/);
+  assert.match(calendarSource, /data-calendar-time-column/);
+  assert.match(globalCssSource, /min-width:\s*calc\(700vw - 480px\)\s*!important/);
+  assert.match(globalCssSource, /width:\s*52px\s*!important/);
+  assert.match(globalCssSource, /width:\s*calc\(100vw - 76px\)\s*!important/);
+  assert.match(globalCssSource, /height:\s*224px\s*!important/);
+  assert.match(globalCssSource, /\[data-calendar-card\]\s+\[title\]/);
+  assert.match(globalCssSource, /white-space:\s*normal\s*!important/);
+  assert.match(globalCssSource, /scroll-snap-type:\s*x mandatory/);
+  assert.match(globalCssSource, /scroll-snap-stop:\s*always/);
 });

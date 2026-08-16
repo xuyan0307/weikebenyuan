@@ -425,6 +425,7 @@ function AppointmentCard({
 
   return (
     <div
+      data-calendar-card
       className="rounded-lg px-2 py-1 text-xs mb-1 transition-opacity"
       style={{
         background: bg,
@@ -2037,7 +2038,7 @@ export default function AppointmentsCalendarPage() {
             overscrollBehavior: 'contain',
           }}
         >
-          <table style={{ minWidth: 720, width: '100%', borderCollapse: 'separate', borderSpacing: 0, tableLayout: 'fixed' }}>
+          <table data-calendar-table style={{ minWidth: 720, width: '100%', borderCollapse: 'separate', borderSpacing: 0, tableLayout: 'fixed' }}>
             <thead
               data-calendar-sticky="dates"
               style={{
@@ -2053,6 +2054,7 @@ export default function AppointmentsCalendarPage() {
             >
               <tr style={{ background: '#F5F7FA' }}>
                 <th
+                  data-calendar-time-column
                   className="text-left text-xs font-semibold px-3 py-1"
                   style={{ color: 'var(--muted-foreground)', width: 80, height: 44, borderRight: '1px solid var(--border)', position: 'sticky', top: 0, zIndex: 56, background: '#F5F7FA', backgroundClip: 'padding-box' }}
                 >
@@ -2064,6 +2066,7 @@ export default function AppointmentsCalendarPage() {
                   return (
                     <th
                       key={d}
+                      data-calendar-day-column
                       className="text-center text-xs font-semibold px-2 py-1"
                       style={{
                         color: 'var(--muted-foreground)',
@@ -2096,6 +2099,7 @@ export default function AppointmentsCalendarPage() {
                 return (
                   <tr key={slot.label} data-calendar-period={slot.label}>
                   <td
+                    data-calendar-time-column
                     className="px-3 py-3 align-top text-xs font-medium"
                     style={{
                       color: 'var(--muted-foreground)',
@@ -2121,6 +2125,7 @@ export default function AppointmentsCalendarPage() {
                     return (
                       <td
                         key={date}
+                        data-calendar-day-column
                         className="px-2 py-2 align-top"
                         style={{
                           minHeight: 80,
