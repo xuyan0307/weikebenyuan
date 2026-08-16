@@ -2039,6 +2039,12 @@ export default function AppointmentsCalendarPage() {
           }}
         >
           <table data-calendar-table style={{ minWidth: 720, width: '100%', borderCollapse: 'separate', borderSpacing: 0, tableLayout: 'fixed' }}>
+            <colgroup>
+              <col data-calendar-time-col />
+              {weekDates.map((date) => (
+                <col key={`calendar-column-${date}`} data-calendar-day-col />
+              ))}
+            </colgroup>
             <thead
               data-calendar-sticky="dates"
               style={{

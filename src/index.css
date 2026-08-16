@@ -519,9 +519,22 @@
   }
 
   [data-cmp='AppointmentsCalendarPage'] [data-calendar-table] {
-    width: calc(700vw - 480px) !important;
-    min-width: calc(700vw - 480px) !important;
+    width: 2292px !important;
+    min-width: 2292px !important;
+    max-width: 2292px !important;
     table-layout: fixed !important;
+  }
+
+  [data-cmp='AppointmentsCalendarPage'] [data-calendar-time-col] {
+    width: 52px !important;
+    min-width: 52px !important;
+    max-width: 52px !important;
+  }
+
+  [data-cmp='AppointmentsCalendarPage'] [data-calendar-day-col] {
+    width: 320px !important;
+    min-width: 320px !important;
+    max-width: 320px !important;
   }
 
   [data-cmp='AppointmentsCalendarPage'] [data-calendar-time-column] {
@@ -541,9 +554,9 @@
   }
 
   [data-cmp='AppointmentsCalendarPage'] [data-calendar-day-column] {
-    width: calc(100vw - 76px) !important;
-    min-width: calc(100vw - 76px) !important;
-    max-width: calc(100vw - 76px) !important;
+    width: 320px !important;
+    min-width: 320px !important;
+    max-width: 320px !important;
     scroll-snap-align: start;
     scroll-snap-stop: always;
   }
