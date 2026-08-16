@@ -708,3 +708,70 @@
     grid-column: auto;
   }
 }
+
+/*
+ * The weekly schedule is intentionally a wide, horizontally scrollable canvas.
+ * Some Huawei browsers expose a tablet-sized CSS viewport even on a phone, so
+ * keep this rule wider than the conventional 767px handset breakpoint.
+ */
+@media (max-width: 1180px) {
+  [data-cmp='AppointmentsCalendarPage'] [data-calendar-scroll-region] {
+    overflow-x: auto !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+    scroll-snap-type: x proximity;
+    scroll-padding-left: 58px;
+    touch-action: pan-x pan-y;
+  }
+
+  [data-cmp='AppointmentsCalendarPage'] [data-calendar-table] {
+    width: 2578px !important;
+    min-width: 2578px !important;
+    max-width: 2578px !important;
+    table-layout: fixed !important;
+  }
+
+  [data-cmp='AppointmentsCalendarPage'] [data-calendar-time-col],
+  [data-cmp='AppointmentsCalendarPage'] [data-calendar-time-column] {
+    width: 58px !important;
+    min-width: 58px !important;
+    max-width: 58px !important;
+  }
+
+  [data-cmp='AppointmentsCalendarPage'] [data-calendar-day-col],
+  [data-cmp='AppointmentsCalendarPage'] [data-calendar-day-column] {
+    width: 360px !important;
+    min-width: 360px !important;
+    max-width: 360px !important;
+  }
+
+  [data-cmp='AppointmentsCalendarPage'] [data-calendar-day-column] {
+    scroll-snap-align: start;
+  }
+
+  [data-cmp='AppointmentsCalendarPage'] [data-calendar-time-column] {
+    position: sticky;
+    left: 0;
+    z-index: 8;
+    background: var(--surface, #fff) !important;
+  }
+
+  [data-cmp='AppointmentsCalendarPage'] [data-calendar-card] {
+    box-sizing: border-box;
+    width: calc(100% - 12px) !important;
+    min-width: 0 !important;
+    height: 232px !important;
+    font-size: 13px !important;
+    line-height: 1.35 !important;
+  }
+
+  [data-cmp='AppointmentsCalendarPage'] [data-calendar-card] [title],
+  [data-cmp='AppointmentsCalendarPage'] [data-calendar-card] .truncate {
+    white-space: normal !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    overflow-wrap: anywhere !important;
+    word-break: break-word !important;
+  }
+}
