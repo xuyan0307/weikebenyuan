@@ -9,6 +9,7 @@ import {
   updateAppointment,
   updateAppointmentStatus,
   reverseCompletedAppointment,
+  synchronizeAllAppointmentOrderProgress,
   synchronizeAppointmentOrderProgress,
 } from '../services/appointmentService';
 import {
@@ -373,6 +374,21 @@ router.patch('/:id/status', authenticateToken, auditLog('appointments'), async (
     res.json({ message: '预约状态已更新' });
   } catch (err) { next(err); }
 });
+
+router.post(
+  '/sync-order-progress',
+  authenticateToken,
+  authorizeRoles('superadmin', 'admin', 'service'),
+  auditLog('appointments'),
+  async (req: AuthRequest, res, next) => {
+    try {
+      const result = await synchronizeAllAppointmentOrderProgress({
+        id: req.userId || '', name: req.userName || '', role: req.userRole || '',
+      });
+      res.json({ message: '订单服务次数基线已批量更新', ...result });
+    } catch (err) { next(err); }
+  }
+);
 
 router.post(
   '/:id/sync-order-progress',

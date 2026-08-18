@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   ChevronLeftIcon, ChevronRightIcon, PlusIcon, CalendarIcon,
   EditIcon, CheckIcon, XIcon, SearchIcon, MapPinIcon, ChevronDownIcon,
-  MessageSquareIcon, ImageIcon
+  MessageSquareIcon, ImageIcon, RefreshCwIcon
 } from 'lucide-react';
 import { uploadsApi } from '../api/endpoints';
 import type { Appointment, Order, UploadedFile } from '../api/endpoints';
@@ -211,6 +211,7 @@ interface TherapistMultiSelectProps {
 
 function TherapistMultiSelect({ therapists, selectedIds, onChange, disabled = false }: TherapistMultiSelectProps) {
   const [open, setOpen] = useState(false);
+  const [collapsedCities, setCollapsedCities] = useState<Set<string>>(new Set());
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -231,6 +232,15 @@ function TherapistMultiSelect({ therapists, selectedIds, onChange, disabled = fa
     } else {
       onChange([...selectedIds, id]);
     }
+  }
+
+  function toggleCity(city: string) {
+    setCollapsedCities(current => {
+      const next = new Set(current);
+      if (next.has(city)) next.delete(city);
+      else next.add(city);
+      return next;
+    });
   }
 
   let label = '全部技师';
@@ -271,6 +281,9 @@ function TherapistMultiSelect({ therapists, selectedIds, onChange, disabled = fa
             background: 'var(--card)',
             border: '1px solid var(--border)',
             minWidth: 220,
+            maxHeight: 'min(560px, calc(100vh - 160px))',
+            overflowY: 'auto',
+            overscrollBehavior: 'contain',
           }}
         >
           <button
@@ -293,10 +306,24 @@ function TherapistMultiSelect({ therapists, selectedIds, onChange, disabled = fa
           {CITY_GROUPS.map(city => {
             const cityTherapists = therapists.filter(therapist => therapist.city === city);
             if (cityTherapists.length === 0) return null;
+            const collapsed = collapsedCities.has(city);
             return (
               <div key={city}>
-                <div className="px-3 pt-2 pb-1 text-xs font-semibold" style={{ color: 'var(--muted-foreground)' }}>{city}</div>
-                {cityTherapists.map(t => {
+                <button
+                  type="button"
+                  className="w-full flex items-center gap-2 px-3 pt-2 pb-1 text-xs font-semibold hover:bg-muted transition-colors text-left"
+                  style={{ color: 'var(--muted-foreground)' }}
+                  onClick={() => toggleCity(city)}
+                  aria-expanded={!collapsed}
+                >
+                  <ChevronDownIcon
+                    size={13}
+                    style={{ transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)', transition: 'transform 150ms' }}
+                  />
+                  <span>{city}</span>
+                  <span className="ml-auto font-normal">{cityTherapists.length}人</span>
+                </button>
+                {!collapsed && cityTherapists.map(t => {
                   const checked = selectedIds.includes(t.id);
                   const color = THERAPIST_COLORS[therapists.findIndex(therapist => therapist.id === t.id) % THERAPIST_COLORS.length];
                   return (
@@ -1856,6 +1883,21 @@ export default function AppointmentsCalendarPage() {
     }
   }
 
+  async function handleSyncAllOrderProgress() {
+    if (progressActionSaving) return;
+    const confirmed = window.confirm('将以套餐订单列表当前服务次数建立新基线，并校正套餐客户未完成预约的服务序号。历史已完成服务不会重复累计，是否继续？');
+    if (!confirmed) return;
+    setProgressActionSaving(true);
+    try {
+      const result = await apptMutations.syncAllOrderProgress();
+      toast.success(`更新完成：${result.ordersUpdated}个套餐订单已建立基线，${result.appointmentsUpdated}条待服务预约已校正`);
+    } catch (error: any) {
+      toast.error(error?.message || '批量更新套餐客户服务次数失败');
+    } finally {
+      setProgressActionSaving(false);
+    }
+  }
+
   async function handleReverseCompletion(appointment: Appointment) {
     if (progressActionSaving) return;
     const reason = window.prompt('请输入冲销原因（将保留原服务、订单次数和工资凭证）：', '误点已完成服务')?.trim();
@@ -1977,6 +2019,20 @@ export default function AppointmentsCalendarPage() {
             <span style={{ color: 'var(--muted-foreground)' }}>套餐</span>
           </div>
         </div>
+
+        {!isTherapist && (
+          <button
+            type="button"
+            disabled={progressActionSaving}
+            className="px-3 py-1.5 rounded-lg text-sm font-medium hover:opacity-90 disabled:opacity-50 flex items-center gap-1.5"
+            style={{ height: 36, color: 'var(--brand)', border: '1px solid var(--brand)', background: '#fff' }}
+            onClick={handleSyncAllOrderProgress}
+            title="以套餐订单当前服务次数建立新基线"
+          >
+            <RefreshCwIcon size={15} className={progressActionSaving ? 'animate-spin' : ''} />
+            更新
+          </button>
+        )}
 
         <div className="flex-1" />
 

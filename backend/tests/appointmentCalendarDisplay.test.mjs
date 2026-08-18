@@ -98,17 +98,31 @@ test('appointments retain an exact order link and display the live order total',
   assert.match(calendarSource, /order\?\.totalTimes \?\? appt\.serviceTotalTimes/);
 });
 
-test('mobile calendar uses readable day widths and fully visible card fields', () => {
+test('calendar can baseline package progress and browse therapists by collapsible scrollable city groups', () => {
+  assert.match(appointmentRouteSource, /'\/sync-order-progress'/);
+  assert.match(appointmentServiceSource, /synchronizeAllAppointmentOrderProgress/);
+  assert.match(appointmentServiceSource, /WHERE type = '套餐'/);
+  assert.match(appointmentServiceSource, /SET service_sequence = \?, service_total_times = \?/);
+  assert.match(calendarSource, />\s*更新\s*</);
+  assert.match(calendarSource, /syncAllOrderProgress/);
+  assert.match(calendarSource, /collapsedCities/);
+  assert.match(calendarSource, /toggleCity/);
+  assert.match(calendarSource, /maxHeight: 'min\(560px, calc\(100vh - 160px\)\)'/);
+  assert.match(calendarSource, /overflowY: 'auto'/);
+});
+
+test('mobile calendar uses compact fixed day widths and readable clipped card fields', () => {
   assert.match(calendarSource, /data-calendar-table/);
   assert.match(calendarSource, /data-calendar-card/);
   assert.match(calendarSource, /data-calendar-day-column/);
   assert.match(calendarSource, /data-calendar-time-column/);
-  assert.match(globalCssSource, /min-width:\s*calc\(700vw - 480px\)\s*!important/);
-  assert.match(globalCssSource, /width:\s*52px\s*!important/);
-  assert.match(globalCssSource, /width:\s*calc\(100vw - 76px\)\s*!important/);
-  assert.match(globalCssSource, /height:\s*224px\s*!important/);
+  assert.match(globalCssSource, /min-width:\s*1128px\s*!important/);
+  assert.match(globalCssSource, /width:\s*64px\s*!important/);
+  assert.match(globalCssSource, /width:\s*152px\s*!important/);
+  assert.match(globalCssSource, /height:\s*174px\s*!important/);
   assert.match(globalCssSource, /\[data-calendar-card\]\s+\[title\]/);
-  assert.match(globalCssSource, /white-space:\s*normal\s*!important/);
+  assert.match(globalCssSource, /white-space:\s*nowrap\s*!important/);
+  assert.match(globalCssSource, /text-overflow:\s*ellipsis\s*!important/);
   assert.match(globalCssSource, /scroll-snap-type:\s*x mandatory/);
   assert.match(globalCssSource, /scroll-snap-stop:\s*always/);
 });

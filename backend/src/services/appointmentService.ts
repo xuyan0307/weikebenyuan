@@ -528,6 +528,81 @@ export async function synchronizeAppointmentOrderProgress(
   }
 }
 
+export async function synchronizeAllAppointmentOrderProgress(
+  operator: AppointmentOperator,
+  pool: Pool = getDb()
+) {
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const [orderRows] = await connection.execute(
+      `SELECT id, order_no, customer_id, type, used_times, total_times
+       FROM orders
+       WHERE type = '套餐'
+         AND total_times > 0
+       ORDER BY created_at, id
+       FOR UPDATE`
+    );
+    const orders = orderRows as Array<{
+      id: string; order_no: string | null; customer_id: string; type: string | null;
+      used_times: number; total_times: number;
+    }>;
+    let appointmentsUpdated = 0;
+
+    for (const order of orders) {
+      const usedTimes = Math.max(0, Number(order.used_times) || 0);
+      const totalTimes = Math.max(1, Number(order.total_times) || 1);
+      await connection.execute(
+        'UPDATE orders SET manual_progress_at = NOW() WHERE id = ?',
+        [order.id]
+      );
+
+      const [appointmentRows] = await connection.execute(
+        `SELECT id
+         FROM appointments
+         WHERE order_id = ?
+           AND status NOT IN ('已完成', '已取消', '取消', '已冲销')
+           AND progress_applied_at IS NULL
+         ORDER BY date, time_slot, created_at, id
+         FOR UPDATE`,
+        [order.id]
+      );
+      const pendingAppointments = appointmentRows as Array<{ id: string }>;
+      for (let index = 0; index < pendingAppointments.length; index += 1) {
+        const nextSequence = Math.min(totalTimes, usedTimes + index + 1);
+        await connection.execute(
+          `UPDATE appointments
+           SET service_sequence = ?, service_total_times = ?
+           WHERE id = ?`,
+          [nextSequence, totalTimes, pendingAppointments[index].id]
+        );
+        appointmentsUpdated += 1;
+      }
+
+      await connection.execute(
+        `INSERT INTO appointment_progress_syncs
+          (id, appointment_id, order_id, customer_id, order_no, order_stage,
+           before_used_times, before_total_times, after_used_times, after_total_times,
+           operator_id, operator_name, operator_role)
+         VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          randomUUID(), order.id, order.customer_id, order.order_no, order.type,
+          usedTimes, totalTimes, usedTimes, totalTimes,
+          operator.id, operator.name, operator.role,
+        ]
+      );
+    }
+
+    await connection.commit();
+    return { ordersUpdated: orders.length, appointmentsUpdated };
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+}
+
 export async function reverseCompletedAppointment(
   appointmentId: string,
   reasonValue: unknown,

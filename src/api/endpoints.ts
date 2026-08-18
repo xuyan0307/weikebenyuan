@@ -149,6 +149,10 @@ export interface AppointmentProgressResult {
   totalTimes: number;
   nextSequence: number;
 }
+export interface AppointmentBulkProgressResult {
+  ordersUpdated: number;
+  appointmentsUpdated: number;
+}
 export const appointmentsApi = {
   list: (params: QueryParams) => api.get<Paged<Appointment>>('/appointments', params),
   create: (body: Partial<Appointment>) => api.post<{
@@ -163,6 +167,8 @@ export const appointmentsApi = {
     api.patch<{ message: string }>(`/appointments/${id}/status`, { status, ...completion }),
   syncOrderProgress: (id: string) =>
     api.post<{ message: string } & AppointmentProgressResult>(`/appointments/${id}/sync-order-progress`, {}),
+  syncAllOrderProgress: () =>
+    api.post<{ message: string } & AppointmentBulkProgressResult>('/appointments/sync-order-progress', {}),
   reverseCompletion: (id: string, reason: string) =>
     api.post<{ message: string; reversalId: string }>(`/appointments/${id}/reverse-completion`, { reason }),
   replyNotified: (id: string) =>

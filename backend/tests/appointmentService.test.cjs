@@ -8,6 +8,7 @@ const {
   incrementAssignedServicePeople,
   resolveAppointmentServiceSequence,
   reverseCompletedAppointment,
+  synchronizeAllAppointmentOrderProgress,
   synchronizeAppointmentOrderProgress,
   updateAppointment,
   updateAppointmentStatus,
@@ -322,6 +323,30 @@ test('synchronizeAppointmentOrderProgress records the current order baseline tra
     pool,
   );
   assert.deepEqual(result, { orderId: 'order-1', usedTimes: 6, totalTimes: 8, nextSequence: 7 });
+  assert.equal(pool.calls.some(call => String(call).includes('appointment_progress_syncs')), true);
+  assert.equal(pool.calls.includes('commit'), true);
+});
+
+test('synchronizeAllAppointmentOrderProgress baselines package orders and resequences pending appointments', async () => {
+  const pool = fakePool([
+    [{
+      id: 'order-1', order_no: 'O001', customer_id: 'customer-1', type: '套餐',
+      used_times: 6, total_times: 8,
+    }],
+    [],
+    [{ id: 'appointment-7' }, { id: 'appointment-8' }],
+    [],
+    [],
+    [],
+  ]);
+  const result = await synchronizeAllAppointmentOrderProgress(
+    { id: 'user-1', name: '客服甲', role: 'service' },
+    pool,
+  );
+  assert.deepEqual(result, { ordersUpdated: 1, appointmentsUpdated: 2 });
+  assert.equal(pool.calls.some(call => String(call).includes("WHERE type = '套餐'")), true);
+  assert.equal(pool.calls.some(call => String(call).includes("status NOT IN ('已完成', '已取消', '取消', '已冲销')")), true);
+  assert.equal(pool.calls.filter(call => String(call).includes('SET service_sequence = ?')).length, 2);
   assert.equal(pool.calls.some(call => String(call).includes('appointment_progress_syncs')), true);
   assert.equal(pool.calls.includes('commit'), true);
 });

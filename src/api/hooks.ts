@@ -97,6 +97,10 @@ export function useAppointmentMutations() {
       mutationFn: (id: string) => appointmentsApi.syncOrderProgress(id),
       onSuccess: invalidate,
     }).mutateAsync,
+    syncAllOrderProgress: useMutation({
+      mutationFn: () => appointmentsApi.syncAllOrderProgress(),
+      onSuccess: invalidate,
+    }).mutateAsync,
     reverseCompletion: useMutation({
       mutationFn: ({ id, reason }: { id: string; reason: string }) =>
         appointmentsApi.reverseCompletion(id, reason),
