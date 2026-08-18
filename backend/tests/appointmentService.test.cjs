@@ -2,10 +2,13 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   createAppointment,
+  decrementAssignedServicePeople,
   getSlotPeriod,
   isAppointmentTimePast,
   incrementAssignedServicePeople,
   resolveAppointmentServiceSequence,
+  reverseCompletedAppointment,
+  synchronizeAppointmentOrderProgress,
   updateAppointment,
   updateAppointmentStatus,
 } = require('../dist/services/appointmentService');
@@ -87,6 +90,16 @@ test('incrementAssignedServicePeople can synchronize to an explicit appointment 
   assert.equal(result.value.sp1.usedTimes, '4');
 });
 
+test('decrementAssignedServicePeople reverses only the affected therapist progress', () => {
+  const result = decrementAssignedServicePeople({
+    sp1: { assign: '张技师', usedTimes: '6', totalTimes: '8' },
+    sp2: { assign: '李技师', usedTimes: '4', totalTimes: '8' },
+  }, '张技师', 1);
+  assert.equal(result.changed, true);
+  assert.equal(result.value.sp1.usedTimes, '5');
+  assert.equal(result.value.sp2.usedTimes, '4');
+});
+
 function fakePool(executeResults) {
   const calls = [];
   let resultIndex = 0;
@@ -126,7 +139,7 @@ test('createAppointment rolls back when the therapist period is already booked',
   );
   assert.equal(pool.calls.includes('commit'), false);
   assert.equal(pool.calls.includes('rollback'), true);
-  assert.equal(pool.calls.some(call => String(call).includes("status NOT IN ('已取消', '取消')")), true);
+  assert.equal(pool.calls.some(call => String(call).includes("status NOT IN ('已取消', '取消', '已冲销')")), true);
   assert.equal(pool.calls.at(-1), 'release');
 });
 
@@ -160,7 +173,7 @@ test('updateAppointment updates the selected appointment and excludes itself fro
   }, pool);
 
   assert.equal(pool.calls.some(call => String(call).includes('id <> ?')), true);
-  assert.equal(pool.calls.some(call => String(call).includes("status NOT IN ('已取消', '取消')")), true);
+  assert.equal(pool.calls.some(call => String(call).includes("status NOT IN ('已取消', '取消', '已冲销')")), true);
   assert.equal(pool.calls.some(call => String(call).includes('UPDATE appointments')), true);
   assert.equal(pool.calls.some(call => String(call).includes('notify_scheduled_at = CASE WHEN')), true);
   assert.equal(pool.calls.includes('commit'), true);
@@ -294,4 +307,70 @@ test('legacy appointment with a service record cannot be cancelled even when sta
     error => error.statusCode === 409
   );
   assert.equal(pool.calls.some(call => String(call).includes('UPDATE appointments')), false);
+});
+
+test('synchronizeAppointmentOrderProgress records the current order baseline transactionally', async () => {
+  const pool = fakePool([[
+    {
+      appointment_id: 'appointment-1', customer_id: 'customer-1', order_id: 'order-1',
+      order_no: 'O001', type: '套餐', used_times: 6, total_times: 8,
+    },
+  ], [], []]);
+  const result = await synchronizeAppointmentOrderProgress(
+    'appointment-1',
+    { id: 'user-1', name: '客服甲', role: 'service' },
+    pool,
+  );
+  assert.deepEqual(result, { orderId: 'order-1', usedTimes: 6, totalTimes: 8, nextSequence: 7 });
+  assert.equal(pool.calls.some(call => String(call).includes('appointment_progress_syncs')), true);
+  assert.equal(pool.calls.includes('commit'), true);
+});
+
+test('reverseCompletedAppointment rejects a repeated reversal before changing evidence', async () => {
+  const pool = fakePool([[
+    {
+      id: 'appointment-1', customer_id: 'customer-1', therapist_id: 'therapist-1',
+      status: '已冲销', progress_applied_at: '2026-08-18 10:00:00', service_record_id: 'record-1',
+    },
+  ]]);
+  await assert.rejects(
+    reverseCompletedAppointment(
+      'appointment-1', '重复冲销测试',
+      { id: 'user-1', name: '管理员', role: 'admin' },
+      pool,
+    ),
+    error => error.statusCode === 409 && /重复/.test(error.message),
+  );
+  assert.equal(pool.calls.some(call => String(call).includes('UPDATE orders')), false);
+  assert.equal(pool.calls.includes('rollback'), true);
+});
+
+test('reverseCompletedAppointment preserves evidence and rolls back order progress in one transaction', async () => {
+  const pool = fakePool([
+    [{
+      id: 'appointment-1', appointment_no: 'A001', customer_id: 'customer-1',
+      order_id: 'order-1', therapist_id: 'therapist-1', status: '已完成',
+      service: '骨盆修复', progress_applied_at: '2026-08-18 10:00:00',
+      service_record_id: 'record-1', service_date: '2026-08-18 09:00:00',
+      service_items: '骨盆修复', progress_event_id: 'event-1', progress_order_id: 'order-1',
+      before_used_times: 5, after_used_times: 6,
+    }],
+    [],
+    [{ id: 'order-1', used_times: 6, total_times: 8, service_people: { sp1: { assign: '张技师', usedTimes: '6', totalTimes: '8' } } }],
+    [{ name: '张技师' }],
+    [], [], [], [], [], [], [],
+  ]);
+  const result = await reverseCompletedAppointment(
+    'appointment-1', '误点已完成服务',
+    { id: 'user-1', name: '管理员', role: 'admin' },
+    pool,
+  );
+  assert.equal(result.appointmentId, 'appointment-1');
+  assert.equal(result.orderBefore.usedTimes, 6);
+  assert.equal(result.orderAfter.usedTimes, 5);
+  assert.equal(pool.calls.some(call => String(call).includes("status = '已冲销'")), true);
+  assert.equal(pool.calls.some(call => String(call).includes('UPDATE service_records SET reversed_at')), true);
+  assert.equal(pool.calls.some(call => String(call).includes('appointment_service_reversals')), true);
+  assert.equal(pool.calls.includes('commit'), true);
+  assert.equal(pool.calls.includes('rollback'), false);
 });

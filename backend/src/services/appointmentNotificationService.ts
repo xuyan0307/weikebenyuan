@@ -314,6 +314,7 @@ export async function recordNotificationReplyFromWecom(
      )
      WHERE a.notify_replied_at IS NULL
        AND a.status NOT LIKE '%取消%'
+       AND a.status <> '已冲销'
        AND EXISTS (
          SELECT 1
          FROM appointment_notification_deliveries delivery
@@ -374,6 +375,7 @@ export async function syncAppointmentNotificationStates(now = new Date()) {
      )
      LEFT JOIN therapists t ON t.id = a.therapist_id
      WHERE a.status NOT LIKE '%取消%'
+       AND a.status <> '已冲销'
        AND a.status NOT LIKE '%完成%'
        AND a.date BETWEEN DATE_SUB(CURDATE(), INTERVAL 1 DAY) AND DATE_ADD(CURDATE(), INTERVAL 2 DAY)`
   );

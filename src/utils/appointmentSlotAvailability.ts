@@ -3,11 +3,11 @@ export interface AppointmentSlotRecord {
   rawStatus?: string;
 }
 
-/** 已取消预约只作为历史记录展示，不再占用技师档期。 */
+/** 已取消、已冲销预约只作为历史记录展示，不再占用技师档期。 */
 export function isCancelledAppointment(appointment: AppointmentSlotRecord): boolean {
   const statuses = [appointment.status, appointment.rawStatus]
     .map(value => String(value || '').trim());
-  return statuses.some(status => status === '取消' || status === '已取消');
+  return statuses.some(status => status === '取消' || status === '已取消' || status === '已冲销');
 }
 
 export function appointmentBlocksSlot(appointment: AppointmentSlotRecord): boolean {

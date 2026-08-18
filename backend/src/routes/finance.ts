@@ -116,7 +116,9 @@ router.get('/salary', authenticateToken, async (req, res, next) => {
        ORDER BY FIELD(s.status, '待结算', '审核中', '已结算'), t.name`,
       [month]
     );
-    const entryWhere = scope === 'all' ? '' : `WHERE DATE_FORMAT(entry.service_date, '%Y-%m') = ?`;
+    const entryWhere = scope === 'all'
+      ? 'WHERE entry.reversed_at IS NULL'
+      : `WHERE entry.reversed_at IS NULL AND DATE_FORMAT(entry.service_date, '%Y-%m') = ?`;
     const [entryRows] = await db.query(
       `SELECT entry.*, DATE_FORMAT(entry.service_date, '%Y-%m-%d') AS service_date_text,
               adjuster.name AS adjusted_by_name,
@@ -137,7 +139,7 @@ router.get('/salary', authenticateToken, async (req, res, next) => {
        FROM salary_settlement_entries entry
        LEFT JOIN users adjuster ON adjuster.id = entry.adjusted_by
        LEFT JOIN users confirmer ON confirmer.id = entry.confirmed_by
-       WHERE entry.settlement_status IN ('已确认', '已结算')
+       WHERE entry.reversed_at IS NULL AND entry.settlement_status IN ('已确认', '已结算')
        ORDER BY entry.service_date, entry.appointment_no`
     );
     const cumulativeEntries = (cumulativeEntryRows as any[]).map(mapEntry);
@@ -148,7 +150,7 @@ router.get('/salary', authenticateToken, async (req, res, next) => {
        FROM salary_settlement_entries entry
        LEFT JOIN users adjuster ON adjuster.id = entry.adjusted_by
        LEFT JOIN users confirmer ON confirmer.id = entry.confirmed_by
-       WHERE entry.service_date BETWEEN ? AND ?
+       WHERE entry.reversed_at IS NULL AND entry.service_date BETWEEN ? AND ?
        ORDER BY entry.service_date, entry.appointment_no`,
       [weekStart, weekEnd]
     );
@@ -182,7 +184,7 @@ router.get('/salary', authenticateToken, async (req, res, next) => {
     );
     const [appointmentRows] = await db.query(
       `SELECT customer_id, therapist_id, DATE_FORMAT(date, '%Y-%m-%d') AS date, status
-       FROM appointments WHERE status <> '已取消'`
+       FROM appointments WHERE status NOT IN ('已取消', '取消', '已冲销')`
     );
     const [adjustmentRows] = await db.query(
       `SELECT * FROM salary_customer_adjustments ${scope === 'all' ? '' : 'WHERE month = ?'}
@@ -315,7 +317,7 @@ router.patch(
       const [monthRows] = await connection.query(
         `SELECT DATE_FORMAT(service_date, '%Y-%m') AS month
          FROM salary_settlement_entries
-         WHERE therapist_id = ? AND customer_id = ? AND service_date BETWEEN ? AND ?
+         WHERE therapist_id = ? AND customer_id = ? AND reversed_at IS NULL AND service_date BETWEEN ? AND ?
          FOR UPDATE`,
         [therapistId, customerId, weekStart, `${weekEnd} 23:59:59`]
       );
@@ -325,7 +327,7 @@ router.patch(
              confirmed_by = CASE WHEN ? = '已确认' THEN ? ELSE NULL END,
              confirmed_at = CASE WHEN ? = '已确认' THEN NOW() ELSE NULL END
          WHERE therapist_id = ? AND customer_id = ?
-           AND service_date BETWEEN ? AND ?
+           AND reversed_at IS NULL AND service_date BETWEEN ? AND ?
            AND settlement_status <> '已结算'`,
         [
           status,
@@ -381,7 +383,7 @@ router.patch(
       await connection.beginTransaction();
       const [existingRows] = await connection.query(
         `SELECT therapist_id, DATE_FORMAT(service_date, '%Y-%m') AS month
-         FROM salary_settlement_entries WHERE id = ? FOR UPDATE`,
+         FROM salary_settlement_entries WHERE id = ? AND reversed_at IS NULL FOR UPDATE`,
         [req.params.id]
       );
       const existing = (existingRows as Array<{ therapist_id: string; month: string }>)[0];
@@ -464,7 +466,7 @@ router.post(
       await connection.execute(
         `UPDATE salary_settlement_entries
          SET settlement_status = ?, confirmed_at = NOW(), confirmed_by = ?
-         WHERE therapist_id = ? AND DATE_FORMAT(service_date, '%Y-%m') = ?`,
+         WHERE therapist_id = ? AND reversed_at IS NULL AND DATE_FORMAT(service_date, '%Y-%m') = ?`,
         [
           status === '已结算' ? '已结算' : '已确认',
           actorId,

@@ -38,7 +38,7 @@ export function buildDashboardTodoQueries(scope: DashboardTodoQueryScope) {
     appointments: `SELECT COUNT(*) AS cnt
       FROM appointments a
       WHERE ${scope.appointmentWhere}
-        AND a.status NOT IN ('已完成','取消','已取消')
+        AND a.status NOT IN ('已完成','取消','已取消','已冲销')
         AND (
           a.notify_manual_status = '需通知'
           OR (

@@ -8,6 +8,8 @@ import {
   createAppointment,
   updateAppointment,
   updateAppointmentStatus,
+  reverseCompletedAppointment,
+  synchronizeAppointmentOrderProgress,
 } from '../services/appointmentService';
 import {
   APPOINTMENT_NOTIFY_STATUSES,
@@ -371,6 +373,36 @@ router.patch('/:id/status', authenticateToken, auditLog('appointments'), async (
     res.json({ message: '预约状态已更新' });
   } catch (err) { next(err); }
 });
+
+router.post(
+  '/:id/sync-order-progress',
+  authenticateToken,
+  authorizeRoles('superadmin', 'admin', 'service'),
+  auditLog('appointments'),
+  async (req: AuthRequest, res, next) => {
+    try {
+      const result = await synchronizeAppointmentOrderProgress(req.params.id, {
+        id: req.userId || '', name: req.userName || '', role: req.userRole || '',
+      });
+      res.json({ message: '订单服务次数已同步到排期基线', ...result });
+    } catch (err) { next(err); }
+  }
+);
+
+router.post(
+  '/:id/reverse-completion',
+  authenticateToken,
+  authorizeRoles('superadmin', 'admin', 'service'),
+  auditLog('appointments'),
+  async (req: AuthRequest, res, next) => {
+    try {
+      const result = await reverseCompletedAppointment(req.params.id, req.body?.reason, {
+        id: req.userId || '', name: req.userName || '', role: req.userRole || '',
+      });
+      res.json({ message: '错误完成服务已冲销', ...result });
+    } catch (err) { next(err); }
+  }
+);
 
 router.delete('/:id', authenticateToken, auditLog('appointments'), async (req, res, next) => {
   try {

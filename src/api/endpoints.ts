@@ -143,6 +143,12 @@ export interface Appointment {
 export interface AppointmentCompletion {
   signaturePhotos?: unknown[];
 }
+export interface AppointmentProgressResult {
+  orderId: string;
+  usedTimes: number;
+  totalTimes: number;
+  nextSequence: number;
+}
 export const appointmentsApi = {
   list: (params: QueryParams) => api.get<Paged<Appointment>>('/appointments', params),
   create: (body: Partial<Appointment>) => api.post<{
@@ -155,6 +161,10 @@ export const appointmentsApi = {
     api.put<{ message: string }>(`/appointments/${id}`, body),
   patchStatus: (id: string, status: string, completion: AppointmentCompletion = {}) =>
     api.patch<{ message: string }>(`/appointments/${id}/status`, { status, ...completion }),
+  syncOrderProgress: (id: string) =>
+    api.post<{ message: string } & AppointmentProgressResult>(`/appointments/${id}/sync-order-progress`, {}),
+  reverseCompletion: (id: string, reason: string) =>
+    api.post<{ message: string; reversalId: string }>(`/appointments/${id}/reverse-completion`, { reason }),
   replyNotified: (id: string) =>
     api.post<{ status: string }>(`/appointments/${id}/notification-reply`, { reply: '已通知' }),
   patchNotificationStatus: (

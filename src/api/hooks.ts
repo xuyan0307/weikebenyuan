@@ -93,6 +93,15 @@ export function useAppointmentMutations() {
         appointmentsApi.patchStatus(id, status, { signaturePhotos }),
       onSuccess: invalidate,
     }).mutateAsync,
+    syncOrderProgress: useMutation({
+      mutationFn: (id: string) => appointmentsApi.syncOrderProgress(id),
+      onSuccess: invalidate,
+    }).mutateAsync,
+    reverseCompletion: useMutation({
+      mutationFn: ({ id, reason }: { id: string; reason: string }) =>
+        appointmentsApi.reverseCompletion(id, reason),
+      onSuccess: invalidate,
+    }).mutateAsync,
     patchNotificationStatus: useMutation({
       mutationFn: ({
         id,

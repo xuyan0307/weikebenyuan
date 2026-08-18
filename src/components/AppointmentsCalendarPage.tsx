@@ -38,7 +38,7 @@ import {
   formatAppointmentDistrict,
 } from '../utils/appointmentCalendarDisplay';
 
-type ApptStatus = '待确认' | '已确认' | '已取消' | '已完成';
+type ApptStatus = '待确认' | '已确认' | '已取消' | '已完成' | '已冲销';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -468,7 +468,7 @@ function AppointmentCard({
       <div className="mb-0.5" style={{ opacity: 0.8, ...truncateStyle }} title={area}>
         区域：{area}
       </div>
-      <div className="mb-0.5" style={{ opacity: 0.8, ...truncateStyle }} title={`${appt.date} ${appt.timeSlot}`}>
+      <div className="schedule-card-time mb-0.5" style={{ opacity: 0.8, ...truncateStyle }} title={`${appt.date} ${appt.timeSlot}`}>
         时间：{appt.timeSlot || '—'}
       </div>
       <div className="mb-0.5" style={{ opacity: 0.85, ...truncateStyle }} title={appt.service || '未填写服务项目'}>
@@ -1578,6 +1578,7 @@ export default function AppointmentsCalendarPage() {
   const [completionSignaturePhotos, setCompletionSignaturePhotos] = useState<UploadedFile[]>([]);
   const [completionUploading, setCompletionUploading] = useState(false);
   const [completionSaving, setCompletionSaving] = useState(false);
+  const [progressActionSaving, setProgressActionSaving] = useState(false);
 
   const calendarTherapists = useMemo(
     () => getBoundTherapists(THERAPISTS, ORDERS, APPOINTMENTS),
@@ -1839,6 +1840,38 @@ export default function AppointmentsCalendarPage() {
       toast.error(error?.message || '服务完成确认失败');
     } finally {
       setCompletionSaving(false);
+    }
+  }
+
+  async function handleSyncOrderProgress(appointment: Appointment) {
+    if (progressActionSaving) return;
+    setProgressActionSaving(true);
+    try {
+      const result = await apptMutations.syncOrderProgress(appointment.id);
+      toast.success(`订单次数已同步：${result.usedTimes}/${result.totalTimes}，下次预约为 ${result.nextSequence}/${result.totalTimes}`);
+    } catch (error: any) {
+      toast.error(error?.message || '同步订单次数失败');
+    } finally {
+      setProgressActionSaving(false);
+    }
+  }
+
+  async function handleReverseCompletion(appointment: Appointment) {
+    if (progressActionSaving) return;
+    const reason = window.prompt('请输入冲销原因（将保留原服务、订单次数和工资凭证）：', '误点已完成服务')?.trim();
+    if (!reason) return;
+    setProgressActionSaving(true);
+    try {
+      await apptMutations.reverseCompletion({ id: appointment.id, reason });
+      setLocalAppts(prev => prev.map(item => item.id === appointment.id
+        ? { ...item, status: '已冲销' as ApptStatus, rawStatus: '已冲销' }
+        : item));
+      setDetailTarget(null);
+      toast.success('服务已冲销，订单次数和工资凭证已同步回退');
+    } catch (error: any) {
+      toast.error(error?.message || '冲销失败');
+    } finally {
+      setProgressActionSaving(false);
     }
   }
 
@@ -2257,6 +2290,7 @@ export default function AppointmentsCalendarPage() {
           ['预约状态', detailTarget.status || '—'],
           ['备注', detailTarget.remark || '—'],
         ];
+        const canManageProgress = ['superadmin', 'admin', 'service'].includes(currentUser.role);
         return (
           <div className="fixed inset-0 z-[55] flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.45)' }} role="dialog" aria-modal="true" aria-label="预约详情">
             <div className="w-[560px] max-w-[calc(100vw-32px)] rounded-xl shadow-custom overflow-hidden" style={{ background: 'var(--card)' }}>
@@ -2277,7 +2311,17 @@ export default function AppointmentsCalendarPage() {
                   </div>
                 ))}
               </div>
-              <div className="px-5 py-4 flex justify-end" style={{ borderTop: '1px solid var(--border)' }}>
+              <div className="px-5 py-4 flex flex-wrap justify-end gap-2" style={{ borderTop: '1px solid var(--border)' }}>
+                {canManageProgress && detailIsPackage && detailTarget.status !== '已冲销' && (
+                  <button type="button" disabled={progressActionSaving} className="px-4 py-2 rounded-lg text-sm hover:opacity-90 disabled:opacity-50" style={{ color: 'var(--brand)', border: '1px solid var(--brand)' }} onClick={() => handleSyncOrderProgress(detailTarget)}>
+                    同步订单次数
+                  </button>
+                )}
+                {canManageProgress && detailTarget.status === '已完成' && (
+                  <button type="button" disabled={progressActionSaving} className="px-4 py-2 rounded-lg text-sm hover:opacity-90 disabled:opacity-50" style={{ color: '#DC2626', border: '1px solid #FCA5A5', background: '#FEF2F2' }} onClick={() => handleReverseCompletion(detailTarget)}>
+                    冲销错误完成
+                  </button>
+                )}
                 <button type="button" className="px-4 py-2 rounded-lg text-sm text-white hover:opacity-90" style={{ background: 'var(--brand)' }} onClick={() => setDetailTarget(null)}>
                   关闭
                 </button>

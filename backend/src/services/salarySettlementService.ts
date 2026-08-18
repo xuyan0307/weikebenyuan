@@ -89,7 +89,7 @@ async function completedServices(
        LIMIT 1
      )
      LEFT JOIN therapists t ON t.id = sr.therapist_id
-     WHERE DATE_FORMAT(sr.service_date, '%Y-%m') = ?
+     WHERE DATE_FORMAT(sr.service_date, '%Y-%m') = ? AND sr.reversed_at IS NULL
      ORDER BY sr.service_date, a.appointment_no`,
     [month]
   );
@@ -172,14 +172,14 @@ export async function syncCompletedServicesToSalary(
            total, status
          )
          SELECT UUID(), ?, ?,
-           SUM(CASE WHEN settlement_status IN ('已确认', '已结算') THEN 1 ELSE 0 END),
-           COALESCE(SUM(CASE WHEN settlement_status IN ('已确认', '已结算') THEN experience_fee ELSE 0 END), 0),
-           COALESCE(SUM(CASE WHEN settlement_status IN ('已确认', '已结算') THEN labor_fee ELSE 0 END), 0),
-           COALESCE(SUM(CASE WHEN settlement_status IN ('已确认', '已结算') THEN commission ELSE 0 END), 0),
-           COALESCE(SUM(CASE WHEN settlement_status IN ('已确认', '已结算') THEN coupon_fee ELSE 0 END), 0),
-           COALESCE(SUM(CASE WHEN settlement_status IN ('已确认', '已结算') THEN other_fee ELSE 0 END), 0),
-           COALESCE(SUM(CASE WHEN settlement_status IN ('已确认', '已结算') THEN deduction ELSE 0 END), 0),
-           COALESCE(SUM(CASE WHEN settlement_status IN ('已确认', '已结算') THEN payable_amount ELSE 0 END), 0),
+           SUM(CASE WHEN reversed_at IS NULL AND settlement_status IN ('已确认', '已结算') THEN 1 ELSE 0 END),
+           COALESCE(SUM(CASE WHEN reversed_at IS NULL AND settlement_status IN ('已确认', '已结算') THEN experience_fee ELSE 0 END), 0),
+           COALESCE(SUM(CASE WHEN reversed_at IS NULL AND settlement_status IN ('已确认', '已结算') THEN labor_fee ELSE 0 END), 0),
+           COALESCE(SUM(CASE WHEN reversed_at IS NULL AND settlement_status IN ('已确认', '已结算') THEN commission ELSE 0 END), 0),
+           COALESCE(SUM(CASE WHEN reversed_at IS NULL AND settlement_status IN ('已确认', '已结算') THEN coupon_fee ELSE 0 END), 0),
+           COALESCE(SUM(CASE WHEN reversed_at IS NULL AND settlement_status IN ('已确认', '已结算') THEN other_fee ELSE 0 END), 0),
+           COALESCE(SUM(CASE WHEN reversed_at IS NULL AND settlement_status IN ('已确认', '已结算') THEN deduction ELSE 0 END), 0),
+           COALESCE(SUM(CASE WHEN reversed_at IS NULL AND settlement_status IN ('已确认', '已结算') THEN payable_amount ELSE 0 END), 0),
            '待结算'
          FROM salary_settlement_entries
          WHERE therapist_id = ? AND DATE_FORMAT(service_date, '%Y-%m') = ?
@@ -214,14 +214,14 @@ export async function recalculateSalaryRecord(
     `UPDATE salary_records sr
      JOIN (
        SELECT therapist_id,
-         SUM(CASE WHEN settlement_status IN ('已确认', '已结算') THEN 1 ELSE 0 END) AS service_count,
-         COALESCE(SUM(CASE WHEN settlement_status IN ('已确认', '已结算') THEN experience_fee ELSE 0 END), 0) AS experience_fee,
-         COALESCE(SUM(CASE WHEN settlement_status IN ('已确认', '已结算') THEN labor_fee ELSE 0 END), 0) AS labor_fee,
-         COALESCE(SUM(CASE WHEN settlement_status IN ('已确认', '已结算') THEN commission ELSE 0 END), 0) AS commission,
-         COALESCE(SUM(CASE WHEN settlement_status IN ('已确认', '已结算') THEN coupon_fee ELSE 0 END), 0) AS coupon_fee,
-         COALESCE(SUM(CASE WHEN settlement_status IN ('已确认', '已结算') THEN other_fee ELSE 0 END), 0) AS other_fee,
-         COALESCE(SUM(CASE WHEN settlement_status IN ('已确认', '已结算') THEN deduction ELSE 0 END), 0) AS deduction,
-         COALESCE(SUM(CASE WHEN settlement_status IN ('已确认', '已结算') THEN payable_amount ELSE 0 END), 0) AS total
+         SUM(CASE WHEN reversed_at IS NULL AND settlement_status IN ('已确认', '已结算') THEN 1 ELSE 0 END) AS service_count,
+         COALESCE(SUM(CASE WHEN reversed_at IS NULL AND settlement_status IN ('已确认', '已结算') THEN experience_fee ELSE 0 END), 0) AS experience_fee,
+         COALESCE(SUM(CASE WHEN reversed_at IS NULL AND settlement_status IN ('已确认', '已结算') THEN labor_fee ELSE 0 END), 0) AS labor_fee,
+         COALESCE(SUM(CASE WHEN reversed_at IS NULL AND settlement_status IN ('已确认', '已结算') THEN commission ELSE 0 END), 0) AS commission,
+         COALESCE(SUM(CASE WHEN reversed_at IS NULL AND settlement_status IN ('已确认', '已结算') THEN coupon_fee ELSE 0 END), 0) AS coupon_fee,
+         COALESCE(SUM(CASE WHEN reversed_at IS NULL AND settlement_status IN ('已确认', '已结算') THEN other_fee ELSE 0 END), 0) AS other_fee,
+         COALESCE(SUM(CASE WHEN reversed_at IS NULL AND settlement_status IN ('已确认', '已结算') THEN deduction ELSE 0 END), 0) AS deduction,
+         COALESCE(SUM(CASE WHEN reversed_at IS NULL AND settlement_status IN ('已确认', '已结算') THEN payable_amount ELSE 0 END), 0) AS total
        FROM salary_settlement_entries
        WHERE therapist_id = ? AND DATE_FORMAT(service_date, '%Y-%m') = ?
        GROUP BY therapist_id

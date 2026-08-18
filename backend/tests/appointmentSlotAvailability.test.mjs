@@ -21,6 +21,10 @@ test('API display and database cancellation status aliases both release the slot
   assert.equal(hasBlockingAppointment([{ status: '取消' }]), false);
 });
 
+test('reversed completed service remains historical evidence without blocking the slot', () => {
+  assert.equal(appointmentBlocksSlot({ status: '已冲销' }), false);
+});
+
 test('active and completed appointments continue to block their schedule slot', () => {
   assert.equal(hasBlockingAppointment([{ status: '待确认' }]), true);
   assert.equal(hasBlockingAppointment([{ status: '已确认' }]), true);

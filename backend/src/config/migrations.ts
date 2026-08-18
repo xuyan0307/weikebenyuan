@@ -756,6 +756,77 @@ const migrations: Migration[] = [
       );
     },
   },
+  {
+    id: '028_appointment_progress_audit',
+    description: 'Add auditable order progress synchronization and completed service reversals',
+    up: async db => {
+      await addColumn(db, 'service_records', 'reversed_at', 'datetime DEFAULT NULL');
+      await addColumn(db, 'service_records', 'reversed_by', 'varchar(36) DEFAULT NULL');
+      await addColumn(db, 'service_records', 'reversal_reason', 'varchar(500) DEFAULT NULL');
+      await addColumn(db, 'salary_settlement_entries', 'reversed_at', 'datetime DEFAULT NULL');
+      await addColumn(db, 'salary_settlement_entries', 'reversal_id', 'char(36) DEFAULT NULL');
+
+      await db.execute(
+        `CREATE TABLE IF NOT EXISTS appointment_progress_events (
+          id char(36) PRIMARY KEY,
+          appointment_id char(36) NOT NULL,
+          order_id char(36) NOT NULL,
+          customer_id char(36) NOT NULL,
+          before_used_times int NOT NULL,
+          after_used_times int NOT NULL,
+          before_total_times int NOT NULL,
+          after_total_times int NOT NULL,
+          before_service_people json DEFAULT NULL,
+          after_service_people json DEFAULT NULL,
+          applied_at datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          reversed_at datetime DEFAULT NULL,
+          reversal_id char(36) DEFAULT NULL,
+          UNIQUE KEY uk_appointment_progress_event (appointment_id),
+          KEY idx_appointment_progress_order (order_id, applied_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
+      );
+      await db.execute(
+        `CREATE TABLE IF NOT EXISTS appointment_progress_syncs (
+          id char(36) PRIMARY KEY,
+          appointment_id char(36) DEFAULT NULL,
+          order_id char(36) NOT NULL,
+          customer_id char(36) NOT NULL,
+          order_no varchar(50) DEFAULT NULL,
+          order_stage varchar(100) DEFAULT NULL,
+          before_used_times int NOT NULL,
+          before_total_times int NOT NULL,
+          after_used_times int NOT NULL,
+          after_total_times int NOT NULL,
+          operator_id char(36) NOT NULL,
+          operator_name varchar(100) NOT NULL,
+          operator_role varchar(50) NOT NULL,
+          created_at datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          KEY idx_appointment_sync_order (order_id, created_at),
+          KEY idx_appointment_sync_customer (customer_id, created_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
+      );
+      await db.execute(
+        `CREATE TABLE IF NOT EXISTS appointment_service_reversals (
+          id char(36) PRIMARY KEY,
+          appointment_id char(36) NOT NULL,
+          service_record_id char(36) DEFAULT NULL,
+          progress_event_id char(36) DEFAULT NULL,
+          order_id char(36) DEFAULT NULL,
+          customer_id char(36) NOT NULL,
+          therapist_id char(36) NOT NULL,
+          reason varchar(500) NOT NULL,
+          operator_id char(36) NOT NULL,
+          operator_name varchar(100) NOT NULL,
+          operator_role varchar(50) NOT NULL,
+          original_service_snapshot json NOT NULL,
+          affected_data_snapshot json NOT NULL,
+          created_at datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE KEY uk_appointment_service_reversal (appointment_id),
+          KEY idx_service_reversal_order (order_id, created_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
+      );
+    },
+  },
 ];
 
 export async function runMigrations(db: mysql.Pool) {
