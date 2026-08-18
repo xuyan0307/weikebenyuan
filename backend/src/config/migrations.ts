@@ -827,6 +827,18 @@ const migrations: Migration[] = [
       );
     },
   },
+  {
+    id: '029_appointment_reversal_schema_compatibility',
+    description: 'Allow reversed appointment status and longer audited route actions',
+    up: async db => {
+      await db.execute(
+        "ALTER TABLE appointments MODIFY status enum('已确认','待确认','已取消','已完成','已冲销') DEFAULT '待确认'"
+      );
+      await db.execute(
+        'ALTER TABLE operation_logs MODIFY action varchar(255) NOT NULL'
+      );
+    },
+  },
 ];
 
 export async function runMigrations(db: mysql.Pool) {
