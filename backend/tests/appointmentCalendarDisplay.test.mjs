@@ -102,6 +102,8 @@ test('calendar can baseline package progress and browse therapists by collapsibl
   assert.match(appointmentRouteSource, /'\/sync-order-progress'/);
   assert.match(appointmentServiceSource, /synchronizeAllAppointmentOrderProgress/);
   assert.match(appointmentServiceSource, /WHERE type = '套餐'/);
+  assert.match(appointmentServiceSource, /status === '已完成'/);
+  assert.match(appointmentServiceSource, /usedTimes \+ 1/);
   assert.match(appointmentServiceSource, /SET service_sequence = \?, service_total_times = \?/);
   assert.match(calendarSource, />\s*更新\s*</);
   assert.match(calendarSource, /syncAllOrderProgress/);

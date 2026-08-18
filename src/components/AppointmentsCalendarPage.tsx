@@ -1885,12 +1885,12 @@ export default function AppointmentsCalendarPage() {
 
   async function handleSyncAllOrderProgress() {
     if (progressActionSaving) return;
-    const confirmed = window.confirm('将以套餐订单列表当前服务次数建立新基线，并校正套餐客户未完成预约的服务序号。历史已完成服务不会重复累计，是否继续？');
+    const confirmed = window.confirm('将以套餐订单列表当前服务次数建立新基线：已完成预约直接同步当前次数，未完成预约按当前次数+1更新；已取消和已冲销记录不变。是否继续？');
     if (!confirmed) return;
     setProgressActionSaving(true);
     try {
       const result = await apptMutations.syncAllOrderProgress();
-      toast.success(`更新完成：${result.ordersUpdated}个套餐订单已建立基线，${result.appointmentsUpdated}条待服务预约已校正`);
+      toast.success(`更新完成：${result.ordersUpdated}个套餐订单已建立基线，${result.appointmentsUpdated}条预约次数已按状态校正`);
     } catch (error: any) {
       toast.error(error?.message || '批量更新套餐客户服务次数失败');
     } finally {

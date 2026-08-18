@@ -528,6 +528,18 @@ export async function synchronizeAppointmentOrderProgress(
   }
 }
 
+export function resolveSynchronizedAppointmentSequence(
+  status: string,
+  usedTimesValue: unknown,
+  totalTimesValue: unknown
+) {
+  const usedTimes = Math.max(0, Number(usedTimesValue) || 0);
+  const totalTimes = Math.max(1, Number(totalTimesValue) || 1);
+  return status === '已完成'
+    ? Math.min(totalTimes, usedTimes)
+    : Math.min(totalTimes, usedTimes + 1);
+}
+
 export async function synchronizeAllAppointmentOrderProgress(
   operator: AppointmentOperator,
   pool: Pool = getDb()
@@ -558,23 +570,26 @@ export async function synchronizeAllAppointmentOrderProgress(
       );
 
       const [appointmentRows] = await connection.execute(
-        `SELECT id
+        `SELECT id, status
          FROM appointments
          WHERE order_id = ?
-           AND status NOT IN ('已完成', '已取消', '取消', '已冲销')
-           AND progress_applied_at IS NULL
+           AND status NOT IN ('已取消', '取消', '已冲销')
          ORDER BY date, time_slot, created_at, id
          FOR UPDATE`,
         [order.id]
       );
-      const pendingAppointments = appointmentRows as Array<{ id: string }>;
-      for (let index = 0; index < pendingAppointments.length; index += 1) {
-        const nextSequence = Math.min(totalTimes, usedTimes + index + 1);
+      const linkedAppointments = appointmentRows as Array<{ id: string; status: string }>;
+      for (const appointment of linkedAppointments) {
+        const nextSequence = resolveSynchronizedAppointmentSequence(
+          appointment.status,
+          usedTimes,
+          totalTimes
+        );
         await connection.execute(
           `UPDATE appointments
            SET service_sequence = ?, service_total_times = ?
            WHERE id = ?`,
-          [nextSequence, totalTimes, pendingAppointments[index].id]
+          [nextSequence, totalTimes, appointment.id]
         );
         appointmentsUpdated += 1;
       }

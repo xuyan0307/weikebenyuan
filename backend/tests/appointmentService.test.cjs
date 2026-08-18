@@ -7,6 +7,7 @@ const {
   isAppointmentTimePast,
   incrementAssignedServicePeople,
   resolveAppointmentServiceSequence,
+  resolveSynchronizedAppointmentSequence,
   reverseCompletedAppointment,
   synchronizeAllAppointmentOrderProgress,
   synchronizeAppointmentOrderProgress,
@@ -327,14 +328,21 @@ test('synchronizeAppointmentOrderProgress records the current order baseline tra
   assert.equal(pool.calls.includes('commit'), true);
 });
 
-test('synchronizeAllAppointmentOrderProgress baselines package orders and resequences pending appointments', async () => {
+test('bulk progress sync uses the order count for completed appointments and plus one for unfinished appointments', () => {
+  assert.equal(resolveSynchronizedAppointmentSequence('已完成', 6, 8), 6);
+  assert.equal(resolveSynchronizedAppointmentSequence('已确认', 6, 8), 7);
+  assert.equal(resolveSynchronizedAppointmentSequence('待确认', 6, 8), 7);
+  assert.equal(resolveSynchronizedAppointmentSequence('已确认', 8, 8), 8);
+});
+
+test('synchronizeAllAppointmentOrderProgress baselines package orders and updates active appointments by status', async () => {
   const pool = fakePool([
     [{
       id: 'order-1', order_no: 'O001', customer_id: 'customer-1', type: '套餐',
       used_times: 6, total_times: 8,
     }],
     [],
-    [{ id: 'appointment-7' }, { id: 'appointment-8' }],
+    [{ id: 'appointment-completed', status: '已完成' }, { id: 'appointment-pending', status: '已确认' }],
     [],
     [],
     [],
@@ -345,7 +353,7 @@ test('synchronizeAllAppointmentOrderProgress baselines package orders and resequ
   );
   assert.deepEqual(result, { ordersUpdated: 1, appointmentsUpdated: 2 });
   assert.equal(pool.calls.some(call => String(call).includes("WHERE type = '套餐'")), true);
-  assert.equal(pool.calls.some(call => String(call).includes("status NOT IN ('已完成', '已取消', '取消', '已冲销')")), true);
+  assert.equal(pool.calls.some(call => String(call).includes("status NOT IN ('已取消', '取消', '已冲销')")), true);
   assert.equal(pool.calls.filter(call => String(call).includes('SET service_sequence = ?')).length, 2);
   assert.equal(pool.calls.some(call => String(call).includes('appointment_progress_syncs')), true);
   assert.equal(pool.calls.includes('commit'), true);
