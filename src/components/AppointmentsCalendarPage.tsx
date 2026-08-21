@@ -37,6 +37,7 @@ import {
   appointmentProgressLabel,
   formatAppointmentDistrict,
 } from '../utils/appointmentCalendarDisplay';
+import { isOrderAssignedToTherapist } from '../utils/appointmentTherapistOrders';
 
 type ApptStatus = '待确认' | '已确认' | '已取消' | '已完成' | '已冲销';
 
@@ -1025,7 +1026,10 @@ function CreateModal({
     if (matchedOrder) setSelectedOrderId(matchedOrder.id);
   }, [visible, initialCustomerId, ORDERS.length]);
 
-  const eligibleOrders = ORDERS.filter(o => o.payStatus !== '已退款');
+  const eligibleOrders = ORDERS.filter(order =>
+    order.payStatus !== '已退款'
+    && isOrderAssignedToTherapist(order, therapist?.name || '')
+  );
   const filteredOrders = eligibleOrders.filter(o => {
     const cust = CUSTOMERS.find(c => c.name === o.customerName);
     const area = cust?.area ?? '';
@@ -1270,7 +1274,9 @@ function CreateModal({
                 );
               })}
               {filteredOrders.length === 0 && (
-                <div className="text-center py-6 text-sm" style={{ color: 'var(--muted-foreground)' }}>暂无匹配客户</div>
+                <div className="text-center py-6 text-sm" style={{ color: 'var(--muted-foreground)' }}>
+                  {search ? '暂无匹配客户' : '该技师暂无关联客户'}
+                </div>
               )}
             </div>
           </div>

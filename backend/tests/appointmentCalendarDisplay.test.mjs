@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { isOrderAssignedToTherapist } from '../../src/utils/appointmentTherapistOrders.ts';
 
 const calendarSource = await readFile(
   new URL('../../src/components/AppointmentsCalendarPage.tsx', import.meta.url),
@@ -30,6 +31,25 @@ const migrationSource = await readFile(
   new URL('../src/config/migrations.ts', import.meta.url),
   'utf8'
 );
+
+test('new appointment customer picker is limited to the selected therapist assignments', () => {
+  assert.match(calendarSource, /isOrderAssignedToTherapist\(order, therapist\?\.name \|\| ''\)/);
+  assert.match(calendarSource, /该技师暂无关联客户/);
+  const order = {
+    servicePeople: {
+      sp1: { assign: '曾丽珍' },
+      sp2: { assign: '胡小华' },
+      sp3: { assign: '待分配' },
+    },
+  };
+  assert.equal(isOrderAssignedToTherapist(order, '曾丽珍'), true);
+  assert.equal(isOrderAssignedToTherapist(order, '胡小华'), true);
+  assert.equal(isOrderAssignedToTherapist(order, '徐燕玲'), false);
+  assert.equal(isOrderAssignedToTherapist({
+    servicePeople: JSON.stringify({ sp1: { assign: '徐燕玲' } }),
+  }, '徐燕玲'), true);
+  assert.equal(isOrderAssignedToTherapist({ servicePeople: '{invalid' }, '徐燕玲'), false);
+});
 
 test('calendar hides cancelled appointments while appointment list keeps the history', () => {
   assert.match(calendarSource, /!isCancelledAppointment\(a\)/);
