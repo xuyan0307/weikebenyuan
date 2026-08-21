@@ -68,7 +68,7 @@ test('service completion is offered only for today or an earlier date', () => {
   assert.match(calendarSource, /appt\.date <= getLocalDateKey\(\)/);
   assert.match(calendarSource, /isCompleted = appt\.status === '已完成'/);
   assert.match(calendarSource, />\s*确认服务\s*</);
-  assert.match(calendarSource, />\s*已完成服务\s*</);
+  assert.match(calendarSource, /appt\.isBackfill \? '补录 · 已完成服务' : '已完成服务'/);
   assert.match(calendarSource, />\s*已预约未做\s*</);
   assert.match(calendarSource, /备注：\{appt\.remark \|\| ''\}/);
   assert.match(calendarSource, /data-calendar-sticky="filters"/);
@@ -82,6 +82,20 @@ test('service completion is offered only for today or an earlier date', () => {
   assert.match(calendarSource, /borderCollapse: 'separate'/);
   assert.match(calendarSource, /background: '#FFFFFF'/);
   assert.match(calendarSource, /background: '#F5F7FA'/);
+});
+
+test('historical appointment creation is rendered above the sticky toolbar and marked as a non-counting backfill', () => {
+  assert.match(calendarSource, /z-\[100\]/);
+  assert.match(calendarSource, /data-backfill-warning/);
+  assert.match(calendarSource, /data-appointment-backfill/);
+  assert.match(calendarSource, /isBackfill \? '已完成' : '待确认'/);
+  assert.match(calendarSource, /!detailTarget\.isBackfill/);
+  assert.match(appointmentRouteSource, /isBackfill: Boolean\(r\.is_backfill\)/);
+  assert.match(appointmentServiceSource, /const isBackfill = isAppointmentTimePast\(date, timeSlot\)/);
+  assert.match(appointmentServiceSource, /isBackfill \? '已完成'/);
+  assert.match(appointmentServiceSource, /!appointment\.is_backfill/);
+  assert.match(appointmentServiceSource, /AND is_backfill = 0/);
+  assert.match(migrationSource, /030_appointment_backfill_marker/);
 });
 
 test('morning afternoon and evening calendar sections use a clear dark divider', () => {

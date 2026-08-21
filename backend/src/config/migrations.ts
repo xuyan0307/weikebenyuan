@@ -839,6 +839,23 @@ const migrations: Migration[] = [
       );
     },
   },
+  {
+    id: '030_appointment_backfill_marker',
+    description: 'Mark historical appointment entries without applying order progress',
+    up: async db => {
+      await addColumn(
+        db,
+        'appointments',
+        'is_backfill',
+        "tinyint(1) NOT NULL DEFAULT 0 COMMENT 'Historical completed entry excluded from order progress' AFTER status"
+      );
+      if (!(await indexExists(db, 'appointments', 'idx_appointments_backfill'))) {
+        await db.execute(
+          'ALTER TABLE appointments ADD INDEX idx_appointments_backfill (is_backfill, date)'
+        );
+      }
+    },
+  },
 ];
 
 export async function runMigrations(db: mysql.Pool) {

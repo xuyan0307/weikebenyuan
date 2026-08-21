@@ -17,6 +17,7 @@ export interface AppointmentWriteBody {
   status?: string;
   area?: string;
   remark?: string;
+  isBackfill?: boolean;
 }
 
 export interface AppointmentCompletionBody {
@@ -41,6 +42,7 @@ interface AppointmentRow {
   service_sequence?: number | null;
   service_total_times?: number | null;
   status: string;
+  is_backfill?: number;
   area?: string | null;
   remark?: string | null;
   progress_applied_at: string | Date | null;
@@ -168,9 +170,9 @@ export async function createAppointment(body: AppointmentWriteBody, pool: Pool =
     if (!therapistId || !date || requestedPeriod === null) {
       throw createError('请选择技师、预约日期和有效时间', 400);
     }
-    if (isAppointmentTimePast(date, timeSlot)) {
-      throw createError('已经过去的时间不能预约，请重新选择', 400);
-    }
+    // Historical times are entered as completed backfills. This is derived on
+    // the server so callers cannot create an ordinary pending appointment in the past.
+    const isBackfill = isAppointmentTimePast(date, timeSlot);
 
     // Locking the therapist serializes concurrent bookings before conflict checking.
     await connection.execute('SELECT id FROM therapists WHERE id = ? FOR UPDATE', [therapistId]);
@@ -222,8 +224,8 @@ export async function createAppointment(body: AppointmentWriteBody, pool: Pool =
     await connection.execute(
       `INSERT INTO appointments
         (id, appointment_no, customer_id, order_id, therapist_id, date, time_slot, service,
-         service_sequence, service_total_times, status, area, remark)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+         service_sequence, service_total_times, status, is_backfill, area, remark)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [
         id,
         no,
@@ -235,13 +237,21 @@ export async function createAppointment(body: AppointmentWriteBody, pool: Pool =
         body.service || '',
         serviceSequence,
         serviceTotalTimes,
-        body.status || '待确认',
+        isBackfill ? '已完成' : (body.status || '待确认'),
+        isBackfill ? 1 : 0,
         body.area || null,
         body.remark || null,
       ]
     );
     await connection.commit();
-    return { id, no, serviceSequence, serviceTotalTimes };
+    return {
+      id,
+      no,
+      serviceSequence,
+      serviceTotalTimes,
+      status: isBackfill ? '已完成' : (body.status || '待确认'),
+      isBackfill,
+    };
   } catch (error) {
     await connection.rollback();
     throw error;
@@ -346,7 +356,7 @@ export async function updateAppointmentStatus(
     await connection.beginTransaction();
     const [rows] = await connection.execute(
       `SELECT a.id, a.customer_id, a.order_id, a.therapist_id, a.date, a.time_slot, a.service,
-              a.service_sequence, a.service_total_times, a.status,
+              a.service_sequence, a.service_total_times, a.status, a.is_backfill,
               a.progress_applied_at,
               EXISTS(SELECT 1 FROM service_records sr WHERE sr.appointment_id = a.id) AS has_service_record
        FROM appointments a WHERE a.id = ? OR a.appointment_no = ? LIMIT 1 FOR UPDATE`,
@@ -363,7 +373,9 @@ export async function updateAppointmentStatus(
       throw createError('该预约已完成并产生服务凭证，不能直接取消；如需纠偏请走冲销流程', 409);
     }
 
-    const applyProgress = status === '已完成' && !appointment.progress_applied_at;
+    const applyProgress = status === '已完成'
+      && !appointment.is_backfill
+      && !appointment.progress_applied_at;
     await connection.execute(
       `UPDATE appointments
        SET status = ?, progress_applied_at = CASE WHEN ? THEN NOW() ELSE progress_applied_at END
@@ -491,7 +503,7 @@ export async function synchronizeAppointmentOrderProgress(
   try {
     await connection.beginTransaction();
     const [rows] = await connection.execute(
-      `SELECT a.id AS appointment_id, a.customer_id, a.order_id,
+      `SELECT a.id AS appointment_id, a.customer_id, a.order_id, a.is_backfill,
               o.order_no, o.type, o.used_times, o.total_times
        FROM appointments a
        INNER JOIN orders o ON o.id = a.order_id
@@ -502,8 +514,10 @@ export async function synchronizeAppointmentOrderProgress(
     const row = (rows as Array<{
       appointment_id: string; customer_id: string; order_id: string;
       order_no: string | null; type: string | null; used_times: number; total_times: number;
+      is_backfill: number;
     }>)[0];
     if (!row) throw createError('预约未关联有效订单，无法同步服务次数', 409);
+    if (row.is_backfill) throw createError('补录预约不参与订单服务次数同步', 409);
     const usedTimes = Math.max(0, Number(row.used_times) || 0);
     const totalTimes = Math.max(1, Number(row.total_times) || 1);
     await connection.execute('UPDATE orders SET manual_progress_at = NOW() WHERE id = ?', [row.order_id]);
@@ -573,6 +587,7 @@ export async function synchronizeAllAppointmentOrderProgress(
         `SELECT id, status
          FROM appointments
          WHERE order_id = ?
+           AND is_backfill = 0
            AND status NOT IN ('已取消', '取消', '已冲销')
          ORDER BY date, time_slot, created_at, id
          FOR UPDATE`,

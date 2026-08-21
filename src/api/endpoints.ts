@@ -133,6 +133,8 @@ export interface Appointment {
   serviceSequence?: number | null;
   serviceTotalTimes?: number | null;
   status: string; rawStatus?: string;
+  /** 过去时间创建的历史补录；已完成但不累计订单服务次数。 */
+  isBackfill?: boolean;
   orderType?: '体验卡' | '套餐';
   area: string; remark: string;
   notifyStatus?: '待通知' | '需通知' | '已通知' | '延迟' | '遗漏' | null;
@@ -160,6 +162,8 @@ export const appointmentsApi = {
     no: string;
     serviceSequence?: number | null;
     serviceTotalTimes?: number | null;
+    status?: string;
+    isBackfill?: boolean;
   }>('/appointments', body),
   update: (id: string, body: Partial<Appointment>) =>
     api.put<{ message: string }>(`/appointments/${id}`, body),

@@ -145,6 +145,33 @@ test('createAppointment rolls back when the therapist period is already booked',
   assert.equal(pool.calls.at(-1), 'release');
 });
 
+test('createAppointment stores elapsed times as completed backfills without applying order progress', async () => {
+  const pool = fakePool([
+    [{ id: 'therapist-1' }],
+    [],
+    [{ id: 'customer-1' }],
+    [{ id: 'order-1', used_times: 3, total_times: 8, type: '套餐' }],
+    [],
+  ]);
+
+  const result = await createAppointment({
+    id: 'A-BACKFILL',
+    orderId: 'order-1',
+    customerId: 'customer-1',
+    therapistId: 'therapist-1',
+    date: '2020-01-01',
+    timeSlot: '09:00',
+    service: '骨盆修复',
+  }, pool);
+
+  assert.equal(result.status, '已完成');
+  assert.equal(result.isBackfill, true);
+  assert.equal(result.serviceSequence, 4);
+  assert.equal(pool.calls.some(call => String(call).includes('is_backfill')), true);
+  assert.equal(pool.calls.some(call => String(call).includes('UPDATE orders SET used_times')), false);
+  assert.equal(pool.calls.includes('commit'), true);
+});
+
 test('updateAppointment updates the selected appointment and excludes itself from conflicts', async () => {
   const pool = fakePool([
     [{
@@ -354,6 +381,7 @@ test('synchronizeAllAppointmentOrderProgress baselines package orders and update
   assert.deepEqual(result, { ordersUpdated: 1, appointmentsUpdated: 2 });
   assert.equal(pool.calls.some(call => String(call).includes("WHERE type = '套餐'")), true);
   assert.equal(pool.calls.some(call => String(call).includes("status NOT IN ('已取消', '取消', '已冲销')")), true);
+  assert.equal(pool.calls.some(call => String(call).includes('AND is_backfill = 0')), true);
   assert.equal(pool.calls.filter(call => String(call).includes('SET service_sequence = ?')).length, 2);
   assert.equal(pool.calls.some(call => String(call).includes('appointment_progress_syncs')), true);
   assert.equal(pool.calls.includes('commit'), true);

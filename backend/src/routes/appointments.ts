@@ -65,6 +65,7 @@ interface AppointmentListRow {
   service_total_times: number | null;
   order_total_times: number | null;
   status: string | null;
+  is_backfill: number | null;
   area: string | null;
   remark: string | null;
   order_type: string | null;
@@ -117,6 +118,7 @@ function mapRow(r: AppointmentListRow) {
       : Number(r.order_total_times),
     status: appointmentStatus(r.status),
     rawStatus: r.status || '',
+    isBackfill: Boolean(r.is_backfill),
     orderType: orderType(r.order_type),
     area: r.area || '',
     remark: r.remark || '',

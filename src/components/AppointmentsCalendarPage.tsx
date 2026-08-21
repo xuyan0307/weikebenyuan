@@ -488,6 +488,15 @@ function AppointmentCard({
       )}
       <div className="mb-0.5 font-semibold" style={truncateStyle} title={appt.customerName || '—'}>
         客户：{appt.customerName || '—'}
+        {appt.isBackfill && (
+          <span
+            data-appointment-backfill
+            className="ml-1 rounded px-1 py-0.5 text-[10px] font-semibold"
+            style={{ background: '#FEF3C7', color: '#B45309', border: '1px solid #FCD34D' }}
+          >
+            补录
+          </span>
+        )}
       </div>
       <div className="mb-0.5" style={{ opacity: 0.8, ...truncateStyle }} title={appt.advisorName || '—'}>
         客服：{appt.advisorName || '—'}
@@ -519,7 +528,7 @@ function AppointmentCard({
           className="mt-1 px-2 py-1 rounded text-xs font-medium text-center"
           style={{ background: '#DCFCE7', color: '#15803D', border: '1px solid #86EFAC' }}
         >
-          已完成服务
+          {appt.isBackfill ? '补录 · 已完成服务' : '已完成服务'}
         </div>
       )}
       {canComplete && (
@@ -1037,6 +1046,9 @@ function CreateModal({
   const currentUsedTimes = selectedOrder
     ? (localOrderUsedTimes[selectedOrder.id] ?? selectedOrder.usedTimes)
     : 0;
+  const selectedTimeIsBackfill = Boolean(
+    selectedDate && selectedSlot && isAppointmentTimePast(selectedDate, startHour, startMin)
+  );
 
   useEffect(() => {
     if (!selectedOrder || !isPackageOrder) {
@@ -1050,7 +1062,7 @@ function CreateModal({
 
   function isSlotFree(date: string, slot: SlotLabel): boolean {
     const slotDefinition = TIME_SLOTS.find(item => item.label === slot);
-    if (!slotDefinition || isSlotExpired(date, slotDefinition)) return false;
+    if (!slotDefinition) return false;
     const key = slotKeyFor(therapistId, date, slot);
     const status = slotStatus[key] ?? '空闲';
     const hasAppt = localAppts.some(a =>
@@ -1064,6 +1076,9 @@ function CreateModal({
 
   function firstAvailableTime(date: string, slot: (typeof TIME_SLOTS)[number]): { hour: string; minute: string } | null {
     const hours = getHourOptions(slot.label);
+    if (isSlotExpired(date, slot)) {
+      return { hour: hours[0], minute: getMinuteOptions(slot.label, hours[0])[0] };
+    }
     for (const hour of hours) {
       for (const minute of getMinuteOptions(slot.label, hour)) {
         if (!isAppointmentTimePast(date, hour, minute)) return { hour, minute };
@@ -1093,10 +1108,7 @@ function CreateModal({
       toast.error('客户档案尚未配置服务项目，请先到订单列表补充后再预约');
       return;
     }
-    if (isAppointmentTimePast(selectedDate, startHour, startMin)) {
-      toast.error('已经过去的时间不能预约，请重新选择');
-      return;
-    }
+    const isBackfill = isAppointmentTimePast(selectedDate, startHour, startMin);
     const totalTimes = Math.max(1, Number(selectedOrder.totalTimes) || 1);
     const serviceSequence = Number(serviceSequenceInput);
     if (isPackageOrder && (!Number.isInteger(serviceSequence) || serviceSequence < 1 || serviceSequence > totalTimes)) {
@@ -1118,7 +1130,8 @@ function CreateModal({
       service,
       serviceSequence: isPackageOrder ? serviceSequence : null,
       serviceTotalTimes: isPackageOrder ? totalTimes : null,
-      status: '待确认' as ApptStatus,
+      status: (isBackfill ? '已完成' : '待确认') as ApptStatus,
+      isBackfill,
       area,
       remark,
     };
@@ -1134,7 +1147,7 @@ function CreateModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center transition-opacity duration-200"
+      className="fixed inset-0 z-[100] flex items-center justify-center transition-opacity duration-200"
       style={{
         background: 'rgba(0,0,0,0.45)',
         opacity: visible ? 1 : 0,
@@ -1345,7 +1358,7 @@ function CreateModal({
                     <div>
                       <div className="text-sm font-medium text-foreground">选择时间（仅空闲时段可选）</div>
                       <div className="text-xs mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
-                        可预约本周和下一周，以周为单位切换
+                        过去时间可用于补录；补录将直接完成且不累计订单服务次数
                       </div>
                     </div>
                     <div className="flex items-center rounded-lg p-1" style={{ background: 'var(--muted)', border: '1px solid var(--border)' }}>
@@ -1399,7 +1412,9 @@ function CreateModal({
                                     style={isSel
                                       ? { background: 'var(--brand)', color: '#fff', border: '2px solid var(--brand)' }
                                       : free
-                                        ? { background: '#F0FDF4', color: '#16A34A', border: '1px solid #86EFAC', cursor: 'pointer' }
+                                        ? expired
+                                          ? { background: '#FFFBEB', color: '#B45309', border: '1px solid #FCD34D', cursor: 'pointer' }
+                                          : { background: '#F0FDF4', color: '#16A34A', border: '1px solid #86EFAC', cursor: 'pointer' }
                                         : { background: 'var(--muted)', color: 'var(--muted-foreground)', border: '1px solid var(--border)', cursor: 'not-allowed', opacity: 0.45 }
                                     }
                                     onClick={() => {
@@ -1412,7 +1427,7 @@ function CreateModal({
                                       setStartMin(firstTime.minute);
                                     }}
                                   >
-                                    {expired ? '已过期' : free ? '空闲' : '占用'}
+                                    {free ? (expired ? '补录' : '空闲') : '占用'}
                                   </button>
                                 </td>
                               );
@@ -1432,21 +1447,10 @@ function CreateModal({
                       className="rounded-lg px-3 py-2 text-sm outline-none"
                       style={{ border: '1px solid var(--border)', background: 'var(--muted)', color: 'var(--foreground)' }}
                       value={startHour}
-                      onChange={e => {
-                        const hour = e.target.value;
-                        setStartHour(hour);
-                        if (selectedDate && isAppointmentTimePast(selectedDate, hour, startMin)) {
-                          const minute = getMinuteOptions(selectedSlot, hour).find(value => !isAppointmentTimePast(selectedDate, hour, value));
-                          if (minute) setStartMin(minute);
-                        }
-                      }}
+                      onChange={e => setStartHour(e.target.value)}
                     >
                       {(selectedSlot ? getHourOptions(selectedSlot as SlotLabel) : ['09']).map(h => (
-                        <option
-                          key={h}
-                          value={h}
-                          disabled={selectedDate ? getMinuteOptions(selectedSlot, h).every(m => isAppointmentTimePast(selectedDate, h, m)) : false}
-                        >
+                        <option key={h} value={h}>
                           {h}时
                         </option>
                       ))}
@@ -1459,11 +1463,7 @@ function CreateModal({
                       onChange={e => setStartMin(e.target.value)}
                     >
                       {getMinuteOptions(selectedSlot, startHour).map(m => (
-                        <option
-                          key={m}
-                          value={m}
-                          disabled={selectedDate ? isAppointmentTimePast(selectedDate, startHour, m) : false}
-                        >
+                        <option key={m} value={m}>
                           {m}分
                         </option>
                       ))}
@@ -1475,6 +1475,19 @@ function CreateModal({
                     )}
                   </div>
                 </div>
+
+                {selectedTimeIsBackfill && (
+                  <div
+                    data-backfill-warning
+                    className="rounded-xl px-4 py-3 text-sm"
+                    style={{ background: '#FFFBEB', color: '#92400E', border: '1px solid #FCD34D' }}
+                  >
+                    <div className="font-semibold">历史服务补录</div>
+                    <div className="mt-1 text-xs">
+                      保存后将标记为“补录”，服务状态直接设为“已完成服务”，不会叠加到订单列表的已服务次数。
+                    </div>
+                  </div>
+                )}
 
                 {/* Remark */}
                 <div>
@@ -1788,11 +1801,15 @@ export default function AppointmentsCalendarPage() {
         _id: created.id,
         serviceSequence: created.serviceSequence ?? newAppt.serviceSequence,
         serviceTotalTimes: created.serviceTotalTimes ?? newAppt.serviceTotalTimes,
+        status: created.status ?? newAppt.status,
+        isBackfill: created.isBackfill ?? newAppt.isBackfill,
       };
       setLocalAppts(prev => prev.some(appointment => appointment.id === persisted.id) ? prev : [persisted, ...prev]);
 
       setShowCreateModal(false);
-      toast.success(`已为「${newAppt.customerName}」创建预约`);
+      toast.success(newAppt.isBackfill
+        ? `已为「${newAppt.customerName}」补录历史服务，订单次数未变更`
+        : `已为「${newAppt.customerName}」创建预约`);
       if (returnToOrderEditor) {
         setReturnToOrderEditor(false);
         setActivePage('orders-list');
@@ -1885,7 +1902,7 @@ export default function AppointmentsCalendarPage() {
 
   async function handleSyncAllOrderProgress() {
     if (progressActionSaving) return;
-    const confirmed = window.confirm('将以套餐订单列表当前服务次数建立新基线：已完成预约直接同步当前次数，未完成预约按当前次数+1更新；已取消和已冲销记录不变。是否继续？');
+    const confirmed = window.confirm('将以套餐订单列表当前服务次数建立新基线：已完成预约直接同步当前次数，未完成预约按当前次数+1更新；补录、已取消和已冲销记录不变。是否继续？');
     if (!confirmed) return;
     setProgressActionSaving(true);
     try {
@@ -2343,6 +2360,7 @@ export default function AppointmentsCalendarPage() {
           ['服务项目', detailTarget.service || '—'],
           ['业务类型', detailBusinessType],
           ...(detailIsPackage ? [['服务次数', appointmentProgressLabel(detailSequence, detailTotal)]] : []),
+          ...(detailTarget.isBackfill ? [['记录类型', '补录（不累计订单服务次数）']] : []),
           ['预约状态', detailTarget.status || '—'],
           ['备注', detailTarget.remark || '—'],
         ];
@@ -2368,7 +2386,7 @@ export default function AppointmentsCalendarPage() {
                 ))}
               </div>
               <div className="px-5 py-4 flex flex-wrap justify-end gap-2" style={{ borderTop: '1px solid var(--border)' }}>
-                {canManageProgress && detailIsPackage && detailTarget.status !== '已冲销' && (
+                {canManageProgress && detailIsPackage && !detailTarget.isBackfill && detailTarget.status !== '已冲销' && (
                   <button type="button" disabled={progressActionSaving} className="px-4 py-2 rounded-lg text-sm hover:opacity-90 disabled:opacity-50" style={{ color: 'var(--brand)', border: '1px solid var(--brand)' }} onClick={() => handleSyncOrderProgress(detailTarget)}>
                     同步订单次数
                   </button>
