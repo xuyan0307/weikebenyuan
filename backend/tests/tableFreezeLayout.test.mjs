@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { orderServiceRoleDisplay } from '../../src/utils/orderServiceRoleDisplay.ts';
+import { packageServiceStatusText, servicePersonStatus } from '../../src/utils/servicePersonStatus.ts';
+import {
+  matchesOrderServiceStatuses,
+  matchesOrderTherapists,
+  orderServiceFilterStatus,
+  orderTherapistFilterValue,
+} from '../../src/utils/orderListFilters.ts';
+import { matchesAppointmentCities } from '../../src/utils/appointmentCalendarFilters.ts';
 
 const customersSource = readFileSync(new URL('../../src/components/CustomersListPage.tsx', import.meta.url), 'utf8');
 const ordersSource = readFileSync(new URL('../../src/components/OrdersListPage.tsx', import.meta.url), 'utf8');
@@ -22,11 +31,106 @@ test('customer table freezes only acquisition time/name and places id after advi
 
 test('order table freezes only purchase time/name and places id after advisor', () => {
   assertSharedFreezeContract(ordersSource, '购卡时间');
-  assert.match(ordersSource, /<th>归属客服<\/th>\s*<th[^>]*>客户ID<\/th>\s*<th>技师<\/th>/);
+  assert.match(ordersSource, /<th>归属客服<\/th>\s*<th[^>]*>客户ID<\/th>\s*<th>产康师<\/th>/);
+  assert.match(ordersSource, /<th>产康师<\/th>[\s\S]*?产康服务[\s\S]*?<th>运动康复师<\/th>[\s\S]*?运动服务[\s\S]*?<th>体质调理师<\/th>[\s\S]*?调理服务/);
   assert.match(ordersSource, /zIndex: 12,[\s\S]*?function STICKY_RIGHT_TD_STYLE[\s\S]*?zIndex: 10,/,
     'right-frozen action pane must render above horizontally scrolled table content');
   assert.match(ordersSource, /STICKY_RIGHT_TD_STYLE\('var\(--card\)'\)/,
     'summary-row action cell must use an opaque background');
+});
+
+test('order service roles show each assigned specialist and independent progress', () => {
+  const order = {
+    type: '套餐',
+    usedTimes: 7,
+    totalTimes: 10,
+    servicePeople: {
+      sp1: { type: '产康师', assign: '吴小玲', usedTimes: '7', totalTimes: '10' },
+      sp2: { type: '运动康复师', assign: '陈康复', usedTimes: '2', totalTimes: '4' },
+      sp3: { type: '调理师', assign: '无', usedTimes: '0', totalTimes: '3' },
+    },
+  };
+  assert.deepEqual(orderServiceRoleDisplay(order, '产康师'), { name: '吴小玲', count: '7/10', progress: '7/10', isPackage: true, usedTimes: 7, totalTimes: 10 });
+  assert.deepEqual(orderServiceRoleDisplay(order, '运动康复师'), { name: '陈康复', count: '2/4', progress: '2/4', isPackage: true, usedTimes: 2, totalTimes: 4 });
+  assert.deepEqual(orderServiceRoleDisplay(order, '调理师'), { name: '—', count: '—', progress: '—', isPackage: true, usedTimes: 0, totalTimes: 0 });
+});
+
+test('order service role display supports legacy labels and experience-card status', () => {
+  const order = {
+    type: '体验卡',
+    servicePeople: JSON.stringify({
+      sp3: { type: '体质调理师', assign: '林调理', usedTimes: '1', totalTimes: '1' },
+    }),
+  };
+  assert.deepEqual(orderServiceRoleDisplay(order, '调理师'), { name: '林调理', count: '1/1', progress: '已服务', isPackage: false, usedTimes: 1, totalTimes: 1 });
+  assert.deepEqual(orderServiceRoleDisplay({ type: '套餐', servicePeople: '{invalid' }, '产康师'), { name: '—', count: '—', progress: '—', isPackage: true, usedTimes: 0, totalTimes: 0 });
+  assert.match(ordersSource, /!service\.isPackage[\s\S]*?service\.status === '已服务'/,
+    'experience cards must remain a status-only display without a count line');
+});
+
+test('service status and order list interval use each specialist completion time', () => {
+  const now = new Date('2026-08-23T10:00:00+08:00');
+  assert.deepEqual(
+    servicePersonStatus(4, 8, '2026-08-18T10:00:00+08:00', now),
+    { label: '服务中', detail: '间隔5天' },
+  );
+  assert.deepEqual(servicePersonStatus(8, 8, '2026-08-18T10:00:00+08:00', now), { label: '服务完结', detail: '' });
+  assert.deepEqual(servicePersonStatus(0, 8, '', now), { label: '未服务', detail: '' });
+  assert.equal(packageServiceStatusText(4, 8, '2026-08-18T10:00:00+08:00', now), '间隔5天');
+  assert.equal(packageServiceStatusText(8, 8, '2026-08-18T10:00:00+08:00', now), '服务完结');
+  assert.equal(packageServiceStatusText(0, 8, '', now), '未服务');
+});
+
+test('order editor restricts therapist options by discipline and shows independent status', () => {
+  assert.match(ordersSource, /selectableTypes=\{\['产康师'\]\}/);
+  assert.match(ordersSource, /selectableTypes=\{\['运动康复师'\]\}/);
+  assert.match(ordersSource, /selectableTypes=\{\['产康师', '调理师'\]\}/);
+  assert.match(ordersSource, /服务总次数[\s\S]*?已服务次数[\s\S]*?服务状态/);
+  assert.match(ordersSource, /lastCompletedAtFor\(form\.servicePerson[123]\.assign\)/);
+  assert.match(ordersSource, /data-order-service-count[\s\S]*?data-order-service-status/);
+  assert.match(ordersSource, /data-order-service-cell className="h-8 flex flex-col/,
+    'order service count/status must share a compact fixed-height cell');
+});
+
+test('order list city filter groups districts into their parent city', () => {
+  assert.equal(matchesAppointmentCities('厦门市思明区湖滨南路', ['厦门']), true);
+  assert.equal(matchesAppointmentCities('湖里区金山街道', ['厦门']), true);
+  assert.equal(matchesAppointmentCities('晋江市陈埭镇', ['厦门']), false);
+  assert.match(ordersSource, /matchesAppointmentCities\(o\.area, fArea\)/);
+});
+
+test('order therapist filter keeps discipline and therapist selections independent', () => {
+  const order = {
+    type: '套餐',
+    servicePeople: {
+      sp1: { type: '产康师', assign: '徐燕玲', usedTimes: '2', totalTimes: '8' },
+      sp2: { type: '运动康复师', assign: '陈康复', usedTimes: '0', totalTimes: '4' },
+      sp3: { type: '调理师', assign: '徐燕玲', usedTimes: '1', totalTimes: '3' },
+    },
+  };
+  assert.equal(matchesOrderTherapists(order, [orderTherapistFilterValue('产康师', '徐燕玲')]), true);
+  assert.equal(matchesOrderTherapists(order, [orderTherapistFilterValue('体质调理师', '徐燕玲')]), true);
+  assert.equal(matchesOrderTherapists(order, [orderTherapistFilterValue('运动康复师', '徐燕玲')]), false);
+  assert.equal(matchesOrderTherapists(order, [orderTherapistFilterValue('运动康复师', '陈康复')]), true);
+  assert.match(ordersSource, /group: label/);
+});
+
+test('order service filter exposes mutually exclusive progress states', () => {
+  const packageOrder = (usedTimes, totalTimes = 8) => ({
+    type: '套餐',
+    servicePeople: { sp1: { type: '产康师', assign: '徐燕玲', usedTimes, totalTimes } },
+  });
+  assert.equal(orderServiceFilterStatus(packageOrder(0)), '未服务');
+  assert.equal(orderServiceFilterStatus(packageOrder(3)), '服务中');
+  assert.equal(orderServiceFilterStatus(packageOrder(8)), '已服务');
+  assert.equal(orderServiceFilterStatus({
+    type: '体验卡',
+    servicePeople: { sp1: { type: '产康师', assign: '徐燕玲', usedTimes: 1, totalTimes: 1 } },
+  }), '已服务');
+  assert.equal(matchesOrderServiceStatuses(packageOrder(3), ['未服务', '服务中']), true);
+  assert.equal(matchesOrderServiceStatuses(packageOrder(8), ['未服务', '服务中']), false);
+  assert.match(ordersSource, /label="服务"[\s\S]*?SERVICE_STATUS_FILTER_OPTIONS/);
+  assert.doesNotMatch(ordersSource, /allSelectedLabel="跟进时间 全选"/);
 });
 
 test('customer areas show two characters while retaining the full hover value', () => {

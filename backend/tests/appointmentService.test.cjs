@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   createAppointment,
+  assignedServicePersonProgress,
   decrementAssignedServicePeople,
   getSlotPeriod,
   isAppointmentTimePast,
@@ -14,6 +15,23 @@ const {
   updateAppointment,
   updateAppointmentStatus,
 } = require('../dist/services/appointmentService');
+
+test('assigned service progress keeps each therapist total and used count independent', () => {
+  const people = {
+    sp1: { assign: '产康甲', usedTimes: '7', totalTimes: '8' },
+    sp2: { assign: '运动乙', usedTimes: '2', totalTimes: '5' },
+    sp3: { assign: '调理丙', usedTimes: '4', totalTimes: '4' },
+  };
+  assert.deepEqual(assignedServicePersonProgress(people, '产康甲', 0, 1), {
+    matched: true, key: 'sp1', usedTimes: 7, totalTimes: 8,
+  });
+  assert.deepEqual(assignedServicePersonProgress(people, '运动乙', 0, 1), {
+    matched: true, key: 'sp2', usedTimes: 2, totalTimes: 5,
+  });
+  assert.deepEqual(assignedServicePersonProgress(people, '调理丙', 0, 1), {
+    matched: true, key: 'sp3', usedTimes: 4, totalTimes: 4,
+  });
+});
 
 test('getSlotPeriod maps booking times to the configured three schedule periods', () => {
   assert.equal(getSlotPeriod('08:00'), 'morning');
@@ -141,7 +159,7 @@ test('createAppointment rolls back when the therapist period is already booked',
   );
   assert.equal(pool.calls.includes('commit'), false);
   assert.equal(pool.calls.includes('rollback'), true);
-  assert.equal(pool.calls.some(call => String(call).includes("status NOT IN ('已取消', '取消', '已冲销')")), true);
+  assert.equal(pool.calls.some(call => /(?:a\.)?status NOT IN \('已取消', '取消', '已冲销'\)/.test(String(call))), true);
   assert.equal(pool.calls.at(-1), 'release');
 });
 
@@ -380,8 +398,8 @@ test('synchronizeAllAppointmentOrderProgress baselines package orders and update
   );
   assert.deepEqual(result, { ordersUpdated: 1, appointmentsUpdated: 2 });
   assert.equal(pool.calls.some(call => String(call).includes("WHERE type = '套餐'")), true);
-  assert.equal(pool.calls.some(call => String(call).includes("status NOT IN ('已取消', '取消', '已冲销')")), true);
-  assert.equal(pool.calls.some(call => String(call).includes('AND is_backfill = 0')), true);
+  assert.equal(pool.calls.some(call => /(?:a\.)?status NOT IN \('已取消', '取消', '已冲销'\)/.test(String(call))), true);
+  assert.equal(pool.calls.some(call => /AND (?:a\.)?is_backfill = 0/.test(String(call))), true);
   assert.equal(pool.calls.filter(call => String(call).includes('SET service_sequence = ?')).length, 2);
   assert.equal(pool.calls.some(call => String(call).includes('appointment_progress_syncs')), true);
   assert.equal(pool.calls.includes('commit'), true);

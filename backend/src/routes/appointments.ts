@@ -65,6 +65,7 @@ interface AppointmentListRow {
   service_total_times: number | null;
   order_total_times: number | null;
   status: string | null;
+  progress_applied_at: string | Date | null;
   is_backfill: number | null;
   area: string | null;
   remark: string | null;
@@ -118,6 +119,7 @@ function mapRow(r: AppointmentListRow) {
       : Number(r.order_total_times),
     status: appointmentStatus(r.status),
     rawStatus: r.status || '',
+    completedAt: r.progress_applied_at ? new Date(r.progress_applied_at).toISOString() : null,
     isBackfill: Boolean(r.is_backfill),
     orderType: orderType(r.order_type),
     area: r.area || '',

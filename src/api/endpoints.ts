@@ -133,6 +133,8 @@ export interface Appointment {
   serviceSequence?: number | null;
   serviceTotalTimes?: number | null;
   status: string; rawStatus?: string;
+  /** Exact time the service was confirmed complete. */
+  completedAt?: string | null;
   /** 过去时间创建的历史补录；已完成但不累计订单服务次数。 */
   isBackfill?: boolean;
   orderType?: '体验卡' | '套餐';

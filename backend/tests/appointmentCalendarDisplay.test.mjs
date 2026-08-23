@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { isOrderAssignedToTherapist } from '../../src/utils/appointmentTherapistOrders.ts';
+import { isOrderAssignedToTherapist, orderTherapistServiceProgress } from '../../src/utils/appointmentTherapistOrders.ts';
 
 const calendarSource = await readFile(
   new URL('../../src/components/AppointmentsCalendarPage.tsx', import.meta.url),
@@ -49,6 +49,16 @@ test('new appointment customer picker is limited to the selected therapist assig
     servicePeople: JSON.stringify({ sp1: { assign: '徐燕玲' } }),
   }, '徐燕玲'), true);
   assert.equal(isOrderAssignedToTherapist({ servicePeople: '{invalid' }, '徐燕玲'), false);
+  assert.deepEqual(orderTherapistServiceProgress({
+    usedTimes: 7,
+    totalTimes: 8,
+    servicePeople: {
+      sp1: { assign: '徐燕玲', usedTimes: '7', totalTimes: '8' },
+      sp2: { assign: '陈康复', usedTimes: '2', totalTimes: '5' },
+    },
+  }, '陈康复'), { matched: true, usedTimes: 2, totalTimes: 5 });
+  assert.match(calendarSource, /orderTherapistServiceProgress/);
+  assert.match(calendarSource, /currentTotalTimes/);
 });
 
 test('calendar hides cancelled appointments while appointment list keeps the history', () => {
@@ -114,7 +124,7 @@ test('historical appointment creation is rendered above the sticky toolbar and m
   assert.match(appointmentServiceSource, /const isBackfill = isAppointmentTimePast\(date, timeSlot\)/);
   assert.match(appointmentServiceSource, /isBackfill \? '已完成'/);
   assert.match(appointmentServiceSource, /!appointment\.is_backfill/);
-  assert.match(appointmentServiceSource, /AND is_backfill = 0/);
+  assert.match(appointmentServiceSource, /AND (?:a\.)?is_backfill = 0/);
   assert.match(migrationSource, /030_appointment_backfill_marker/);
 });
 

@@ -37,7 +37,7 @@ import {
   appointmentProgressLabel,
   formatAppointmentDistrict,
 } from '../utils/appointmentCalendarDisplay';
-import { isOrderAssignedToTherapist } from '../utils/appointmentTherapistOrders';
+import { isOrderAssignedToTherapist, orderTherapistServiceProgress } from '../utils/appointmentTherapistOrders';
 
 type ApptStatus = '待确认' | '已确认' | '已取消' | '已完成' | '已冲销';
 
@@ -1047,9 +1047,15 @@ function CreateModal({
   const serviceRecordMissing = serviceRecordRequired && !syncedService;
 
   // Current used times for selected order
-  const currentUsedTimes = selectedOrder
-    ? (localOrderUsedTimes[selectedOrder.id] ?? selectedOrder.usedTimes)
-    : 0;
+  const selectedTherapistProgress = selectedOrder
+    ? orderTherapistServiceProgress(
+      selectedOrder,
+      therapist?.name || '',
+      localOrderUsedTimes[selectedOrder.id] ?? selectedOrder.usedTimes
+    )
+    : { matched: false, usedTimes: 0, totalTimes: 1 };
+  const currentUsedTimes = selectedTherapistProgress.usedTimes;
+  const currentTotalTimes = selectedTherapistProgress.totalTimes;
   const selectedTimeIsBackfill = Boolean(
     selectedDate && selectedSlot && isAppointmentTimePast(selectedDate, startHour, startMin)
   );
@@ -1059,10 +1065,10 @@ function CreateModal({
       setServiceSequenceInput('');
       return;
     }
-    const total = Math.max(1, Number(selectedOrder.totalTimes) || 1);
+    const total = currentTotalTimes;
     const completed = Math.max(0, Number(currentUsedTimes) || 0);
     setServiceSequenceInput(String(Math.min(total, completed + 1)));
-  }, [selectedOrderId, isPackageOrder, currentUsedTimes, selectedOrder?.totalTimes]);
+  }, [selectedOrderId, isPackageOrder, currentUsedTimes, currentTotalTimes]);
 
   function isSlotFree(date: string, slot: SlotLabel): boolean {
     const slotDefinition = TIME_SLOTS.find(item => item.label === slot);
@@ -1113,7 +1119,7 @@ function CreateModal({
       return;
     }
     const isBackfill = isAppointmentTimePast(selectedDate, startHour, startMin);
-    const totalTimes = Math.max(1, Number(selectedOrder.totalTimes) || 1);
+    const totalTimes = currentTotalTimes;
     const serviceSequence = Number(serviceSequenceInput);
     if (isPackageOrder && (!Number.isInteger(serviceSequence) || serviceSequence < 1 || serviceSequence > totalTimes)) {
       toast.error(`本次服务次数应填写 1-${totalTimes} 之间的整数`);
@@ -1297,7 +1303,7 @@ function CreateModal({
                     )}
                     <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
                       {selectedOrder.type} · {selectedOrder.payStatus}
-                      {isPackageOrder && ` · 已完成${currentUsedTimes}次/共${selectedOrder.totalTimes}次`}
+                      {isPackageOrder && ` · 已完成${currentUsedTimes}次/共${currentTotalTimes}次`}
                     </span>
                   </div>
                 </div>
@@ -1319,7 +1325,7 @@ function CreateModal({
                         <input
                           type="number"
                           min={1}
-                          max={Math.max(1, Number(selectedOrder.totalTimes) || 1)}
+                          max={currentTotalTimes}
                           step={1}
                           value={serviceSequenceInput}
                           onChange={event => setServiceSequenceInput(event.target.value)}
@@ -1327,7 +1333,7 @@ function CreateModal({
                           style={{ width: 72, border: '1px solid #93C5FD', background: 'var(--card)', color: '#1D4ED8' }}
                           aria-label="本次服务序号"
                         />
-                        <span className="text-sm text-foreground">次 / 共 {selectedOrder.totalTimes} 次</span>
+                        <span className="text-sm text-foreground">次 / 共 {currentTotalTimes} 次</span>
                       </div>
                     </div>
                   </div>

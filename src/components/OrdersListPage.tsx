@@ -36,6 +36,15 @@ import {
   saveOrderAppointmentDraft,
 } from '../utils/orderAppointmentFlow';
 import { compactAreaLabel } from '../utils/compactArea';
+import { orderServiceRoleDisplay } from '../utils/orderServiceRoleDisplay';
+import { packageServiceStatusText, servicePersonStatus } from '../utils/servicePersonStatus';
+import { matchesAppointmentCities } from '../utils/appointmentCalendarFilters';
+import {
+  matchesOrderServiceStatuses,
+  matchesOrderTherapists,
+  ORDER_THERAPIST_FILTER_ROLES,
+  orderTherapistFilterValue,
+} from '../utils/orderListFilters';
 
 /* ─── Types ─────────────────────────────────────────── */
 type NewPayStatus = '已支付' | '待支付' | '已付定金' | '已退款';
@@ -377,6 +386,11 @@ const FOLLOW_TIME_FILTER_OPTIONS: FilterOption[] = [
 ];
 const CONTRACT_STATUS_FILTER_OPTIONS: FilterOption[] =
   ORDER_CONTRACT_FILTER_VALUES.map(value => ({ value, label: value }));
+const SERVICE_STATUS_FILTER_OPTIONS: FilterOption[] = [
+  { value: '未服务', label: '未服务' },
+  { value: '服务中', label: '服务中' },
+  { value: '已服务', label: '已服务' },
+];
 
 function matchesFollowTimeFilter(value: string, selected: string[]) {
   return matchesFollowTime(value, selected, {
@@ -870,9 +884,10 @@ function ServiceItemsPicker({ value, onChange }: ServiceItemsPickerProps) {
 
 /* ─── Service Person Row ─────────────────────────────── */
 interface ServicePersonRowProps {
-  label: TherapistType;
+  label: '产康师' | '运动康复师' | '调理师' | '体质调理师';
   value: ServicePerson;
   onChange: (v: ServicePerson) => void;
+  selectableTypes: TherapistType[];
   totalTimes?: string;
   onTotalTimesChange?: (value: string) => void;
   usedTimes?: string;
@@ -880,6 +895,7 @@ interface ServicePersonRowProps {
   isExperience?: boolean;
   canEditProgress?: boolean;
   assignmentDisabled?: boolean;
+  lastCompletedAt?: string;
 }
 
 function isAssignedServicePerson(person?: ServicePerson) {
@@ -914,6 +930,7 @@ function ServicePersonRow({
   label,
   value,
   onChange,
+  selectableTypes,
   totalTimes = '1',
   onTotalTimesChange,
   usedTimes = '0',
@@ -921,16 +938,21 @@ function ServicePersonRow({
   isExperience = false,
   canEditProgress = false,
   assignmentDisabled = false,
+  lastCompletedAt = '',
 }: ServicePersonRowProps) {
   const therapistsQ = useTherapists({ page: 1, pageSize: 1000 });
   const THERAPISTS: any[] = therapistsQ.data?.data ?? [];
-  const typeTherapists = THERAPISTS.filter(t => t.status === '在职');
-  const assignOptions = ['待分配', '无', ...typeTherapists.map(t => t.name)];
+  const typeTherapists = THERAPISTS.filter(t =>
+    t.status === '在职' && selectableTypes.includes(t.therapistType as TherapistType)
+  );
+  const assignOptions = ['待分配', '无', ...Array.from(new Set(typeTherapists.map(t => t.name)))];
   const isUnassigned = !isAssignedServicePerson(value);
+  const status = servicePersonStatus(usedTimes, totalTimes, lastCompletedAt);
+  const statusText = status.label === '服务中' ? status.detail : status.label;
 
   return (
     <div className="flex items-center gap-3 py-2" style={{ borderBottom: '1px solid var(--border)' }}>
-      <span className="text-sm font-medium w-20 flex-shrink-0" style={{ color: 'var(--foreground)' }}>{label}</span>
+      <span className="text-sm font-medium w-24 flex-shrink-0" style={{ color: 'var(--foreground)' }}>{label === '调理师' ? '体质调理师' : label}</span>
       <select
         className="text-sm rounded-lg px-2 py-1.5 outline-none flex-1"
         style={{ background: 'var(--muted)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
@@ -984,6 +1006,17 @@ function ServicePersonRow({
             onChange={e => onUsedTimesChange?.(e.target.value)}
             disabled={!canEditProgress}
           />}
+        </div>
+      )}
+      {!isExperience && (
+        <div className="w-36 flex-shrink-0">
+          {isUnassigned ? (
+            <span className="text-sm" style={{ color: 'var(--muted-foreground)' }}>—</span>
+          ) : (
+            <div className="text-xs font-medium leading-tight" style={{ color: status.label === '服务完结' ? 'var(--success)' : status.label === '未服务' ? 'var(--muted-foreground)' : 'var(--brand)' }}>
+              {statusText}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -1491,6 +1524,22 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
   const [uploadingRecordId, setUploadingRecordId] = useState('');
   const customerAppointments = appointmentsQuery.data?.data ?? [];
   const serviceRecords = serviceRecordsQuery.data?.data ?? [];
+  const currentOrderIds = new Set(
+    [editOrderId, order?._id, order?.id].map(value => String(value || '').trim()).filter(Boolean)
+  );
+  const lastCompletedAtFor = (therapistName: string): string => {
+    if (!therapistName || therapistName === '待分配' || therapistName === '无') return '';
+    return customerAppointments
+      .filter(item =>
+        item.status === '已完成'
+        && !item.isBackfill
+        && item.therapistName === therapistName
+        && (!item.orderId || currentOrderIds.has(String(item.orderId)))
+      )
+      .map(item => item.completedAt || `${item.date}T${String(item.timeSlot || '').slice(0, 5)}:00`)
+      .filter(Boolean)
+      .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0] || '';
+  };
   const nextAppointment = [...customerAppointments]
     .filter(item => item.status !== '已完成' && item.status !== '已取消')
     .sort((a, b) => `${a.date} ${a.timeSlot}`.localeCompare(`${b.date} ${b.timeSlot}`))[0];
@@ -2822,14 +2871,16 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
                     <div className="text-xs mb-3" style={{ color: 'var(--muted-foreground)' }}>服务人员、排期及服务照片均归属于当前订单阶段。</div>
                     <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
                       <div className="px-4 py-2 text-xs font-medium flex gap-3" style={{ background: 'var(--muted)', color: 'var(--muted-foreground)', borderBottom: '1px solid var(--border)' }}>
-                        <span className="w-20">服务类型</span>
+                        <span className="w-24">服务类型</span>
                         <span className="flex-1">分配人员</span>
                         <span className="w-28">{form.orderType === '体验卡' ? '服务状态' : '服务总次数'}</span>
                         {form.orderType !== '体验卡' && <span className="w-28">已服务次数</span>}
+                        {form.orderType !== '体验卡' && <span className="w-36">服务状态</span>}
                       </div>
                       <div className="px-4">
                         <ServicePersonRow
                           label="产康师"
+                          selectableTypes={['产康师']}
                           value={form.servicePerson1}
                           onChange={v => {
                             set('servicePerson1', v);
@@ -2842,6 +2893,7 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
                           isExperience={form.orderType === '体验卡'}
                           canEditProgress={canEditServiceProgress}
                           assignmentDisabled={isExperienceFrozen}
+                          lastCompletedAt={lastCompletedAtFor(form.servicePerson1.assign)}
                           onTotalTimesChange={v => {
                             if (!canEditServiceProgress) return;
                             set('totalTimes', v);
@@ -2860,6 +2912,7 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
                         />
                         <ServicePersonRow
                           label="运动康复师"
+                          selectableTypes={['运动康复师']}
                           value={form.servicePerson2}
                           onChange={v => {
                             set('servicePerson2', v);
@@ -2872,6 +2925,7 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
                           isExperience={form.orderType === '体验卡'}
                           canEditProgress={canEditServiceProgress}
                           assignmentDisabled={isExperienceFrozen}
+                          lastCompletedAt={lastCompletedAtFor(form.servicePerson2.assign)}
                           onTotalTimesChange={v => {
                             if (!canEditServiceProgress) return;
                             set('servicePerson2', { ...form.servicePerson2, totalTimes: v });
@@ -2888,7 +2942,8 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
                           }}
                         />
                         <ServicePersonRow
-                          label="调理师"
+                          label="体质调理师"
+                          selectableTypes={['产康师', '调理师']}
                           value={form.servicePerson3}
                           onChange={v => {
                             set('servicePerson3', v);
@@ -2901,6 +2956,7 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
                           isExperience={form.orderType === '体验卡'}
                           canEditProgress={canEditServiceProgress}
                           assignmentDisabled={isExperienceFrozen}
+                          lastCompletedAt={lastCompletedAtFor(form.servicePerson3.assign)}
                           onTotalTimesChange={v => {
                             if (!canEditServiceProgress) return;
                             set('servicePerson3', { ...form.servicePerson3, totalTimes: v });
@@ -3286,6 +3342,11 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
                               <ServicePersonRow
                                 key={key}
                                 label={label}
+                                selectableTypes={key === 'sp1'
+                                  ? ['产康师']
+                                  : key === 'sp2'
+                                    ? ['运动康复师']
+                                    : ['产康师', '调理师']}
                                 value={person}
                                 onChange={value => updateExperienceSnapshotPerson(key, value)}
                                 usedTimes={person.usedTimes || '0'}
@@ -3473,22 +3534,6 @@ function getFollowDisplay(order: any): { status: string; date: string; task: str
   };
 }
 
-function serviceProgressText(order: any): string {
-  const used = Math.max(0, Number(order?.usedTimes) || 0);
-  const total = Math.max(1, Number(order?.totalTimes) || 1);
-  const people = order?.servicePeople || {};
-  const assignedPeople = ['sp1', 'sp2', 'sp3']
-    .map(key => people[key] as ServicePerson | undefined)
-    .filter(isAssignedServicePerson);
-  if (assignedPeople.length === 0) return '无';
-  if (order?.type === '套餐' || order?.isUpgrade) return `${used}/${total}`;
-  const hasPersonStatus = assignedPeople.some(person => person.usedTimes !== undefined);
-  const experienceUsed = hasPersonStatus
-    ? assignedPeople.some(person => Number(person.usedTimes) > 0)
-    : used > 0;
-  return experienceUsed ? '已服务' : '未服务';
-}
-
 /* ─── Main Page ──────────────────────────────────────── */
 export default function OrdersListPage() {
   const { currentUser } = useApp();
@@ -3531,6 +3576,7 @@ export default function OrdersListPage() {
   });
   const [fAdvisor, setFAdvisor] = useState<string[]>([]);
   const [fTherapist, setFTherapist] = useState<string[]>([]);
+  const [fServiceStatus, setFServiceStatus] = useState<string[]>([]);
 
   const isReadOnly = currentUser.role === 'finance';
   const canManageBulk = currentUser.role === 'superadmin' || currentUser.role === 'admin';
@@ -3544,9 +3590,11 @@ export default function OrdersListPage() {
     from: purchaseCustomRange.start,
     to: purchaseCustomRange.end,
   });
+  const orderListAppointmentsQ = useAppointments({ page: 1, pageSize: 2000 });
   const CUSTOMERS: any[] = customersQ.data?.data ?? [];
   const THERAPISTS: any[] = therapistsQ.data?.data ?? [];
   const ORDERS: any[] = ordersQ.data?.data ?? [];
+  const ORDER_LIST_APPOINTMENTS = orderListAppointmentsQ.data?.data ?? [];
   useEffect(() => {
     if (appointmentResumeAttemptedRef.current || !ordersQ.data) return;
     appointmentResumeAttemptedRef.current = true;
@@ -3602,23 +3650,30 @@ export default function OrdersListPage() {
     ...CUSTOMERS.map(c => c.advisor),
     ...enrichedOrders.map(o => o.advisor),
   ]);
-  const assignedTherapistNames = enrichedOrders.flatMap(o =>
-    getTherapistDisplay(o).split(/[，,、]/).map(name => name.trim()).filter(name => name && name !== '待分配')
+  const therapistNamesForRole = (label: '产康师' | '运动康复师' | '体质调理师') => {
+    const eligibleProfileNames = THERAPISTS
+      .filter(t => t.status === '在职' && (
+        label === '产康师'
+          ? t.therapistType === '产康师'
+          : label === '运动康复师'
+            ? t.therapistType === '运动康复师'
+            : t.therapistType === '产康师' || t.therapistType === '调理师' || t.therapistType === '体质调理师'
+      ))
+      .map(t => t.name);
+    const serviceRole = ORDER_THERAPIST_FILTER_ROLES.find(item => item.label === label)!.serviceRole;
+    const assignedNames = enrichedOrders
+      .map(order => orderServiceRoleDisplay(order, serviceRole).name)
+      .filter(name => name !== '—');
+    return Array.from(new Set([...eligibleProfileNames, ...assignedNames]))
+      .sort((a, b) => a.localeCompare(b, 'zh-CN'));
+  };
+  const THERAPIST_OPTIONS: FilterOption[] = ORDER_THERAPIST_FILTER_ROLES.flatMap(({ label }) =>
+    therapistNamesForRole(label).map(name => ({
+      value: orderTherapistFilterValue(label, name),
+      label: name,
+      group: label,
+    }))
   );
-  const therapistTypeOrder = ['产康师', '调理师', '运动康复师'];
-  const THERAPIST_OPTIONS: FilterOption[] = [
-    ...THERAPISTS
-      .filter(t => t.status === '在职')
-      .sort((a, b) => {
-        const at = therapistTypeOrder.indexOf(a.therapistType);
-        const bt = therapistTypeOrder.indexOf(b.therapistType);
-        return (at === -1 ? 99 : at) - (bt === -1 ? 99 : bt) || a.name.localeCompare(b.name, 'zh-CN');
-      })
-      .map(t => ({ value: t.name, label: t.name, group: t.therapistType || '其他' })),
-    ...assignedTherapistNames
-      .filter(name => !THERAPISTS.some(t => t.name === name))
-      .map(name => ({ value: name, label: name, group: '其他' })),
-  ];
 
   const filtered = enrichedOrders.filter(o => {
     const matchSearch = !search || o.customerName.includes(search) || o.id.includes(search);
@@ -3633,14 +3688,14 @@ export default function OrdersListPage() {
       getContractStatus(o),
       fContract
     );
-    const matchArea = fArea.length === 0 || fArea.some(area => String(o.area || '').includes(area));
+    const matchArea = matchesAppointmentCities(o.area, fArea);
     const matchTag = fTag.length === 0 || (o.tag !== null && fTag.includes(o.tag));
     const followInfo = getFollowDisplay(o);
     const matchFollowTime = matchesFollowTimeFilter(followInfo.date, fFollowTime);
     const matchAdvisor = fAdvisor.length === 0 || fAdvisor.includes(o.advisor);
-    const therapistDisplay = getTherapistDisplay(o);
-    const matchTherapist = fTherapist.length === 0 || fTherapist.some(t => therapistDisplay.includes(t));
-    return matchSearch && matchPurchaseDate && matchType && matchPay && matchContract && matchArea && matchTag && matchFollowTime && matchAdvisor && matchTherapist;
+    const matchTherapist = matchesOrderTherapists(o, fTherapist);
+    const matchServiceStatus = matchesOrderServiceStatuses(o, fServiceStatus);
+    return matchSearch && matchPurchaseDate && matchType && matchPay && matchContract && matchArea && matchTag && matchFollowTime && matchAdvisor && matchTherapist && matchServiceStatus;
   }).sort((a, b) => {
     const bTime = new Date(`${b.purchaseRangeProjection?.displayPurchaseDate || b.purchaseDate || ''}T00:00:00`).getTime();
     const aTime = new Date(`${a.purchaseRangeProjection?.displayPurchaseDate || a.purchaseDate || ''}T00:00:00`).getTime();
@@ -3667,7 +3722,7 @@ export default function OrdersListPage() {
   ];
   const amountTotals = sumOrderAmountStages(amountStageRows);
 
-  useEffect(() => { setPage(1); }, [search, purchaseDateRange, purchaseCustomRange.start, purchaseCustomRange.end, fType, fPay, fContract, fArea, fTag, fFollowTime, fAdvisor, fTherapist]);
+  useEffect(() => { setPage(1); }, [search, purchaseDateRange, purchaseCustomRange.start, purchaseCustomRange.end, fType, fPay, fContract, fArea, fTag, fFollowTime, fAdvisor, fTherapist, fServiceStatus]);
 
   function handleOrderCustomerExport() {
     const headers = ['订单编号', '购买时间', '客户ID', '客户姓名', '联系电话', '所在区域', '客户标签', '归属客服', '订单类型', '服务项目', '跟进状态', '跟进时间', '跟进事项', '付款状态', '订单金额', '合同状态', '服务人员', '预约服务时间', '服务备注'];
@@ -3727,8 +3782,8 @@ export default function OrdersListPage() {
   /* ── Column widths for non-frozen cols ── */
   // 标签 | 区域 | 订单类型 | 服务项目 | 跟进状态 | 跟进时间 | 跟进事项 | 付款状态
   const NORMAL_COLS_BEFORE_AMOUNT = [54, 92, 80, 160, 76, 82, 120, 76];
-  // 合同状态 | 归属客服 | 客户ID | 技师 | 服务情况
-  const NORMAL_COLS_AFTER_AMOUNT = [76, 76, 92, 88, 82];
+  // 合同状态 | 归属客服 | 客户ID | 三类服务人员及各自服务进度
+  const NORMAL_COLS_AFTER_AMOUNT = [76, 76, 92, 96, 82, 104, 82, 104, 82];
   const NORMAL_COLS = [
     ...NORMAL_COLS_BEFORE_AMOUNT,
     ...amountColumns.map(() => 108),
@@ -3864,8 +3919,6 @@ export default function OrdersListPage() {
               options={FOLLOW_TIME_FILTER_OPTIONS}
               selected={fFollowTime}
               onChange={setFFollowTime}
-              allSelectedLabel="跟进时间 全选"
-              fixedSelectAllLabel
             />
             <div className="w-px h-5 flex-shrink-0" style={{ background: 'var(--border)' }} />
             <MultiSelectDropdown label="客服" options={ADVISOR_OPTIONS} selected={fAdvisor} onChange={setFAdvisor} />
@@ -3876,12 +3929,14 @@ export default function OrdersListPage() {
               selected={fTherapist}
               onChange={setFTherapist}
               grouped={true}
-              renderOption={opt => (
-                <>
-                  <span className="text-sm font-medium">{opt.label}</span>
-                  <span className="text-xs ml-auto" style={{ color: 'var(--muted-foreground)' }}>{opt.group}</span>
-                </>
-              )}
+              renderOption={opt => <span className="text-sm font-medium">{opt.label}</span>}
+            />
+            <div className="w-px h-5 flex-shrink-0" style={{ background: 'var(--border)' }} />
+            <MultiSelectDropdown
+              label="服务"
+              options={SERVICE_STATUS_FILTER_OPTIONS}
+              selected={fServiceStatus}
+              onChange={setFServiceStatus}
             />
             </div>
             {/* Count + new button */}
@@ -3941,8 +3996,12 @@ export default function OrdersListPage() {
                   <th style={{ textAlign: 'center' }}>合同状态</th>
                   <th>归属客服</th>
                   <th style={{ textAlign: 'center' }}>客户ID</th>
-                  <th>技师</th>
-                  <th style={{ textAlign: 'center' }}>服务情况</th>
+                  <th>产康师</th>
+                  <th style={{ textAlign: 'center' }}>产康服务</th>
+                  <th>运动康复师</th>
+                  <th style={{ textAlign: 'center' }}>运动服务</th>
+                  <th>体质调理师</th>
+                  <th style={{ textAlign: 'center' }}>调理服务</th>
                   <th style={STICKY_RIGHT_TH_STYLE}>操作</th>
                 </tr>
               </thead>
@@ -3979,10 +4038,36 @@ export default function OrdersListPage() {
                     return '—';
                   })();
 
-                  const therapistDisplay = getTherapistDisplay(o);
                   const contractStatus = getContractStatus(o);
                   const followInfo = getFollowDisplay(o);
                   const displayPayStatus = effectiveOrderPayStatus(o);
+                  const postpartumService = orderServiceRoleDisplay(o, '产康师');
+                  const exerciseService = orderServiceRoleDisplay(o, '运动康复师');
+                  const conditioningService = orderServiceRoleDisplay(o, '调理师');
+                  const orderIds = new Set([o._id, o.id].map(value => String(value || '')).filter(Boolean));
+                  const customerIds = new Set([o.internalCustomerId, o.customerId, o.resolvedCustomerId, o.customerCode]
+                    .map(value => String(value || '')).filter(Boolean));
+                  const progressWithStatus = (service: ReturnType<typeof orderServiceRoleDisplay>) => {
+                    if (service.name === '—') return { ...service, status: '—' };
+                    const lastCompletedAt = ORDER_LIST_APPOINTMENTS
+                      .filter(item =>
+                        item.status === '已完成'
+                        && !item.isBackfill
+                        && item.therapistName === service.name
+                        && (item.orderId ? orderIds.has(String(item.orderId)) : customerIds.has(String(item.customerId)))
+                      )
+                      .map(item => item.completedAt || `${item.date}T${String(item.timeSlot || '').slice(0, 5)}:00`)
+                      .filter(Boolean)
+                      .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0];
+                    return {
+                      ...service,
+                      status: service.isPackage
+                        ? packageServiceStatusText(service.usedTimes, service.totalTimes, lastCompletedAt)
+                        : service.progress,
+                    };
+                  };
+                  const displayedServices = [postpartumService, exerciseService, conditioningService]
+                    .map(progressWithStatus);
                   const orderAmountStages = new Map(
                     getOrderAmountStages(o).map(stage => [stage.key, stage]),
                   );
@@ -4150,24 +4235,37 @@ export default function OrdersListPage() {
                         </span>
                       </td>
 
-                      {/* 技师 */}
-                      <td>
-                        <span
-                          className="text-xs"
-                          style={{
-                            color: therapistDisplay === '待分配' ? 'var(--muted-foreground)' : 'var(--foreground)',
-                            fontStyle: therapistDisplay === '待分配' ? 'italic' : 'normal',
-                          }}
-                        >
-                          {therapistDisplay}
-                        </span>
-                      </td>
-
-                      <td style={{ textAlign: 'center' }}>
-                        <span className="text-xs font-medium" style={{ color: serviceProgressText(o) === '未服务' ? 'var(--muted-foreground)' : 'var(--brand)' }}>
-                          {serviceProgressText(o)}
-                        </span>
-                      </td>
+                      {displayedServices.flatMap((service, index) => [
+                        <td key={`service-person-${index}`}>
+                          <span className="text-xs" style={{ color: service.name === '—' ? 'var(--muted-foreground)' : 'var(--foreground)' }}>
+                            {service.name}
+                          </span>
+                        </td>,
+                        <td key={`service-progress-${index}`} style={{ textAlign: 'center' }}>
+                          {service.count === '—' ? (
+                            <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>—</span>
+                          ) : !service.isPackage ? (
+                            <span
+                              data-order-service-status
+                              className="text-xs font-medium"
+                              style={{ color: service.status === '已服务' ? 'var(--success)' : 'var(--muted-foreground)' }}
+                            >
+                              {service.status}
+                            </span>
+                          ) : (
+                            <div data-order-service-cell className="h-8 flex flex-col items-center justify-center leading-none">
+                              <span data-order-service-count className="text-xs font-semibold" style={{ color: 'var(--brand)' }}>{service.count}</span>
+                              <span
+                                data-order-service-status
+                                className="text-[11px] font-medium mt-1 whitespace-nowrap"
+                                style={{ color: service.status === '服务完结' || service.status === '已服务' ? 'var(--success)' : service.status === '未服务' ? 'var(--muted-foreground)' : 'var(--brand)' }}
+                              >
+                                {service.status}
+                              </span>
+                            </div>
+                          )}
+                        </td>,
+                      ])}
 
                       {/* 操作 */}
                       <td style={STICKY_RIGHT_TD_STYLE(bgColor)}>
@@ -4183,7 +4281,7 @@ export default function OrdersListPage() {
 
                 {paginated.length === 0 && (
                   <tr>
-                    <td colSpan={16 + amountColumns.length} className="text-center py-12" style={{ color: 'var(--muted-foreground)' }}>
+                    <td colSpan={COL_W.length + NORMAL_COLS.length + 1} className="text-center py-12" style={{ color: 'var(--muted-foreground)' }}>
                       <FileTextIcon size={36} className="mx-auto mb-3 opacity-20" />
                       <div className="text-sm">暂无订单数据</div>
                     </td>

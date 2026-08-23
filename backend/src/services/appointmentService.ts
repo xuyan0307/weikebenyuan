@@ -64,6 +64,30 @@ interface ServicePerson extends Record<string, unknown> {
 
 type ServicePeople = Record<string, ServicePerson | undefined>;
 
+export interface AssignedServiceProgress {
+  matched: boolean;
+  key: 'sp1' | 'sp2' | 'sp3' | null;
+  usedTimes: number;
+  totalTimes: number;
+}
+
+/** Resolves one therapist's independent counter, with order counters only as a legacy fallback. */
+export function assignedServicePersonProgress(
+  value: unknown,
+  therapistName: string,
+  fallbackUsed: unknown,
+  fallbackTotal: unknown
+): AssignedServiceProgress {
+  const servicePeople = parseJson<ServicePeople>(value, {});
+  const key = (['sp1', 'sp2', 'sp3'] as const).find(slot =>
+    Boolean(therapistName) && servicePeople[slot]?.assign === therapistName
+  ) ?? null;
+  const person = key ? servicePeople[key] : undefined;
+  const totalTimes = Math.max(1, Number(person?.totalTimes ?? fallbackTotal) || 1);
+  const usedTimes = Math.max(0, Math.min(totalTimes, Number(person?.usedTimes ?? fallbackUsed) || 0));
+  return { matched: Boolean(person), key, usedTimes, totalTimes };
+}
+
 export type SlotPeriod = 'morning' | 'afternoon' | 'evening';
 
 export function getSlotPeriod(timeSlot: unknown): SlotPeriod | null {
@@ -175,7 +199,8 @@ export async function createAppointment(body: AppointmentWriteBody, pool: Pool =
     const isBackfill = isAppointmentTimePast(date, timeSlot);
 
     // Locking the therapist serializes concurrent bookings before conflict checking.
-    await connection.execute('SELECT id FROM therapists WHERE id = ? FOR UPDATE', [therapistId]);
+    const [therapistRows] = await connection.execute('SELECT id, name FROM therapists WHERE id = ? FOR UPDATE', [therapistId]);
+    const therapistName = (therapistRows as Array<{ id: string; name?: string }>)[0]?.name || '';
     const [sameDayRows] = await connection.execute(
       `SELECT time_slot FROM appointments
        WHERE therapist_id = ? AND date = ? AND status NOT IN ('已取消', '取消', '已冲销')`,
@@ -193,7 +218,7 @@ export async function createAppointment(body: AppointmentWriteBody, pool: Pool =
     const customerId = await resolveCustomerId(connection, body.customerId || '');
     const requestedOrderId = String(body.orderId || '').trim();
     const [orderRows] = await connection.execute(
-      `SELECT id, used_times, total_times, type
+      `SELECT id, used_times, total_times, type, service_people
        FROM orders
        WHERE customer_id = ? AND pay_status <> '已退款'
          ${requestedOrderId ? 'AND (id = ? OR order_no = ?)' : ''}
@@ -206,20 +231,27 @@ export async function createAppointment(body: AppointmentWriteBody, pool: Pool =
       used_times: number;
       total_times: number;
       type: string;
+      service_people: unknown;
     }>)[0];
     if (requestedOrderId && !currentOrder) {
       throw createError('所选订单不存在、已退款或不属于当前客户，请刷新后重试', 400);
     }
     const isPackageOrder = currentOrder?.type === '套餐';
+    const assignedProgress = assignedServicePersonProgress(
+      currentOrder?.service_people,
+      therapistName,
+      currentOrder?.used_times,
+      currentOrder?.total_times
+    );
     const serviceSequence = isPackageOrder
       ? resolveAppointmentServiceSequence(
         body.serviceSequence,
-        currentOrder.used_times,
-        currentOrder.total_times
+        assignedProgress.usedTimes,
+        assignedProgress.totalTimes
       )
       : null;
     const serviceTotalTimes = isPackageOrder
-      ? Math.max(1, Number(currentOrder.total_times) || 1)
+      ? assignedProgress.totalTimes
       : null;
     await connection.execute(
       `INSERT INTO appointments
@@ -442,7 +474,6 @@ async function applyOrderProgress(connection: PoolConnection, appointment: Appoi
     `SELECT id, used_times, total_times, service_people FROM orders
      WHERE customer_id = ?
        AND (? IS NULL OR id = ?)
-       AND used_times < total_times
        AND (manual_progress_at IS NULL OR NOW() > manual_progress_at)
      ORDER BY created_at DESC
      LIMIT 1 FOR UPDATE`,
@@ -474,9 +505,13 @@ async function applyOrderProgress(connection: PoolConnection, appointment: Appoi
 
   const beforeUsed = Math.max(0, Number(order.used_times) || 0);
   const total = Math.max(1, Number(order.total_times) || 1);
-  const afterUsed = appointment.service_sequence == null
-    ? Math.min(beforeUsed + 1, total)
-    : Math.min(Math.max(beforeUsed, Number(appointment.service_sequence) || beforeUsed), total);
+  const beforeAssigned = assignedServicePersonProgress(order.service_people, therapistName, beforeUsed, total);
+  const afterAssigned = assignedServicePersonProgress(servicePeople.value, therapistName, beforeUsed, total);
+  const afterUsed = beforeAssigned.matched
+    ? beforeAssigned.key === 'sp1' ? afterAssigned.usedTimes : beforeUsed
+    : appointment.service_sequence == null
+      ? Math.min(beforeUsed + 1, total)
+      : Math.min(Math.max(beforeUsed, Number(appointment.service_sequence) || beforeUsed), total);
   await connection.execute(
     'UPDATE orders SET used_times = ?, service_people = ? WHERE id = ?',
     [afterUsed, servicePeopleValue, order.id]
@@ -504,9 +539,11 @@ export async function synchronizeAppointmentOrderProgress(
     await connection.beginTransaction();
     const [rows] = await connection.execute(
       `SELECT a.id AS appointment_id, a.customer_id, a.order_id, a.is_backfill,
-              o.order_no, o.type, o.used_times, o.total_times
+              o.order_no, o.type, o.used_times, o.total_times, o.service_people,
+              t.name AS therapist_name
        FROM appointments a
        INNER JOIN orders o ON o.id = a.order_id
+       LEFT JOIN therapists t ON t.id = a.therapist_id
        WHERE a.id = ? OR a.appointment_no = ?
        LIMIT 1 FOR UPDATE`,
       [appointmentId, appointmentId]
@@ -514,12 +551,19 @@ export async function synchronizeAppointmentOrderProgress(
     const row = (rows as Array<{
       appointment_id: string; customer_id: string; order_id: string;
       order_no: string | null; type: string | null; used_times: number; total_times: number;
+      service_people: unknown; therapist_name: string | null;
       is_backfill: number;
     }>)[0];
     if (!row) throw createError('预约未关联有效订单，无法同步服务次数', 409);
     if (row.is_backfill) throw createError('补录预约不参与订单服务次数同步', 409);
-    const usedTimes = Math.max(0, Number(row.used_times) || 0);
-    const totalTimes = Math.max(1, Number(row.total_times) || 1);
+    const assignedProgress = assignedServicePersonProgress(
+      row.service_people,
+      row.therapist_name || '',
+      row.used_times,
+      row.total_times
+    );
+    const usedTimes = assignedProgress.usedTimes;
+    const totalTimes = assignedProgress.totalTimes;
     await connection.execute('UPDATE orders SET manual_progress_at = NOW() WHERE id = ?', [row.order_id]);
     await connection.execute(
       `INSERT INTO appointment_progress_syncs
@@ -562,7 +606,7 @@ export async function synchronizeAllAppointmentOrderProgress(
   try {
     await connection.beginTransaction();
     const [orderRows] = await connection.execute(
-      `SELECT id, order_no, customer_id, type, used_times, total_times
+      `SELECT id, order_no, customer_id, type, used_times, total_times, service_people
        FROM orders
        WHERE type = '套餐'
          AND total_times > 0
@@ -572,6 +616,7 @@ export async function synchronizeAllAppointmentOrderProgress(
     const orders = orderRows as Array<{
       id: string; order_no: string | null; customer_id: string; type: string | null;
       used_times: number; total_times: number;
+      service_people: unknown;
     }>;
     let appointmentsUpdated = 0;
 
@@ -584,27 +629,34 @@ export async function synchronizeAllAppointmentOrderProgress(
       );
 
       const [appointmentRows] = await connection.execute(
-        `SELECT id, status
-         FROM appointments
-         WHERE order_id = ?
-           AND is_backfill = 0
-           AND status NOT IN ('已取消', '取消', '已冲销')
-         ORDER BY date, time_slot, created_at, id
+        `SELECT a.id, a.status, t.name AS therapist_name
+         FROM appointments a
+         LEFT JOIN therapists t ON t.id = a.therapist_id
+         WHERE a.order_id = ?
+           AND a.is_backfill = 0
+           AND a.status NOT IN ('已取消', '取消', '已冲销')
+         ORDER BY a.date, a.time_slot, a.created_at, a.id
          FOR UPDATE`,
         [order.id]
       );
-      const linkedAppointments = appointmentRows as Array<{ id: string; status: string }>;
+      const linkedAppointments = appointmentRows as Array<{ id: string; status: string; therapist_name?: string }>;
       for (const appointment of linkedAppointments) {
-        const nextSequence = resolveSynchronizedAppointmentSequence(
-          appointment.status,
+        const assignedProgress = assignedServicePersonProgress(
+          order.service_people,
+          appointment.therapist_name || '',
           usedTimes,
           totalTimes
+        );
+        const nextSequence = resolveSynchronizedAppointmentSequence(
+          appointment.status,
+          assignedProgress.usedTimes,
+          assignedProgress.totalTimes
         );
         await connection.execute(
           `UPDATE appointments
            SET service_sequence = ?, service_total_times = ?
            WHERE id = ?`,
-          [nextSequence, totalTimes, appointment.id]
+          [nextSequence, assignedProgress.totalTimes, appointment.id]
         );
         appointmentsUpdated += 1;
       }
@@ -690,8 +742,17 @@ export async function reverseCompletedAppointment(
         const [therapistRows] = await connection.execute('SELECT name FROM therapists WHERE id = ? LIMIT 1', [appointment.therapist_id]);
         const therapistName = (therapistRows as Array<{ name: string }>)[0]?.name || '';
         const delta = Math.max(0, Number(appointment.after_used_times) - Number(appointment.before_used_times));
-        const nextUsed = Math.max(0, Number(order.used_times) - delta);
-        const people = decrementAssignedServicePeople(order.service_people, therapistName, delta);
+        const assignedProgress = assignedServicePersonProgress(
+          order.service_people,
+          therapistName,
+          order.used_times,
+          order.total_times
+        );
+        const personDelta = assignedProgress.matched ? 1 : delta;
+        const nextUsed = assignedProgress.matched
+          ? assignedProgress.key === 'sp1' ? Math.max(0, Number(order.used_times) - personDelta) : Number(order.used_times)
+          : Math.max(0, Number(order.used_times) - delta);
+        const people = decrementAssignedServicePeople(order.service_people, therapistName, personDelta);
         const nextPeople = people.changed
           ? JSON.stringify(people.value)
           : typeof order.service_people === 'string'
