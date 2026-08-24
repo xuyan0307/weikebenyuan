@@ -45,6 +45,10 @@ import {
   ORDER_THERAPIST_FILTER_ROLES,
   orderTherapistFilterValue,
 } from '../utils/orderListFilters';
+import {
+  matchesOrderFollowStatuses,
+  ORDER_FOLLOW_STATUS_VALUES,
+} from '../utils/orderFollowStatusFilter';
 
 /* ─── Types ─────────────────────────────────────────── */
 type NewPayStatus = '已支付' | '待支付' | '已付定金' | '已退款';
@@ -391,6 +395,8 @@ const SERVICE_STATUS_FILTER_OPTIONS: FilterOption[] = [
   { value: '服务中', label: '服务中' },
   { value: '已服务', label: '已服务' },
 ];
+const FOLLOW_STATUS_FILTER_OPTIONS: FilterOption[] =
+  ORDER_FOLLOW_STATUS_VALUES.map(value => ({ value, label: value }));
 
 function matchesFollowTimeFilter(value: string, selected: string[]) {
   return matchesFollowTime(value, selected, {
@@ -3566,6 +3572,7 @@ export default function OrdersListPage() {
   });
   const [fArea, setFArea] = useState<string[]>([]);
   const [fTag, setFTag] = useState<string[]>([]);
+  const [fFollowStatus, setFFollowStatus] = useState<string[]>([]);
   const [fFollowTime, setFFollowTime] = useState<string[]>(() => {
     const filter = readDashboardFilter();
     if (filter.orderFollowTime === 'today') {
@@ -3691,11 +3698,12 @@ export default function OrdersListPage() {
     const matchArea = matchesAppointmentCities(o.area, fArea);
     const matchTag = fTag.length === 0 || (o.tag !== null && fTag.includes(o.tag));
     const followInfo = getFollowDisplay(o);
+    const matchFollowStatus = matchesOrderFollowStatuses(followInfo.status, fFollowStatus, FILTER_NONE);
     const matchFollowTime = matchesFollowTimeFilter(followInfo.date, fFollowTime);
     const matchAdvisor = fAdvisor.length === 0 || fAdvisor.includes(o.advisor);
     const matchTherapist = matchesOrderTherapists(o, fTherapist);
     const matchServiceStatus = matchesOrderServiceStatuses(o, fServiceStatus);
-    return matchSearch && matchPurchaseDate && matchType && matchPay && matchContract && matchArea && matchTag && matchFollowTime && matchAdvisor && matchTherapist && matchServiceStatus;
+    return matchSearch && matchPurchaseDate && matchType && matchPay && matchContract && matchArea && matchTag && matchFollowStatus && matchFollowTime && matchAdvisor && matchTherapist && matchServiceStatus;
   }).sort((a, b) => {
     const bTime = new Date(`${b.purchaseRangeProjection?.displayPurchaseDate || b.purchaseDate || ''}T00:00:00`).getTime();
     const aTime = new Date(`${a.purchaseRangeProjection?.displayPurchaseDate || a.purchaseDate || ''}T00:00:00`).getTime();
@@ -3722,7 +3730,7 @@ export default function OrdersListPage() {
   ];
   const amountTotals = sumOrderAmountStages(amountStageRows);
 
-  useEffect(() => { setPage(1); }, [search, purchaseDateRange, purchaseCustomRange.start, purchaseCustomRange.end, fType, fPay, fContract, fArea, fTag, fFollowTime, fAdvisor, fTherapist, fServiceStatus]);
+  useEffect(() => { setPage(1); }, [search, purchaseDateRange, purchaseCustomRange.start, purchaseCustomRange.end, fType, fPay, fContract, fArea, fTag, fFollowStatus, fFollowTime, fAdvisor, fTherapist, fServiceStatus]);
 
   function handleOrderCustomerExport() {
     const headers = ['订单编号', '购买时间', '客户ID', '客户姓名', '联系电话', '所在区域', '客户标签', '归属客服', '订单类型', '服务项目', '跟进状态', '跟进时间', '跟进事项', '付款状态', '订单金额', '合同状态', '服务人员', '预约服务时间', '服务备注'];
@@ -3912,6 +3920,16 @@ export default function OrdersListPage() {
               selected={fTag}
               onChange={setFTag}
               grouped={true}
+            />
+            <div className="w-px h-5 flex-shrink-0" style={{ background: 'var(--border)' }} />
+            <MultiSelectDropdown
+              label="跟进状态"
+              options={FOLLOW_STATUS_FILTER_OPTIONS}
+              selected={fFollowStatus}
+              onChange={setFFollowStatus}
+              renderOption={opt => (
+                <span className={`badge ${FOLLOW_STATUS_COLORS[opt.value] || 'badge-gray'}`}>{opt.label}</span>
+              )}
             />
             <div className="w-px h-5 flex-shrink-0" style={{ background: 'var(--border)' }} />
             <MultiSelectDropdown

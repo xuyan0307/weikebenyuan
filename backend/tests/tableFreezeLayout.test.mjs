@@ -10,6 +10,10 @@ import {
   orderTherapistFilterValue,
 } from '../../src/utils/orderListFilters.ts';
 import { matchesAppointmentCities } from '../../src/utils/appointmentCalendarFilters.ts';
+import {
+  matchesOrderFollowStatuses,
+  ORDER_FOLLOW_STATUS_VALUES,
+} from '../../src/utils/orderFollowStatusFilter.ts';
 
 const customersSource = readFileSync(new URL('../../src/components/CustomersListPage.tsx', import.meta.url), 'utf8');
 const ordersSource = readFileSync(new URL('../../src/components/OrdersListPage.tsx', import.meta.url), 'utf8');
@@ -151,6 +155,17 @@ test('order service filter exposes mutually exclusive progress states', () => {
   assert.equal(matchesOrderServiceStatuses(packageOrder(8), ['未服务', '服务中']), false);
   assert.match(ordersSource, /label="服务"[\s\S]*?SERVICE_STATUS_FILTER_OPTIONS/);
   assert.doesNotMatch(ordersSource, /allSelectedLabel="跟进时间 全选"/);
+});
+
+test('order follow status filter supports all, single and multiple selections', () => {
+  assert.deepEqual(ORDER_FOLLOW_STATUS_VALUES, ['跟进中', '待跟进', '已完成', '延迟']);
+  assert.equal(matchesOrderFollowStatuses('跟进中', []), true);
+  assert.equal(matchesOrderFollowStatuses('延迟', ['跟进中']), false);
+  assert.equal(matchesOrderFollowStatuses('延迟', ['待跟进', '延迟']), true);
+  assert.equal(matchesOrderFollowStatuses('已完成', [...ORDER_FOLLOW_STATUS_VALUES]), true);
+  assert.equal(matchesOrderFollowStatuses('跟进中', ['__FILTER_NONE__']), false);
+  assert.match(ordersSource, /label="跟进状态"[\s\S]*?FOLLOW_STATUS_FILTER_OPTIONS/);
+  assert.match(ordersSource, /matchesOrderFollowStatuses\(followInfo\.status, fFollowStatus, FILTER_NONE\)/);
 });
 
 test('customer areas show two characters while retaining the full hover value', () => {
