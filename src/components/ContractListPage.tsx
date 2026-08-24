@@ -9,6 +9,7 @@ import { useApp } from '../hooks/useApp';
 import { DateRangeFilter } from './ui/date-range-filter';
 import { GLOBAL_DATE_RANGE_QUICK_OPTIONS, formatLocalDate, quickDateRange, type DateRangeValue } from '../utils/dateRange';
 import { useGlobalDateRange } from '../utils/useGlobalDateRange';
+import { orderReportContribution } from '../utils/orderReportMetrics';
 
 type TimeDimension = 'day' | 'week' | 'month' | 'year';
 
@@ -128,18 +129,6 @@ function percent(value: number) {
 function normalizeAdvisor(value: unknown) {
   const text = String(value || '').trim();
   return text && text !== '—' ? text : '未分配';
-}
-
-function isTrialOrder(order: any) {
-  return String(order.type || '').includes('体验');
-}
-
-function isPackageOrder(order: any) {
-  return String(order.type || '').includes('套餐') || order.isUpgrade;
-}
-
-function isRefunded(order: any) {
-  return String(order.payStatus || '').includes('退款') || order.tag === 'T2';
 }
 
 function customerKeyOf(order: any) {
@@ -446,26 +435,19 @@ function OrderReportPage() {
       const customerId = customer ? String(customer.id || customer._id || customer.customerCode || customer.name) : customerKeyOf(o);
       row.customerIds.add(customerId);
 
-      if (!inRange(o.createdAt || o.purchaseDate || o.paidAt, start, end)) return;
-      if (isTrialOrder(o)) {
-        row.trialCardCount += 1;
-        row.trialCustomerIds.add(customerId);
-      }
-      if (isPackageOrder(o)) {
-        row.upgradeCustomerIds.add(customerId);
-      }
-      if (!isRefunded(o)) {
-        row.salesAmount += Number(o.amount) || 0;
-      }
+      const contribution = orderReportContribution(o, start, end);
+      if (contribution.hasExperienceCard) row.trialCustomerIds.add(customerId);
+      if (contribution.hasUpgrade) row.upgradeCustomerIds.add(customerId);
+      row.salesAmount += contribution.upgradeSalesAmount;
     });
 
     return Array.from(map.values()).map(row => ({
       advisor: row.advisor,
       customerCount: row.customerIds.size,
-      trialCardCount: row.trialCardCount,
-      purchaseRate: row.customerIds.size ? row.trialCardCount / row.customerIds.size : 0,
+      trialCardCount: row.trialCustomerIds.size,
+      purchaseRate: row.customerIds.size ? row.trialCustomerIds.size / row.customerIds.size : 0,
       upgradeCustomerCount: row.upgradeCustomerIds.size,
-      upgradeRate: row.trialCardCount ? row.upgradeCustomerIds.size / row.trialCardCount : 0,
+      upgradeRate: row.trialCustomerIds.size ? row.upgradeCustomerIds.size / row.trialCustomerIds.size : 0,
       salesAmount: row.salesAmount,
     })).sort((a, b) => b.salesAmount - a.salesAmount || b.trialCardCount - a.trialCardCount || a.advisor.localeCompare(b.advisor, 'zh-CN'));
   }, [customers, orders, customerById, advisorOptionsKey, start.getTime(), end.getTime()]);

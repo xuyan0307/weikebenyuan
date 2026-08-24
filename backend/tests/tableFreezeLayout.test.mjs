@@ -14,9 +14,11 @@ import {
   matchesOrderFollowStatuses,
   ORDER_FOLLOW_STATUS_VALUES,
 } from '../../src/utils/orderFollowStatusFilter.ts';
+import { orderReportContribution, orderReportSaleStages } from '../../src/utils/orderReportMetrics.ts';
 
 const customersSource = readFileSync(new URL('../../src/components/CustomersListPage.tsx', import.meta.url), 'utf8');
 const ordersSource = readFileSync(new URL('../../src/components/OrdersListPage.tsx', import.meta.url), 'utf8');
+const reportSource = readFileSync(new URL('../../src/components/ContractListPage.tsx', import.meta.url), 'utf8');
 const compactAreaSource = readFileSync(new URL('../../src/utils/compactArea.ts', import.meta.url), 'utf8');
 
 function assertSharedFreezeContract(source, timeLabel) {
@@ -166,6 +168,37 @@ test('order follow status filter supports all, single and multiple selections', 
   assert.equal(matchesOrderFollowStatuses('跟进中', ['__FILTER_NONE__']), false);
   assert.match(ordersSource, /label="跟进状态"[\s\S]*?FOLLOW_STATUS_FILTER_OPTIONS/);
   assert.match(ordersSource, /matchesOrderFollowStatuses\(followInfo\.status, fFollowStatus, FILTER_NONE\)/);
+});
+
+test('data report keeps upgraded customers in experience count and sales include packages only', () => {
+  const upgradedOrder = {
+    type: '套餐',
+    amount: 6000,
+    payStatus: '已支付',
+    purchaseDate: '2026-08-12',
+    servicePeople: { experienceSnapshot: { amount: 288, payStatus: '已支付', purchaseDate: '2026-07-03' } },
+  };
+  const stages = orderReportSaleStages(upgradedOrder);
+  assert.deepEqual(stages, [
+    { kind: 'experience', amount: 288, purchaseDate: '2026-07-03' },
+    { kind: 'package', amount: 6000, purchaseDate: '2026-08-12' },
+  ]);
+  const start = new Date('2026-08-01T00:00:00');
+  const end = new Date('2026-08-31T23:59:59');
+  assert.deepEqual(orderReportContribution(upgradedOrder, start, end), {
+    hasExperienceCard: true,
+    hasUpgrade: true,
+    upgradeSalesAmount: 6000,
+  });
+  assert.deepEqual(orderReportContribution({
+    type: '体验卡', amount: 288, payStatus: '已支付', purchaseDate: '2026-08-05', servicePeople: {},
+  }, start, end), {
+    hasExperienceCard: true,
+    hasUpgrade: false,
+    upgradeSalesAmount: 0,
+  });
+  assert.match(reportSource, /trialCardCount: row\.trialCustomerIds\.size/);
+  assert.match(reportSource, /row\.salesAmount \+= contribution\.upgradeSalesAmount/);
 });
 
 test('customer areas show two characters while retaining the full hover value', () => {
