@@ -33,6 +33,23 @@ test('assigned service progress keeps each therapist total and used count indepe
   });
 });
 
+test('assigned non-postpartum service missing used count starts at zero', () => {
+  const people = {
+    sp1: { assign: '产康甲' },
+    sp2: { assign: '运动乙', totalTimes: '3' },
+    sp3: { assign: '调理丙', totalTimes: '4' },
+  };
+  assert.deepEqual(assignedServicePersonProgress(people, '产康甲', 6, 8), {
+    matched: true, key: 'sp1', usedTimes: 6, totalTimes: 8,
+  });
+  assert.deepEqual(assignedServicePersonProgress(people, '运动乙', 6, 8), {
+    matched: true, key: 'sp2', usedTimes: 0, totalTimes: 3,
+  });
+  assert.deepEqual(assignedServicePersonProgress(people, '调理丙', 6, 8), {
+    matched: true, key: 'sp3', usedTimes: 0, totalTimes: 4,
+  });
+});
+
 test('getSlotPeriod maps booking times to the configured three schedule periods', () => {
   assert.equal(getSlotPeriod('08:00'), 'morning');
   assert.equal(getSlotPeriod('11:59'), 'morning');

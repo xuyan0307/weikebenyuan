@@ -57,6 +57,23 @@ test('new appointment customer picker is limited to the selected therapist assig
       sp2: { assign: '陈康复', usedTimes: '2', totalTimes: '5' },
     },
   }, '陈康复'), { matched: true, usedTimes: 2, totalTimes: 5 });
+  assert.deepEqual(orderTherapistServiceProgress({
+    usedTimes: 7,
+    totalTimes: 8,
+    servicePeople: {
+      sp1: { assign: '徐燕玲' },
+      sp2: { assign: '陈康复', totalTimes: '3' },
+      sp3: { assign: '林调理', totalTimes: '4' },
+    },
+  }, '陈康复'), { matched: true, usedTimes: 0, totalTimes: 3 });
+  assert.deepEqual(orderTherapistServiceProgress({
+    usedTimes: 7,
+    totalTimes: 8,
+    servicePeople: {
+      sp1: { assign: '徐燕玲' },
+      sp3: { assign: '林调理', totalTimes: '4' },
+    },
+  }, '林调理'), { matched: true, usedTimes: 0, totalTimes: 4 });
   assert.match(calendarSource, /orderTherapistServiceProgress/);
   assert.match(calendarSource, /currentTotalTimes/);
 });

@@ -39,10 +39,13 @@ export function orderTherapistServiceProgress(
 ): { matched: boolean; usedTimes: number; totalTimes: number } {
   const targetName = therapistName.trim();
   const people = parseServicePeople(order.servicePeople) as Record<string, ProgressServicePerson | undefined>;
-  const person = ['sp1', 'sp2', 'sp3']
-    .map(key => people[key])
-    .find(item => targetName && String(item?.assign ?? '').trim() === targetName);
-  const totalTimes = Math.max(1, Number(person?.totalTimes ?? order.totalTimes) || 1);
-  const usedTimes = Math.max(0, Math.min(totalTimes, Number(person?.usedTimes ?? legacyUsedTimes) || 0));
+  const personKey = (['sp1', 'sp2', 'sp3'] as const)
+    .find(key => targetName && String(people[key]?.assign ?? '').trim() === targetName);
+  const person = personKey ? people[personKey] : undefined;
+  const mayUseLegacyOrderProgress = personKey === 'sp1' || personKey === undefined;
+  const fallbackTotal = mayUseLegacyOrderProgress ? order.totalTimes : 1;
+  const fallbackUsed = mayUseLegacyOrderProgress ? legacyUsedTimes : 0;
+  const totalTimes = Math.max(1, Number(person?.totalTimes ?? fallbackTotal) || 1);
+  const usedTimes = Math.max(0, Math.min(totalTimes, Number(person?.usedTimes ?? fallbackUsed) || 0));
   return { matched: Boolean(person), usedTimes, totalTimes };
 }

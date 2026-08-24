@@ -66,6 +66,7 @@ export function orderServiceRoleDisplay(
   const typedPerson = candidates.find(person => normalizeRole(person.type) === role);
   const fallbackPerson = people[conventionalKey[role]];
   const person = typedPerson || (!normalizeRole(fallbackPerson?.type) ? fallbackPerson : undefined);
+  const personKey = (['sp1', 'sp2', 'sp3'] as const).find(key => people[key] === person);
 
   const isPackage = order.type === '套餐' || Boolean(order.isUpgrade);
   if (!isAssigned(person)) {
@@ -73,8 +74,13 @@ export function orderServiceRoleDisplay(
   }
 
   const name = String(person?.assign ?? '').trim();
-  const used = Math.max(0, Number(person?.usedTimes ?? order.usedTimes) || 0);
-  const total = Math.max(1, Number(person?.totalTimes ?? order.totalTimes) || 1);
+  // The order-level counters are the legacy postpartum (sp1) counters. Never
+  // use them for exercise rehabilitation or conditioning, whose progress is
+  // independent even when older service_people records omit their counters.
+  const legacyUsed = personKey === 'sp1' ? order.usedTimes : 0;
+  const legacyTotal = personKey === 'sp1' ? order.totalTimes : 1;
+  const used = Math.max(0, Number(person?.usedTimes ?? legacyUsed) || 0);
+  const total = Math.max(1, Number(person?.totalTimes ?? legacyTotal) || 1);
   return {
     name,
     count: `${Math.min(used, total)}/${total}`,

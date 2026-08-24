@@ -55,6 +55,26 @@ test('order service roles show each assigned specialist and independent progress
   assert.deepEqual(orderServiceRoleDisplay(order, '调理师'), { name: '—', count: '—', progress: '—', isPackage: true, usedTimes: 0, totalTimes: 0 });
 });
 
+test('legacy order progress never leaks into exercise or conditioning counters', () => {
+  const order = {
+    type: '套餐',
+    usedTimes: 6,
+    totalTimes: 8,
+    servicePeople: {
+      sp1: { type: '产康师', assign: '产康甲' },
+      sp2: { type: '运动康复师', assign: '运动乙', totalTimes: '3' },
+      sp3: { type: '调理师', assign: '调理丙', totalTimes: '4' },
+    },
+  };
+  assert.equal(orderServiceRoleDisplay(order, '产康师').usedTimes, 6);
+  assert.deepEqual(orderServiceRoleDisplay(order, '运动康复师'), {
+    name: '运动乙', count: '0/3', progress: '0/3', isPackage: true, usedTimes: 0, totalTimes: 3,
+  });
+  assert.deepEqual(orderServiceRoleDisplay(order, '调理师'), {
+    name: '调理丙', count: '0/4', progress: '0/4', isPackage: true, usedTimes: 0, totalTimes: 4,
+  });
+});
+
 test('order service role display supports legacy labels and experience-card status', () => {
   const order = {
     type: '体验卡',

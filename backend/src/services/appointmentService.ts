@@ -83,8 +83,14 @@ export function assignedServicePersonProgress(
     Boolean(therapistName) && servicePeople[slot]?.assign === therapistName
   ) ?? null;
   const person = key ? servicePeople[key] : undefined;
-  const totalTimes = Math.max(1, Number(person?.totalTimes ?? fallbackTotal) || 1);
-  const usedTimes = Math.max(0, Math.min(totalTimes, Number(person?.usedTimes ?? fallbackUsed) || 0));
+  // orders.used_times/total_times are retained as the legacy sp1 counters.
+  // Other disciplines must default to their own zero/one progress rather than
+  // inheriting postpartum progress when old JSON lacks per-person fields.
+  const mayUseLegacyOrderProgress = key === 'sp1' || key === null;
+  const legacyTotal = mayUseLegacyOrderProgress ? fallbackTotal : 1;
+  const legacyUsed = mayUseLegacyOrderProgress ? fallbackUsed : 0;
+  const totalTimes = Math.max(1, Number(person?.totalTimes ?? legacyTotal) || 1);
+  const usedTimes = Math.max(0, Math.min(totalTimes, Number(person?.usedTimes ?? legacyUsed) || 0));
   return { matched: Boolean(person), key, usedTimes, totalTimes };
 }
 
