@@ -3,6 +3,8 @@ const assert = require('node:assert/strict');
 const {
   completePastAppointments,
   millisecondsUntilNextPeriodScan,
+  startAppointmentAutoCompletionScheduler,
+  stopAppointmentAutoCompletionScheduler,
 } = require('../dist/services/appointmentAutoCompletionService');
 
 test('automatic completion scans at the end of morning, afternoon and evening in China time', () => {
@@ -18,6 +20,11 @@ test('automatic completion scans at the end of morning, afternoon and evening in
     millisecondsUntilNextPeriodScan(new Date('2026-08-25T10:00:00.000Z')),
     6 * 60 * 60 * 1000,
   );
+});
+
+test('scheduler waits for the next period boundary instead of scanning on startup', () => {
+  startAppointmentAutoCompletionScheduler();
+  stopAppointmentAutoCompletionScheduler();
 });
 
 test('automatic completion only scans elapsed active non-backfill appointments', async () => {

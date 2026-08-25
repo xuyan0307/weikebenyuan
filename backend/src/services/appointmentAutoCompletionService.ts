@@ -68,7 +68,6 @@ async function runScheduledCompletion() {
 
 export function startAppointmentAutoCompletionScheduler() {
   if (timer) return;
-  void runScheduledCompletion();
   const scheduleNext = () => {
     timer = setTimeout(async () => {
       await runScheduledCompletion();
