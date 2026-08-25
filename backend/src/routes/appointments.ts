@@ -114,14 +114,17 @@ function mapRow(r: AppointmentListRow) {
     service: r.service || '',
     serviceContent: r.service || r.order_service_items || '',
     serviceSequence: r.service_sequence == null ? null : Number(r.service_sequence),
-    serviceTotalTimes: r.order_total_times == null
-      ? (r.service_total_times == null ? null : Number(r.service_total_times))
-      : Number(r.order_total_times),
+    serviceTotalTimes: r.service_total_times == null
+      ? null
+      : (r.order_total_times == null ? Number(r.service_total_times) : Number(r.order_total_times)),
     status: appointmentStatus(r.status),
     rawStatus: r.status || '',
     completedAt: r.progress_applied_at ? new Date(r.progress_applied_at).toISOString() : null,
     isBackfill: Boolean(r.is_backfill),
-    orderType: orderType(r.order_type),
+    // An appointment without a package sequence is an experience-card visit.
+    // The linked order row may later be upgraded in place, but that must not
+    // rewrite the historical appointment into a package service.
+    orderType: r.service_total_times == null ? '体验卡' : orderType(r.order_type),
     area: r.area || '',
     remark: r.remark || '',
     notifyStatus: displayedNotifyStatus,

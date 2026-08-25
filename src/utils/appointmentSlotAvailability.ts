@@ -27,3 +27,14 @@ export function hasBlockingAppointmentExcluding<T extends AppointmentSlotRecord 
 ): boolean {
   return appointments.some(appointment => appointment.id !== excludedId && appointmentBlocksSlot(appointment));
 }
+
+/** 同一时段可排多个客户，仅完全相同的开始时间构成冲突。 */
+export function hasBlockingAppointmentAtStart<
+  T extends AppointmentSlotRecord & { id?: string; timeSlot?: string }
+>(appointments: T[], timeSlot: string, excludedId?: string): boolean {
+  return appointments.some(appointment =>
+    appointment.id !== excludedId
+    && appointment.timeSlot === timeSlot
+    && appointmentBlocksSlot(appointment)
+  );
+}

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   appointmentBlocksSlot,
   hasBlockingAppointment,
+  hasBlockingAppointmentAtStart,
   hasBlockingAppointmentExcluding,
   isCancelledAppointment,
 } from '../../src/utils/appointmentSlotAvailability.ts';
@@ -47,4 +48,15 @@ test('rescheduling excludes the current appointment but still detects another ac
     { id: 'current', status: '待确认' },
     { id: 'other', status: '已确认' },
   ], 'current'), true);
+});
+
+test('appointments in one period only conflict when their exact start time matches', () => {
+  const appointments = [
+    { id: 'first', timeSlot: '13:00', status: '待确认' },
+    { id: 'cancelled', timeSlot: '14:00', status: '已取消' },
+  ];
+  assert.equal(hasBlockingAppointmentAtStart(appointments, '13:00'), true);
+  assert.equal(hasBlockingAppointmentAtStart(appointments, '13:30'), false);
+  assert.equal(hasBlockingAppointmentAtStart(appointments, '14:00'), false);
+  assert.equal(hasBlockingAppointmentAtStart(appointments, '13:00', 'first'), false);
 });

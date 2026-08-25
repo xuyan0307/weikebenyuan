@@ -21,7 +21,7 @@ import {
 import {
   appointmentBlocksSlot,
   hasBlockingAppointment,
-  hasBlockingAppointmentExcluding,
+  hasBlockingAppointmentAtStart,
   isCancelledAppointment,
 } from '../utils/appointmentSlotAvailability';
 import {
@@ -184,7 +184,12 @@ function getOrderForAppointment(appt: Pick<Appointment, 'orderId' | 'customerId'
   const exactOrder = appt.orderId
     ? orders.find(order => order.id === appt.orderId || order._id === appt.orderId)
     : null;
-  if (exactOrder) return exactOrder;
+  const exactOrderMatchesStage = exactOrder && (
+    appt.orderType === '套餐'
+      ? exactOrder.type === '套餐' || exactOrder.isUpgrade
+      : exactOrder.type === '体验卡' && !exactOrder.isUpgrade
+  );
+  if (exactOrderMatchesStage) return exactOrder;
 
   const customerOrders = orders.filter(order => (
     order.customerId === appt.customerId
@@ -198,7 +203,7 @@ function getOrderForAppointment(appt: Pick<Appointment, 'orderId' | 'customerId'
   ));
   return sameStageOrders.find(order => (
     !appt.service || !order.serviceItems || order.serviceItems.includes(appt.service)
-  )) ?? sameStageOrders[0] ?? customerOrders[0] ?? null;
+  )) ?? sameStageOrders[0] ?? null;
 }
 
 // ─── TherapistMultiSelect ─────────────────────────────────────────────────────
@@ -798,7 +803,14 @@ function RescheduleModal({
   function firstAvailableTime(date: string, slot: SlotLabel): { hour: string; minute: string } | null {
     for (const hour of hourOptions(slot)) {
       for (const minute of minuteOptions(slot, hour)) {
-        if (!isAppointmentTimePast(date, hour, minute)) return { hour, minute };
+        const timeSlot = `${hour}:${minute}`;
+        const sameDayAppointments = localAppts.filter(item =>
+          item.therapistId === appointment?.therapistId && item.date === date
+        );
+        if (!isAppointmentTimePast(date, hour, minute)
+          && !hasBlockingAppointmentAtStart(sameDayAppointments, timeSlot, appointment?.id)) {
+          return { hour, minute };
+        }
       }
     }
     return null;
@@ -809,12 +821,7 @@ function RescheduleModal({
     const definition = TIME_SLOTS.find(item => item.label === slot);
     if (!definition || isSlotExpired(date, definition)) return false;
     if ((slotStatus[slotKeyFor(appointment.therapistId, date, slot)] ?? '空闲') !== '空闲') return false;
-    const sameSlotAppointments = localAppts.filter(item =>
-      item.therapistId === appointment.therapistId
-      && item.date === date
-      && slotLabelFromTimeSlot(item.timeSlot) === slot
-    );
-    return !hasBlockingAppointmentExcluding(sameSlotAppointments, appointment.id);
+    return firstAvailableTime(date, slot) !== null;
   }
 
   function selectSlot(date: string, slot: SlotLabel) {
@@ -835,6 +842,13 @@ function RescheduleModal({
     }
     if (isAppointmentTimePast(selectedDate, startHour, startMin)) {
       toast.error('已经过去的时间不能改约');
+      return;
+    }
+    const sameDayAppointments = localAppts.filter(item =>
+      item.therapistId === appointment.therapistId && item.date === selectedDate
+    );
+    if (hasBlockingAppointmentAtStart(sameDayAppointments, `${startHour}:${startMin}`, appointment.id)) {
+      toast.error('该技师在相同开始时间已有预约，请重新选择');
       return;
     }
     setSaving(true);
@@ -1075,23 +1089,21 @@ function CreateModal({
     if (!slotDefinition) return false;
     const key = slotKeyFor(therapistId, date, slot);
     const status = slotStatus[key] ?? '空闲';
-    const hasAppt = localAppts.some(a =>
-      a.therapistId === therapistId &&
-      a.date === date &&
-      slotLabelFromTimeSlot(a.timeSlot) === slot &&
-      appointmentBlocksSlot(a)
-    );
-    return status === '空闲' && !hasAppt;
+    return status === '空闲' && firstAvailableTime(date, slotDefinition) !== null;
   }
 
   function firstAvailableTime(date: string, slot: (typeof TIME_SLOTS)[number]): { hour: string; minute: string } | null {
     const hours = getHourOptions(slot.label);
-    if (isSlotExpired(date, slot)) {
-      return { hour: hours[0], minute: getMinuteOptions(slot.label, hours[0])[0] };
-    }
     for (const hour of hours) {
       for (const minute of getMinuteOptions(slot.label, hour)) {
-        if (!isAppointmentTimePast(date, hour, minute)) return { hour, minute };
+        const timeSlot = `${hour}:${minute}`;
+        const sameDayAppointments = localAppts.filter(item =>
+          item.therapistId === therapistId && item.date === date
+        );
+        if ((isSlotExpired(date, slot) || !isAppointmentTimePast(date, hour, minute))
+          && !hasBlockingAppointmentAtStart(sameDayAppointments, timeSlot)) {
+          return { hour, minute };
+        }
       }
     }
     return null;
@@ -1119,6 +1131,13 @@ function CreateModal({
       return;
     }
     const isBackfill = isAppointmentTimePast(selectedDate, startHour, startMin);
+    const sameDayAppointments = localAppts.filter(item =>
+      item.therapistId === therapist.id && item.date === selectedDate
+    );
+    if (hasBlockingAppointmentAtStart(sameDayAppointments, `${startHour}:${startMin}`)) {
+      toast.error('该技师在相同开始时间已有预约，请重新选择');
+      return;
+    }
     const totalTimes = currentTotalTimes;
     const serviceSequence = Number(serviceSequenceInput);
     if (isPackageOrder && (!Number.isInteger(serviceSequence) || serviceSequence < 1 || serviceSequence > totalTimes)) {

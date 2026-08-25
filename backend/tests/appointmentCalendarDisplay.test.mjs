@@ -159,6 +159,14 @@ test('appointments retain an exact order link and display the live order total',
   assert.match(calendarSource, /order\?\.totalTimes \?\? appt\.serviceTotalTimes/);
 });
 
+test('an upgraded order does not rewrite its historical experience appointment as a package visit', () => {
+  assert.match(appointmentRouteSource, /r\.service_total_times == null \? '体验卡' : orderType\(r\.order_type\)/);
+  assert.match(appointmentRouteSource, /serviceTotalTimes: r\.service_total_times == null\s*\? null/);
+  assert.match(calendarSource, /const exactOrderMatchesStage = exactOrder/);
+  assert.match(calendarSource, /sameStageOrders\[0\] \?\? null/);
+  assert.match(appointmentServiceSource, /applyProgress && appointment\.service_total_times != null/);
+});
+
 test('calendar can baseline package progress and browse therapists by collapsible scrollable city groups', () => {
   assert.match(appointmentRouteSource, /'\/sync-order-progress'/);
   assert.match(appointmentServiceSource, /synchronizeAllAppointmentOrderProgress/);

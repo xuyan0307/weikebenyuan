@@ -196,8 +196,7 @@ export async function createAppointment(body: AppointmentWriteBody, pool: Pool =
     const therapistId = body.therapistId || '';
     const date = body.date || '';
     const timeSlot = body.timeSlot || '';
-    const requestedPeriod = getSlotPeriod(timeSlot);
-    if (!therapistId || !date || requestedPeriod === null) {
+    if (!therapistId || !date || getSlotPeriod(timeSlot) === null) {
       throw createError('请选择技师、预约日期和有效时间', 400);
     }
     // Historical times are entered as completed backfills. This is derived on
@@ -207,16 +206,15 @@ export async function createAppointment(body: AppointmentWriteBody, pool: Pool =
     // Locking the therapist serializes concurrent bookings before conflict checking.
     const [therapistRows] = await connection.execute('SELECT id, name FROM therapists WHERE id = ? FOR UPDATE', [therapistId]);
     const therapistName = (therapistRows as Array<{ id: string; name?: string }>)[0]?.name || '';
-    const [sameDayRows] = await connection.execute(
-      `SELECT time_slot FROM appointments
-       WHERE therapist_id = ? AND date = ? AND status NOT IN ('已取消', '取消', '已冲销')`,
-      [therapistId, date]
+    const [sameStartRows] = await connection.execute(
+      `SELECT id FROM appointments
+       WHERE therapist_id = ? AND date = ? AND time_slot = ?
+         AND status NOT IN ('已取消', '取消', '已冲销')
+       LIMIT 1`,
+      [therapistId, date, timeSlot]
     );
-    const hasConflict = (sameDayRows as Array<{ time_slot: string }>).some(
-      appointment => getSlotPeriod(appointment.time_slot) === requestedPeriod
-    );
-    if (hasConflict) {
-      throw createError('该技师此时间段已有预约，请重新选择', 409);
+    if ((sameStartRows as Array<{ id: string }>).length > 0) {
+      throw createError('该技师在相同开始时间已有预约，请重新选择', 409);
     }
 
     const id = randomUUID();
@@ -322,8 +320,7 @@ export async function updateAppointment(
     const therapistId = body.therapistId ?? current.therapist_id;
     const date = body.date ?? formatDateOnly(current.date);
     const timeSlot = body.timeSlot ?? current.time_slot;
-    const requestedPeriod = getSlotPeriod(timeSlot);
-    if (!therapistId || !date || requestedPeriod === null) {
+    if (!therapistId || !date || getSlotPeriod(timeSlot) === null) {
       throw createError('请选择技师、预约日期和有效时间', 400);
     }
 
@@ -343,16 +340,15 @@ export async function updateAppointment(
     }
 
     await connection.execute('SELECT id FROM therapists WHERE id = ? FOR UPDATE', [therapistId]);
-    const [sameDayRows] = await connection.execute(
-      `SELECT time_slot FROM appointments
-       WHERE therapist_id = ? AND date = ? AND id <> ? AND status NOT IN ('已取消', '取消', '已冲销')`,
-      [therapistId, date, current.id]
+    const [sameStartRows] = await connection.execute(
+      `SELECT id FROM appointments
+       WHERE therapist_id = ? AND date = ? AND time_slot = ? AND id <> ?
+         AND status NOT IN ('已取消', '取消', '已冲销')
+       LIMIT 1`,
+      [therapistId, date, timeSlot, current.id]
     );
-    const hasConflict = (sameDayRows as Array<{ time_slot: string }>).some(
-      appointment => getSlotPeriod(appointment.time_slot) === requestedPeriod
-    );
-    if (hasConflict) {
-      throw createError('该技师此时间段已有预约，请重新选择', 409);
+    if ((sameStartRows as Array<{ id: string }>).length > 0) {
+      throw createError('该技师在相同开始时间已有预约，请重新选择', 409);
     }
 
     await connection.execute(
@@ -421,7 +417,10 @@ export async function updateAppointmentStatus(
       [status, applyProgress ? 1 : 0, appointment.id]
     );
 
-    if (applyProgress) {
+    // 体验卡只有“未服务/已服务”状态，不存在服务序号或累计次数。
+    // Only package appointments carry a total-times snapshot and may advance
+    // the independently assigned therapist counter in the order.
+    if (applyProgress && appointment.service_total_times != null) {
       await applyOrderProgress(connection, appointment);
     }
     if (status === '已完成') {

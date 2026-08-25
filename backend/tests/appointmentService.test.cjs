@@ -159,10 +159,10 @@ function fakePool(executeResults) {
   return { calls, getConnection: async () => connection };
 }
 
-test('createAppointment rolls back when the therapist period is already booked', async () => {
+test('createAppointment rolls back when the therapist exact start time is already booked', async () => {
   const pool = fakePool([
     [{ id: 'therapist-1' }],
-    [{ time_slot: '09:00' }],
+    [{ id: 'appointment-existing' }],
   ]);
 
   await assert.rejects(
@@ -170,13 +170,14 @@ test('createAppointment rolls back when the therapist period is already booked',
       customerId: 'customer-1',
       therapistId: 'therapist-1',
       date: '2099-07-18',
-      timeSlot: '10:00',
+      timeSlot: '09:00',
     }, pool),
     error => error.statusCode === 409
   );
   assert.equal(pool.calls.includes('commit'), false);
   assert.equal(pool.calls.includes('rollback'), true);
   assert.equal(pool.calls.some(call => /(?:a\.)?status NOT IN \('已取消', '取消', '已冲销'\)/.test(String(call))), true);
+  assert.equal(pool.calls.some(call => String(call).includes('time_slot = ?')), true);
   assert.equal(pool.calls.at(-1), 'release');
 });
 
@@ -276,7 +277,7 @@ test('updateAppointment rejects rescheduling completed appointment evidence', as
   assert.equal(pool.calls.includes('rollback'), true);
 });
 
-test('updateAppointment rolls back when another appointment occupies the therapist period', async () => {
+test('updateAppointment rolls back when another appointment uses the same exact start', async () => {
   const pool = fakePool([
     [{
       id: 'appointment-1',
@@ -292,13 +293,13 @@ test('updateAppointment rolls back when another appointment occupies the therapi
       progress_applied_at: null,
     }],
     [{ id: 'therapist-1' }],
-    [{ time_slot: '10:30' }],
+    [{ id: 'appointment-other' }],
   ]);
 
   await assert.rejects(
     updateAppointment('appointment-1', {
       date: '2099-07-18',
-      timeSlot: '11:00',
+      timeSlot: '10:30',
     }, pool),
     error => error.statusCode === 409
   );
@@ -327,6 +328,33 @@ test('updateAppointmentStatus does not reapply progress after it was synchronize
   assert.equal(pool.calls.includes('commit'), true);
   assert.equal(pool.calls.includes('rollback'), false);
   assert.equal(pool.calls.at(-1), 'release');
+});
+
+test('completed experience-card appointment changes service status without accumulating order times', async () => {
+  const pool = fakePool([
+    [{
+      id: 'experience-appointment',
+      customer_id: 'customer-1',
+      order_id: 'experience-order',
+      therapist_id: 'therapist-1',
+      date: '2026-08-25',
+      time_slot: '15:00',
+      service: '产康体验',
+      service_total_times: null,
+      status: '待确认',
+      is_backfill: 0,
+      progress_applied_at: null,
+      has_service_record: 0,
+    }],
+    [],
+    [],
+    [],
+  ]);
+
+  await updateAppointmentStatus('experience-appointment', '已完成', pool);
+  assert.equal(pool.calls.some(call => String(call).includes('FROM orders')), false);
+  assert.equal(pool.calls.some(call => String(call).includes('INSERT INTO service_records')), true);
+  assert.equal(pool.calls.includes('commit'), true);
 });
 
 test('completed appointment with service evidence cannot be cancelled directly', async () => {
