@@ -3,9 +3,34 @@ import { getDb } from '../config/database';
 import { authenticateToken } from '../middleware/auth';
 import { auditLog } from '../middleware/auditLog';
 import { parseJson } from '../utils/serialization';
+import { authorizeRoles } from '../middleware/auth';
+import { getSystemParameters, refreshSystemParameters } from '../services/systemParametersService';
 
 const router: Router = Router();
 const VALID_KEY = /^[a-z0-9][a-z0-9:._-]{0,99}$/i;
+
+router.get(
+  '/system-parameters/summary',
+  authenticateToken,
+  authorizeRoles('superadmin', 'admin'),
+  async (_req, res, next) => {
+    try {
+      res.json({ data: await getSystemParameters() });
+    } catch (error) { next(error); }
+  },
+);
+
+router.post(
+  '/system-parameters/refresh',
+  authenticateToken,
+  authorizeRoles('superadmin', 'admin'),
+  auditLog('settings'),
+  async (_req, res, next) => {
+    try {
+      res.json({ data: await refreshSystemParameters(), message: '系统参数已更新' });
+    } catch (error) { next(error); }
+  },
+);
 
 function assertWriteAccess(role: string | undefined, key: string) {
   if (role === 'superadmin' || role === 'admin') return;

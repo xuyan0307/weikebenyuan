@@ -275,9 +275,11 @@ export default function SystemSettingsPage() {
   const [filterRole, setFilterRole] = useState<SystemRole | '__all__'>('__all__');
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchHasUserInputRef = useRef(false);
+  const [searchUnlocked, setSearchUnlocked] = useState(false);
 
   useEffect(() => {
     searchHasUserInputRef.current = false;
+    setSearchUnlocked(false);
     setSearchText('');
 
     const clearDelayedLoginAutofill = () => {
@@ -487,10 +489,41 @@ export default function SystemSettingsPage() {
         <div className="flex items-center gap-3 flex-wrap">
           <input
             ref={searchInputRef}
-            type="search"
-            name="system-user-directory-search"
+            type="text"
+            name={`system-account-filter-${currentUser.id}`}
             value={searchText}
-            onKeyDown={() => { searchHasUserInputRef.current = true; }}
+            readOnly={!searchUnlocked}
+            onPointerDown={() => {
+              setSearchUnlocked(true);
+              searchInputRef.current?.removeAttribute('readonly');
+            }}
+            onFocus={e => {
+              setSearchUnlocked(true);
+              e.currentTarget.removeAttribute('readonly');
+              if (shouldClearAccountSearchAutofill(
+                e.currentTarget.value,
+                currentUser.username,
+                currentUser.name,
+                false,
+              )) {
+                e.currentTarget.value = '';
+                setSearchText('');
+              }
+            }}
+            onKeyDown={e => {
+              if ((e.key === 'Backspace' || e.key === 'Delete') && shouldClearAccountSearchAutofill(
+                e.currentTarget.value,
+                currentUser.username,
+                currentUser.name,
+                false,
+              )) {
+                e.preventDefault();
+                e.currentTarget.value = '';
+                setSearchText('');
+                return;
+              }
+              if (e.key.length === 1 || e.key === 'Process') searchHasUserInputRef.current = true;
+            }}
             onPaste={() => { searchHasUserInputRef.current = true; }}
             onChange={e => {
               const value = e.target.value;
@@ -509,7 +542,9 @@ export default function SystemSettingsPage() {
             }}
             placeholder="搜索姓名 / 账号 / 手机号"
             aria-label="搜索系统账号"
-            autoComplete="off"
+            autoComplete="new-password"
+            autoCapitalize="off"
+            spellCheck={false}
             data-form-type="other"
             data-1p-ignore="true"
             data-lpignore="true"

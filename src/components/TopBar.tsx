@@ -22,6 +22,8 @@ const PAGE_TITLES: Record<string, string> = {
   'finance-profit': '利润分析',
   'settings-basic': '基本设置',
   'settings-notify': '通知设置',
+  'settings-main': '账号设置',
+  'settings-parameters': '系统参数',
 };
 
 const BREADCRUMBS: Record<string, string[]> = {
@@ -38,6 +40,8 @@ const BREADCRUMBS: Record<string, string[]> = {
   'finance-profit': ['财务结算', '利润分析'],
   'settings-basic': ['系统设置', '基本设置'],
   'settings-notify': ['系统设置', '通知设置'],
+  'settings-main': ['系统设置', '账号设置'],
+  'settings-parameters': ['系统设置', '系统参数'],
 };
 
 const ROLE_LABELS: Record<string, string> = {

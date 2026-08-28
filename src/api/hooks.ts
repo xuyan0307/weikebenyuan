@@ -28,6 +28,7 @@ export const qk = {
   operationLogs: (params: QueryParams) => ['operation-logs', params] as const,
   users: () => ['users'] as const,
   setting: (key: string) => ['settings', key] as const,
+  systemParameters: () => ['settings', 'system-parameters'] as const,
 };
 
 // ====== Customers ======
@@ -275,6 +276,22 @@ export function usePlatformSettingMutation<T>(key: string) {
     mutationFn: (value: T) => settingsApi.update(key, value),
     onSuccess: (_result, value) => qc.setQueryData(qk.setting(key), value),
   }).mutateAsync;
+}
+
+export function useSystemParameters() {
+  return useQuery({
+    queryKey: qk.systemParameters(),
+    queryFn: async () => (await settingsApi.systemParameters()).data,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useSystemParametersRefresh() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => (await settingsApi.refreshSystemParameters()).data,
+    onSuccess: data => qc.setQueryData(qk.systemParameters(), data),
+  });
 }
 
 // ====== Auth ======

@@ -28,6 +28,10 @@ import {
   startAppointmentAutoCompletionScheduler,
   stopAppointmentAutoCompletionScheduler,
 } from './services/appointmentAutoCompletionService';
+import {
+  startSystemParametersScheduler,
+  stopSystemParametersScheduler,
+} from './services/systemParametersService';
 
 // Local development keeps shared secrets in the repository root `.env.local`.
 // Support starting the API from either the repository root or `backend/`.
@@ -98,6 +102,7 @@ async function startServer() {
     await initDatabase();
     startAppointmentNotificationScheduler();
     startAppointmentAutoCompletionScheduler();
+    startSystemParametersScheduler();
 
     const server = createServer(app);
     server.listen(PORT, () => {
@@ -114,6 +119,7 @@ async function startServer() {
       console.log(`${signal} received, shutting down gracefully...`);
       stopAppointmentNotificationScheduler();
       stopAppointmentAutoCompletionScheduler();
+      stopSystemParametersScheduler();
       server.close(async () => {
         await closeDatabase();
         console.log('Server closed');

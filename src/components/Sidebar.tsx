@@ -38,7 +38,8 @@ const NAV_ITEMS = [
   {
     key: 'settings', label: '系统设置', icon: SettingsIcon, module: 'settings',
     children: [
-      { key: 'settings-main', label: '系统设置' },
+      { key: 'settings-main', label: '账号设置' },
+      { key: 'settings-parameters', label: '系统参数' },
     ],
   },
 ];

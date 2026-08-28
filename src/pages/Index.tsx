@@ -15,6 +15,7 @@ const TherapistListPage = lazy(() => import('../components/TherapistListPage'));
 const FinanceSalaryPage = lazy(() => import('../components/FinanceSalaryPage'));
 const FinanceIncomePage = lazy(() => import('../components/FinanceIncomePage'));
 const SystemSettingsPage = lazy(() => import('../components/SystemSettingsPage'));
+const SystemParametersPage = lazy(() => import('../components/SystemParametersPage'));
 
 function PageLoading() {
   return (
@@ -40,7 +41,8 @@ const PAGE_TITLES: Record<string, string> = {
   'therapists-list': '技师管理',
   'finance-salary': '工资结算',
   'finance-income': '收支管理',
-  'settings-main': '系统设置',
+  'settings-main': '账号设置',
+  'settings-parameters': '系统参数',
 };
 
 class PageErrorBoundary extends React.Component<
@@ -114,6 +116,8 @@ function AppShell() {
         return <FinanceIncomePage />;
       case 'settings-main':
         return <SystemSettingsPage />;
+      case 'settings-parameters':
+        return <SystemParametersPage />;
       default:
         return <DashboardPage />;
     }

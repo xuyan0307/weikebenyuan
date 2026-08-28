@@ -567,6 +567,39 @@ export async function handleDemoRequest<T>(
     }
   }
 
+  if (path === '/settings/system-parameters/summary' && method === 'GET') {
+    const refreshedAt = new Date().toISOString();
+    return {
+      data: {
+        rds: {
+          database: 'weikebenyuan', status: 'healthy', usedBytes: 860 * 1024 * 1024,
+          totalBytes: 20 * 1024 ** 3, freeBytes: 20 * 1024 ** 3 - 860 * 1024 * 1024,
+          usagePercent: 4.2, message: 'RDS 结构化数据容量统计正常',
+        },
+        oss: {
+          bucket: 'chankang-test', region: 'cn-beijing', status: 'healthy',
+          usedBytes: 1.36 * 1024 ** 3, totalBytes: 40 * 1024 ** 3, freeBytes: 38.64 * 1024 ** 3,
+          usagePercent: 3.4, objectCount: 1268, message: 'OSS 非结构化数据容量统计正常',
+        },
+        ssl: {
+          status: 'healthy', domain: 'weikebenyuan.com', validFrom: '2026-07-01T00:00:00.000Z',
+          validTo: '2026-10-01T00:00:00.000Z', daysRemaining: 34, issuer: "Let's Encrypt",
+          message: 'SSL 证书有效',
+        },
+        refreshedAt,
+        nextAutoRefreshAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      },
+    } as T;
+  }
+  if (path === '/settings/system-parameters/refresh' && method === 'POST') {
+    return handleDemoRequest<T>('GET', '/settings/system-parameters/summary');
+  }
+  if (parts[0] === 'settings') {
+    const key = parts.slice(1).join('/');
+    if (method === 'GET') return { key, value: null, updatedAt: null } as T;
+    return { message: '配置已保存', key } as T;
+  }
+
   throw { status: 404, message: `演示接口未实现：${method} ${path}` };
 }
 

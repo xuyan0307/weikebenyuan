@@ -74,7 +74,34 @@ export const settingsApi = {
   get: <T>(key: string) => api.get<{ key: string; value: T | null; updatedAt: string | null }>(`/settings/${encodeURIComponent(key)}`),
   update: <T>(key: string, value: T) => api.put<{ message: string; key: string }>(`/settings/${encodeURIComponent(key)}`, { value }),
   remove: (key: string) => api.delete<{ message: string; key: string }>(`/settings/${encodeURIComponent(key)}`),
+  systemParameters: () => api.get<{ data: SystemParametersSnapshot }>('/settings/system-parameters/summary'),
+  refreshSystemParameters: () => api.post<{ data: SystemParametersSnapshot; message: string }>('/settings/system-parameters/refresh'),
 };
+
+export type ResourceStatus = 'healthy' | 'warning' | 'unavailable';
+export interface StorageParameter {
+  status: ResourceStatus;
+  usedBytes: number | null;
+  totalBytes: number | null;
+  freeBytes: number | null;
+  usagePercent: number | null;
+  message: string;
+}
+export interface SystemParametersSnapshot {
+  rds: StorageParameter & { database: string };
+  oss: StorageParameter & { bucket: string; region: string; objectCount: number | null };
+  ssl: {
+    status: ResourceStatus;
+    domain: string;
+    validFrom: string | null;
+    validTo: string | null;
+    daysRemaining: number | null;
+    issuer: string;
+    message: string;
+  };
+  refreshedAt: string;
+  nextAutoRefreshAt: string;
+}
 
 // ====== Uploads ======
 export interface UploadedFile {
