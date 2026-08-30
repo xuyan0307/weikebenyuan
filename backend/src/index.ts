@@ -19,6 +19,7 @@ import { operationLogsRouter } from './routes/operation-logs';
 import { usersRouter } from './routes/users';
 import { uploadsRouter } from './routes/uploads';
 import { settingsRouter } from './routes/settings';
+import { assistantRouter } from './routes/assistant';
 import { errorHandler } from './middleware/errorHandler';
 import {
   startAppointmentNotificationScheduler,
@@ -86,6 +87,7 @@ app.use('/api/operation-logs', operationLogsRouter);
 app.use('/api/users', usersRouter);
 app.use('/api/uploads', uploadsRouter);
 app.use('/api/settings', settingsRouter);
+app.use('/api/assistant', assistantRouter);
 
 // 404处理
 app.use((_req: Request, res: Response) => {
