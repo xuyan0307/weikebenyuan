@@ -182,18 +182,27 @@ test('calendar can baseline package progress and browse therapists by collapsibl
   assert.match(calendarSource, /overflowY: 'auto'/);
 });
 
-test('mobile calendar uses compact fixed day widths and readable clipped card fields', () => {
+test('mobile calendar uses compact adaptive rows, readable clipped card fields and pinch zoom', () => {
   assert.match(calendarSource, /data-calendar-table/);
   assert.match(calendarSource, /data-calendar-card/);
   assert.match(calendarSource, /data-calendar-day-column/);
   assert.match(calendarSource, /data-calendar-time-column/);
-  assert.match(globalCssSource, /min-width:\s*1128px\s*!important/);
-  assert.match(globalCssSource, /width:\s*64px\s*!important/);
-  assert.match(globalCssSource, /width:\s*152px\s*!important/);
-  assert.match(globalCssSource, /height:\s*174px\s*!important/);
+  assert.match(globalCssSource, /min-width:\s*1066px\s*!important/);
+  assert.match(globalCssSource, /width:\s*58px\s*!important/);
+  assert.match(globalCssSource, /width:\s*144px\s*!important/);
+  assert.match(globalCssSource, /height:\s*auto\s*!important/);
+  assert.match(globalCssSource, /calendar-card-spacer/);
   assert.match(globalCssSource, /\[data-calendar-card\]\s+\[title\]/);
   assert.match(globalCssSource, /white-space:\s*nowrap\s*!important/);
   assert.match(globalCssSource, /text-overflow:\s*ellipsis\s*!important/);
   assert.match(globalCssSource, /scroll-snap-type:\s*x mandatory/);
   assert.match(globalCssSource, /scroll-snap-stop:\s*always/);
+  assert.match(calendarSource, /label="客服"/);
+  assert.match(calendarSource, /data-calendar-toolbar-row="primary"/);
+  assert.match(calendarSource, /data-calendar-toolbar-row="secondary"/);
+  assert.match(calendarSource, /data-calendar-toolbar-row="tertiary"/);
+  assert.match(calendarSource, /handleCalendarTouchStart/);
+  assert.match(calendarSource, /handleCalendarTouchMove/);
+  assert.match(calendarSource, /Math\.min\(1\.45, Math\.max\(0\.65/);
+  assert.match(calendarSource, /zoom: calendarZoom/);
 });

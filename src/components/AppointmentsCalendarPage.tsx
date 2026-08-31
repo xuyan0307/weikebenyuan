@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, type TouchEvent as ReactTouchEvent } from 'react';
 import {
   ChevronLeftIcon, ChevronRightIcon, PlusIcon, CalendarIcon,
   EditIcon, CheckIcon, XIcon, SearchIcon, MapPinIcon, ChevronDownIcon,
@@ -528,7 +528,7 @@ function AppointmentCard({
       {!editMode && (
         <div className="mt-0.5" style={{ opacity: 0.65, fontSize: 10, ...truncateStyle }} title={appt.remark || ''}>备注：{appt.remark || ''}</div>
       )}
-      <div style={{ flex: 1 }} />
+      <div className="calendar-card-spacer" style={{ flex: 1 }} />
       {!editMode && isCompleted && (
         <div
           className="mt-1 px-2 py-1 rounded text-xs font-medium text-center"
@@ -1650,6 +1650,8 @@ export default function AppointmentsCalendarPage() {
   const [completionUploading, setCompletionUploading] = useState(false);
   const [completionSaving, setCompletionSaving] = useState(false);
   const [progressActionSaving, setProgressActionSaving] = useState(false);
+  const [calendarZoom, setCalendarZoom] = useState(1);
+  const calendarPinchRef = useRef<{ distance: number; zoom: number } | null>(null);
 
   const calendarTherapists = useMemo(
     () => getBoundTherapists(THERAPISTS, ORDERS, APPOINTMENTS),
@@ -1997,6 +1999,34 @@ export default function AppointmentsCalendarPage() {
     }
   }
 
+  function calendarTouchDistance(touches: ReactTouchEvent<HTMLDivElement>['touches']) {
+    const first = touches.item(0);
+    const second = touches.item(1);
+    if (!first || !second) return 0;
+    return Math.hypot(second.clientX - first.clientX, second.clientY - first.clientY);
+  }
+
+  function handleCalendarTouchStart(event: ReactTouchEvent<HTMLDivElement>) {
+    if (event.touches.length !== 2) return;
+    calendarPinchRef.current = {
+      distance: calendarTouchDistance(event.touches),
+      zoom: calendarZoom,
+    };
+  }
+
+  function handleCalendarTouchMove(event: ReactTouchEvent<HTMLDivElement>) {
+    if (event.touches.length !== 2 || !calendarPinchRef.current) return;
+    const distance = calendarTouchDistance(event.touches);
+    if (!distance || !calendarPinchRef.current.distance) return;
+    event.preventDefault();
+    const nextZoom = calendarPinchRef.current.zoom * (distance / calendarPinchRef.current.distance);
+    setCalendarZoom(Math.min(1.45, Math.max(0.65, Math.round(nextZoom * 100) / 100)));
+  }
+
+  function handleCalendarTouchEnd(event: ReactTouchEvent<HTMLDivElement>) {
+    if (event.touches.length < 2) calendarPinchRef.current = null;
+  }
+
   const showTherapistOnCard = activeTherapistIds.length !== 1 && !isTherapist;
 
   return (
@@ -2030,34 +2060,37 @@ export default function AppointmentsCalendarPage() {
           transform: 'translateZ(0)',
         }}
       >
-        {!isTherapist && (
-          <TherapistMultiSelect
-            therapists={calendarTherapists}
-            selectedIds={selectedTherapistIds}
-            onChange={ids => {
-              setSelectedTherapistIds(ids);
-              if (editMode) cancelEdit();
-            }}
+        <div data-calendar-toolbar-row="primary" className="calendar-toolbar-row calendar-toolbar-row-primary">
+          {!isTherapist && (
+            <TherapistMultiSelect
+              therapists={calendarTherapists}
+              selectedIds={selectedTherapistIds}
+              onChange={ids => {
+                setSelectedTherapistIds(ids);
+                if (editMode) cancelEdit();
+              }}
+            />
+          )}
+
+          <GlobalMultiSelectFilter
+            label="客服"
+            options={advisorOptions}
+            selected={selectedAdvisorNames}
+            onChange={setSelectedAdvisorNames}
+            width={200}
           />
-        )}
+          <GlobalMultiSelectFilter
+            label="区域"
+            options={areaOptions}
+            selected={selectedAreas}
+            onChange={setSelectedAreas}
+            width={180}
+          />
+        </div>
 
-        <GlobalMultiSelectFilter
-          label="归属客服"
-          options={advisorOptions}
-          selected={selectedAdvisorNames}
-          onChange={setSelectedAdvisorNames}
-          width={200}
-        />
-        <GlobalMultiSelectFilter
-          label="区域"
-          options={areaOptions}
-          selected={selectedAreas}
-          onChange={setSelectedAreas}
-          width={180}
-        />
-
+        <div data-calendar-toolbar-row="secondary" className="calendar-toolbar-row calendar-toolbar-row-secondary">
         {/* Legend */}
-        <div className="flex items-center gap-3 text-xs">
+        <div className="calendar-toolbar-legend flex items-center gap-3 text-xs">
           <div className="flex items-center gap-1">
             <div className="w-3 h-3 rounded" style={{ background: '#FFF7ED', border: '1px solid #FDBA74' }} />
             <span style={{ color: 'var(--muted-foreground)' }}>体验卡</span>
@@ -2072,7 +2105,7 @@ export default function AppointmentsCalendarPage() {
           <button
             type="button"
             disabled={progressActionSaving}
-            className="px-3 py-1.5 rounded-lg text-sm font-medium hover:opacity-90 disabled:opacity-50 flex items-center gap-1.5"
+            className="calendar-toolbar-sync px-3 py-1.5 rounded-lg text-sm font-medium hover:opacity-90 disabled:opacity-50 flex items-center gap-1.5"
             style={{ height: 36, color: 'var(--brand)', border: '1px solid var(--brand)', background: '#fff' }}
             onClick={handleSyncAllOrderProgress}
             title="以套餐订单当前服务次数建立新基线"
@@ -2082,10 +2115,10 @@ export default function AppointmentsCalendarPage() {
           </button>
         )}
 
-        <div className="flex-1" />
+        <div className="calendar-toolbar-spacer flex-1" />
 
         {/* Week navigator */}
-        <div className="flex items-center gap-1 relative">
+        <div className="calendar-week-navigator flex items-center gap-1 relative">
           <button
             className="p-1.5 rounded-lg hover:bg-muted transition-colors"
             style={{ border: '1px solid var(--border)' }}
@@ -2116,10 +2149,11 @@ export default function AppointmentsCalendarPage() {
             />
           )}
         </div>
+        </div>
 
         {/* Action buttons */}
         {!isTherapist && (
-          <div className="flex items-center gap-2">
+          <div data-calendar-toolbar-row="tertiary" className="calendar-toolbar-row calendar-toolbar-row-tertiary flex items-center gap-2">
             <div className="relative" title={!singleTherapistId ? '请选择单位技师后操作' : ''}>
               <button
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all"
@@ -2166,6 +2200,11 @@ export default function AppointmentsCalendarPage() {
         <div
           data-calendar-scroll-region
           className="overflow-auto"
+          aria-label="排期日历，支持双指缩放"
+          onTouchStart={handleCalendarTouchStart}
+          onTouchMove={handleCalendarTouchMove}
+          onTouchEnd={handleCalendarTouchEnd}
+          onTouchCancel={handleCalendarTouchEnd}
           style={{
             height: '100%',
             minHeight: 0,
@@ -2175,7 +2214,18 @@ export default function AppointmentsCalendarPage() {
             overscrollBehavior: 'contain',
           }}
         >
-          <table data-calendar-table style={{ minWidth: 720, width: '100%', borderCollapse: 'separate', borderSpacing: 0, tableLayout: 'fixed' }}>
+          <table
+            data-calendar-table
+            data-calendar-zoom={calendarZoom.toFixed(2)}
+            style={{
+              minWidth: 720,
+              width: '100%',
+              borderCollapse: 'separate',
+              borderSpacing: 0,
+              tableLayout: 'fixed',
+              zoom: calendarZoom,
+            }}
+          >
             <colgroup>
               <col data-calendar-time-col />
               {weekDates.map((date) => (

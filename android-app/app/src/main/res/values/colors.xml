@@ -1,0 +1,8 @@
+<resources>
+    <color name="brand_blue">#258FE5</color>
+    <color name="brand_blue_dark">#176FB5</color>
+    <color name="page_background">#F3F7FB</color>
+    <color name="text_primary">#17243A</color>
+    <color name="text_secondary">#72829B</color>
+    <color name="white">#FFFFFF</color>
+</resources>
