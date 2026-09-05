@@ -858,6 +858,16 @@ const migrations: Migration[] = [
   },
 ];
 
+migrations.push({
+  id: '031_therapist_dispatch_profile',
+  description: 'Add dispatch settings and multiple origin locations to therapist archive',
+  up: async db => {
+    await addColumn(db, 'therapists', 'dispatch_enabled', 'tinyint(1) NOT NULL DEFAULT 1');
+    await addColumn(db, 'therapists', 'dispatch_locations', 'JSON DEFAULT NULL');
+    await addColumn(db, 'therapists', 'dispatch_note', 'text');
+  },
+});
+
 export async function runMigrations(db: mysql.Pool) {
   const lockConnection = await db.getConnection();
   try {

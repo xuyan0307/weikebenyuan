@@ -24,6 +24,7 @@ const NAV_ITEMS = [
     key: 'services', label: '服务管理', icon: CalendarIcon, module: 'appointments',
     children: [
       { key: 'therapists-list', label: '技师档案' },
+      { key: 'dispatch-assistant', label: '派单助手' },
       { key: 'appointments-calendar', label: '排期管理' },
       { key: 'appointments-list', label: '预约列表' },
     ],

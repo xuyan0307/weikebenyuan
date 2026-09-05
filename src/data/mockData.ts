@@ -276,6 +276,9 @@ export interface Therapist {
   laborCert: MultiCert;           // 人社局证书
   associationCert: MultiCert;     // 协会证书
   remark?: string;
+  dispatchEnabled?: boolean;
+  dispatchLocations?: { label: string; address: string; location?: string }[];
+  dispatchNote?: string;
 }
 
 export const THERAPISTS: Therapist[] = [

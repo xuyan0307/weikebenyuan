@@ -33,6 +33,9 @@ function mapRow(r: any) {
     laborCert: parseJson(r.labor_cert, { state: '无' }),
     associationCert: parseJson(r.association_cert, { state: '无' }),
     remark: r.remark || '',
+    dispatchEnabled: r.dispatch_enabled !== 0,
+    dispatchLocations: parseJson(r.dispatch_locations, []),
+    dispatchNote: r.dispatch_note || '',
   };
 }
 
@@ -78,8 +81,8 @@ router.post('/', authenticateToken, auditLog('therapists'), async (req, res, nex
     const db = getDb();
     const id = b.id || randomUUID();
     await db.execute(
-      `INSERT INTO therapists (id, name, therapist_type, birth_year, phone, area, city, detail_address, services, service_method, characteristics, transport, status, orders, rating, upgrade_rate, star_level, commission_rate, health_cert, first_aid_cert, labor_cert, association_cert, remark)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      `INSERT INTO therapists (id, name, therapist_type, birth_year, phone, area, city, detail_address, services, service_method, characteristics, transport, status, orders, rating, upgrade_rate, star_level, commission_rate, health_cert, first_aid_cert, labor_cert, association_cert, remark, dispatch_enabled, dispatch_locations, dispatch_note)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [
         id, b.name || '', b.therapistType || '产康师', b.birthYear || null, b.phone || '',
         b.area || null, b.city || '厦门', b.detailAddress || null,
@@ -92,6 +95,9 @@ router.post('/', authenticateToken, auditLog('therapists'), async (req, res, nex
         b.laborCert ? JSON.stringify(b.laborCert) : null,
         b.associationCert ? JSON.stringify(b.associationCert) : null,
         b.remark || null,
+        b.dispatchEnabled === false ? 0 : 1,
+        b.dispatchLocations ? JSON.stringify(b.dispatchLocations) : null,
+        b.dispatchNote || null,
       ]
     );
     res.status(201).json({ id });
@@ -107,7 +113,8 @@ router.put('/:id', authenticateToken, auditLog('therapists'), async (req, res, n
         name=?, therapist_type=?, birth_year=?, phone=?, area=?, city=?, detail_address=?,
         services=?, service_method=?, characteristics=?, transport=?, status=?,
         orders=?, rating=?, upgrade_rate=?, star_level=?, commission_rate=?,
-        health_cert=?, first_aid_cert=?, labor_cert=?, association_cert=?, remark=?
+        health_cert=?, first_aid_cert=?, labor_cert=?, association_cert=?, remark=?,
+        dispatch_enabled=COALESCE(?,dispatch_enabled), dispatch_locations=COALESCE(?,dispatch_locations), dispatch_note=COALESCE(?,dispatch_note)
        WHERE id=?`,
       [
         b.name ?? '', b.therapistType ?? '产康师', b.birthYear ?? null, b.phone ?? '',
@@ -120,7 +127,9 @@ router.put('/:id', authenticateToken, auditLog('therapists'), async (req, res, n
         b.firstAidCert ? JSON.stringify(b.firstAidCert) : null,
         b.laborCert ? JSON.stringify(b.laborCert) : null,
         b.associationCert ? JSON.stringify(b.associationCert) : null,
-        b.remark ?? null, req.params.id,
+        b.remark ?? null, b.dispatchEnabled == null ? null : b.dispatchEnabled === false ? 0 : 1,
+        b.dispatchLocations ? JSON.stringify(b.dispatchLocations) : null,
+        b.dispatchNote ?? null, req.params.id,
       ]
     );
     res.json({ message: '更新成功' });

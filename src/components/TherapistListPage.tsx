@@ -31,6 +31,9 @@ interface TherapistForm {
   commissionRate: string;
   gradeKey: TherapistGradeKey;
   remark: string;
+  dispatchEnabled: boolean;
+  dispatchLocationsText: string;
+  dispatchNote: string;
   healthCert: CertWithExpiry;
   firstAidCert: MultiCertFormValue;
   laborCert: MultiCertFormValue;
@@ -623,6 +626,24 @@ function EditModal({ form, onChange, onClose, onSave, onDelete, isNew, canEditGr
             </div>
           </div>
 
+          {/* ── 派单信息 ── */}
+          <p className="text-xs font-semibold text-blue-600 uppercase tracking-wider mt-2 mb-3">派单助手</p>
+          <div className="grid grid-cols-2 gap-x-4">
+            <label className={`${fieldCls} col-span-2 flex items-center gap-2 text-sm text-gray-700`}>
+              <input type="checkbox" checked={form.dispatchEnabled} onChange={e => onChange({ ...form, dispatchEnabled: e.target.checked })} className="accent-blue-600" />
+              参与派单助手推荐（离职、休假人员仍会自动排除）
+            </label>
+            <div className={`${fieldCls} col-span-2`}>
+              <label className={labelCls}>常驻/出发点（每行一个，格式：名称 | 地址）</label>
+              <textarea className={`${inputCls} resize-y`} rows={3} value={form.dispatchLocationsText} onChange={e => onChange({ ...form, dispatchLocationsText: e.target.value })} placeholder={'家 | 厦门市思明区某小区\n门店 | 厦门市湖里区某街道'} />
+              <p className="mt-1 text-[11px] text-gray-400">留空时使用上方“详细住址”；多个出发点会自动选择距客户最近的一个。</p>
+            </div>
+            <div className={`${fieldCls} col-span-2`}>
+              <label className={labelCls}>派单备注</label>
+              <textarea className={`${inputCls} resize-none`} rows={2} value={form.dispatchNote} onChange={e => onChange({ ...form, dispatchNote: e.target.value })} placeholder="仅用于派单判断的补充说明" />
+            </div>
+          </div>
+
           {/* ── 绩效信息 ── */}
           <p className="text-xs font-semibold text-blue-600 uppercase tracking-wider mt-2 mb-3">绩效信息</p>
           <div className="grid grid-cols-2 gap-x-4">
@@ -782,6 +803,9 @@ const BLANK_FORM: TherapistForm = {
   commissionRate: '0',
   gradeKey: 'observer',
   remark: '',
+  dispatchEnabled: true,
+  dispatchLocationsText: '',
+  dispatchNote: '',
   healthCert: { state: '无证书' },
   firstAidCert: { state: '无', items: [] },
   laborCert: { state: '无', items: [] },
@@ -908,6 +932,9 @@ export default function TherapistListPage() {
       commissionRate: String(t.commissionRate ?? GRADE_DEFAULT_COMMISSION[calcTherapistGrade(t.upgradeRate).key]),
       gradeKey: calcTherapistGrade(t.upgradeRate).key,
       remark: t.remark ?? '',
+      dispatchEnabled: t.dispatchEnabled !== false,
+      dispatchLocationsText: (t.dispatchLocations ?? []).map(item => `${item.label || '出发点'} | ${item.address}`).join('\n'),
+      dispatchNote: t.dispatchNote ?? '',
       healthCert: { ...t.healthCert },
       firstAidCert: {
         state: t.firstAidCert.state,
@@ -939,6 +966,11 @@ export default function TherapistListPage() {
 
     const normalizedUpgradeNum = upgradeNum;
     const star = calcLegacyStarLevel(normalizedUpgradeNum);
+    const dispatchLocations = form.dispatchLocationsText.split(/\r?\n/).map(line => line.trim()).filter(Boolean).map(line => {
+      const [label, ...addressParts] = line.split('|');
+      const address = addressParts.join('|').trim();
+      return address ? { label: label.trim() || '出发点', address } : { label: '出发点', address: label.trim() };
+    }).filter(item => item.address);
 
     try {
       if (editIsNew) {
@@ -965,6 +997,9 @@ export default function TherapistListPage() {
           laborCert: toMultiCert(form.laborCert),
           associationCert: toMultiCert(form.associationCert),
           remark: form.remark || undefined,
+          dispatchEnabled: form.dispatchEnabled,
+          dispatchLocations,
+          dispatchNote: form.dispatchNote || undefined,
         };
         await mutations.create(newT);
         toast.success('技师已添加');
@@ -991,6 +1026,9 @@ export default function TherapistListPage() {
           laborCert: toMultiCert(form.laborCert),
           associationCert: toMultiCert(form.associationCert),
           remark: form.remark || undefined,
+          dispatchEnabled: form.dispatchEnabled,
+          dispatchLocations,
+          dispatchNote: form.dispatchNote || undefined,
         } });
         toast.success('技师信息已更新');
       }

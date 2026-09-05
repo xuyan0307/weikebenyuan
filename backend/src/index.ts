@@ -21,6 +21,7 @@ import { uploadsRouter } from './routes/uploads';
 import { settingsRouter } from './routes/settings';
 import { assistantRouter } from './routes/assistant';
 import { xiaohongshuOAuthRouter } from './routes/xiaohongshuOAuth';
+import { dispatchRouter } from './routes/dispatch';
 import { errorHandler } from './middleware/errorHandler';
 import { shouldSkipRequestLogging } from './middleware/requestLogging';
 import {
@@ -84,6 +85,7 @@ app.use('/api/customers', customersRouter);
 app.use('/api/orders', ordersRouter);
 app.use('/api/appointments', appointmentsRouter);
 app.use('/api/therapists', therapistsRouter);
+app.use('/api/dispatch', dispatchRouter);
 app.use('/api/service-records', serviceRecordsRouter);
 app.use('/api/finance', financeRouter);
 app.use('/api/contracts', contractsRouter);

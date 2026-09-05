@@ -223,6 +223,7 @@ export interface Therapist {
   services: string[]; serviceMethod: string; characteristics: string; transport: string;
   status: string; orders: number; rating: number; upgradeRate: number; starLevel: number; commissionRate: number;
   healthCert: unknown; firstAidCert: unknown; laborCert: unknown; associationCert: unknown; remark?: string;
+  dispatchEnabled?: boolean; dispatchLocations?: { label: string; address: string; location?: string }[]; dispatchNote?: string;
 }
 export const therapistsApi = {
   list: (params: QueryParams) => api.get<Paged<Therapist>>('/therapists', params),
@@ -232,6 +233,24 @@ export const therapistsApi = {
   patchStatus: (id: string, status: string) =>
     api.patch<{ message: string }>(`/therapists/${id}/status`, { status }),
   remove: (id: string) => api.delete<{ message: string }>(`/therapists/${id}`),
+};
+
+// ====== Dispatch Assistant ======
+export interface DispatchTip { name: string; district: string; address: string; location: string }
+export interface DispatchCandidate {
+  id: string; name: string; phone: string; city: string; role: string; level: string;
+  levelScore: number; isObservation: boolean; transport: string; scope: string;
+  originAddress: string; driveKm: number; driveMinutes: number; scopeReason: string;
+  projectReason: string; note: string; estimated: boolean; score: number;
+}
+export interface DispatchRankInput {
+  city: string; district?: string; address: string; need?: string; appointmentDate?: string;
+  roles: string[]; includeObservation: boolean; location?: string;
+}
+export const dispatchApi = {
+  source: () => api.get<{ source: string; total: number; roles: { role: string; count: number }[]; mapConfigured: boolean }>('/dispatch/source'),
+  tips: (city: string, district: string, keyword: string) => api.get<{ tips: DispatchTip[] }>('/dispatch/tips', { city, district, keyword }),
+  rank: (body: DispatchRankInput) => api.post<{ customerLocation: string; results: DispatchCandidate[]; warning: string }>('/dispatch/rank', body),
 };
 
 // ====== Service Records ======

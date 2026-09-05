@@ -12,6 +12,7 @@ const ContractListPage = lazy(() => import('../components/ContractListPage'));
 const AppointmentsCalendarPage = lazy(() => import('../components/AppointmentsCalendarPage'));
 const AppointmentsListPage = lazy(() => import('../components/AppointmentsListPage'));
 const TherapistListPage = lazy(() => import('../components/TherapistListPage'));
+const DispatchAssistantPage = lazy(() => import('../components/DispatchAssistantPage'));
 const FinanceSalaryPage = lazy(() => import('../components/FinanceSalaryPage'));
 const FinanceIncomePage = lazy(() => import('../components/FinanceIncomePage'));
 const SystemSettingsPage = lazy(() => import('../components/SystemSettingsPage'));
@@ -39,6 +40,7 @@ const PAGE_TITLES: Record<string, string> = {
   'services-records': '服务记录',
   'services-change': '服务进度',
   'therapists-list': '技师管理',
+  'dispatch-assistant': '派单助手',
   'finance-salary': '工资结算',
   'finance-income': '收支管理',
   'settings-main': '账号设置',
@@ -110,6 +112,8 @@ function AppShell() {
         return <AppointmentsListPage />;
       case 'therapists-list':
         return <TherapistListPage />;
+      case 'dispatch-assistant':
+        return <DispatchAssistantPage />;
       case 'finance-salary':
         return <FinanceSalaryPage />;
       case 'finance-income':
