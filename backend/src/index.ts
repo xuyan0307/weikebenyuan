@@ -20,6 +20,7 @@ import { usersRouter } from './routes/users';
 import { uploadsRouter } from './routes/uploads';
 import { settingsRouter } from './routes/settings';
 import { assistantRouter } from './routes/assistant';
+import { xiaohongshuOAuthRouter } from './routes/xiaohongshuOAuth';
 import { errorHandler } from './middleware/errorHandler';
 import {
   startAppointmentNotificationScheduler,
@@ -51,7 +52,10 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '30mb' }));
 app.use(express.urlencoded({ extended: true, limit: '30mb' }));
-app.use(morgan('combined'));
+app.use(morgan('combined', {
+  // OAuth authorization codes are short-lived credentials and must not enter logs.
+  skip: req => req.path === '/api/oauth/xiaohongshu/callback',
+}));
 
 // 健康检查
 app.get('/health', (_req: Request, res: Response) => {
@@ -88,6 +92,7 @@ app.use('/api/users', usersRouter);
 app.use('/api/uploads', uploadsRouter);
 app.use('/api/settings', settingsRouter);
 app.use('/api/assistant', assistantRouter);
+app.use('/api/oauth', xiaohongshuOAuthRouter);
 
 // 404处理
 app.use((_req: Request, res: Response) => {
