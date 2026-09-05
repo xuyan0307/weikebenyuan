@@ -9,7 +9,7 @@ import { useApp } from '../hooks/useApp';
 import { DateRangeFilter } from './ui/date-range-filter';
 import { GLOBAL_DATE_RANGE_QUICK_OPTIONS, formatLocalDate, quickDateRange, type DateRangeValue } from '../utils/dateRange';
 import { useGlobalDateRange } from '../utils/useGlobalDateRange';
-import { orderReportContribution } from '../utils/orderReportMetrics';
+import { isVisibleAdvisorReportRow, orderReportContribution } from '../utils/orderReportMetrics';
 
 type TimeDimension = 'day' | 'week' | 'month' | 'year';
 
@@ -449,8 +449,18 @@ function OrderReportPage() {
       upgradeCustomerCount: row.upgradeCustomerIds.size,
       upgradeRate: row.trialCustomerIds.size ? row.upgradeCustomerIds.size / row.trialCustomerIds.size : 0,
       salesAmount: row.salesAmount,
-    })).sort((a, b) => b.salesAmount - a.salesAmount || b.trialCardCount - a.trialCardCount || a.advisor.localeCompare(b.advisor, 'zh-CN'));
+    })).filter(isVisibleAdvisorReportRow).sort((a, b) => b.salesAmount - a.salesAmount || b.trialCardCount - a.trialCardCount || a.advisor.localeCompare(b.advisor, 'zh-CN'));
   }, [customers, orders, customerById, advisorOptionsKey, start.getTime(), end.getTime()]);
+
+  const visibleAdvisorOptions = advisorOptions.filter(option => reportRows.some(row => row.advisor === option.value));
+  const visibleAdvisorKey = JSON.stringify(visibleAdvisorOptions.map(option => option.value));
+  useEffect(() => {
+    const available = new Set<string>(JSON.parse(visibleAdvisorKey));
+    setAdvisorFilter(previous => {
+      const next = previous.filter(value => value === '__none__' || available.has(value));
+      return next.length === previous.length ? previous : next;
+    });
+  }, [visibleAdvisorKey]);
 
   const filtered = reportRows.filter(row => {
     const matchSearch = !search.trim() || row.advisor.includes(search.trim());
@@ -509,7 +519,7 @@ function OrderReportPage() {
           {search && <button onClick={() => setSearch('')}><XIcon size={12} style={{ color: 'var(--muted-foreground)' }} /></button>}
         </div>
 
-        <MultiSelect label="客服" options={advisorOptions} selected={advisorFilter} onChange={setAdvisorFilter} />
+        <MultiSelect label="客服" options={visibleAdvisorOptions} selected={advisorFilter} onChange={setAdvisorFilter} />
 
         <div className="hidden" style={{ border: '1px solid var(--border)' }}>
           {(['day', 'week', 'month', 'year'] as TimeDimension[]).map(item => (

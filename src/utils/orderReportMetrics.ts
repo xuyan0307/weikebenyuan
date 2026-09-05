@@ -4,6 +4,18 @@ export type OrderReportSaleStage = {
   purchaseDate: string;
 };
 
+/** Unassigned is a data bucket, not an account; hide it only when empty. */
+export function isVisibleAdvisorReportRow(row: {
+  advisor: string;
+  customerCount: number;
+  trialCardCount: number;
+  upgradeCustomerCount: number;
+  salesAmount: number;
+}): boolean {
+  return row.advisor !== '未分配' || row.customerCount > 0 || row.trialCardCount > 0
+    || row.upgradeCustomerCount > 0 || row.salesAmount !== 0;
+}
+
 function parseRecord(value: unknown): Record<string, any> {
   if (typeof value === 'string') {
     try {

@@ -2,7 +2,21 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import fs from 'node:fs';
 import vm from 'node:vm';
-import { orderReportContribution } from '../../src/utils/orderReportMetrics.ts';
+import { isVisibleAdvisorReportRow, orderReportContribution } from '../../src/utils/orderReportMetrics.ts';
+
+test('empty unassigned bucket is hidden but real accounts and any current activity remain visible', () => {
+  const empty = { advisor: '未分配', customerCount: 0, trialCardCount: 0, upgradeCustomerCount: 0, salesAmount: 0 };
+  assert.equal(isVisibleAdvisorReportRow(empty), false);
+  assert.equal(isVisibleAdvisorReportRow({ ...empty, advisor: '秋怡' }), true);
+  for (const key of ['customerCount', 'trialCardCount', 'upgradeCustomerCount', 'salesAmount']) {
+    assert.equal(isVisibleAdvisorReportRow({ ...empty, [key]: 1 }), true);
+  }
+  assert.equal(isVisibleAdvisorReportRow({ ...empty, salesAmount: -288 }), true);
+  const source = fs.readFileSync(new URL('../../src/components/ContractListPage.tsx', import.meta.url), 'utf8');
+  assert.match(source, /filter\(isVisibleAdvisorReportRow\)/);
+  assert.match(source, /label="客服" options=\{visibleAdvisorOptions\}/);
+  assert.match(source, /value === '__none__' \|\| available.has\(value\)/);
+});
 
 const start = new Date('2026-08-01T00:00:00');
 const end = new Date('2026-08-31T23:59:59');
