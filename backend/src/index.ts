@@ -22,6 +22,7 @@ import { settingsRouter } from './routes/settings';
 import { assistantRouter } from './routes/assistant';
 import { xiaohongshuOAuthRouter } from './routes/xiaohongshuOAuth';
 import { errorHandler } from './middleware/errorHandler';
+import { shouldSkipRequestLogging } from './middleware/requestLogging';
 import {
   startAppointmentNotificationScheduler,
   stopAppointmentNotificationScheduler,
@@ -54,7 +55,7 @@ app.use(express.json({ limit: '30mb' }));
 app.use(express.urlencoded({ extended: true, limit: '30mb' }));
 app.use(morgan('combined', {
   // OAuth authorization codes are short-lived credentials and must not enter logs.
-  skip: req => req.path === '/api/oauth/xiaohongshu/callback',
+  skip: shouldSkipRequestLogging,
 }));
 
 // 健康检查

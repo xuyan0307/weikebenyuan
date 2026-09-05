@@ -2,13 +2,23 @@ const assert = require('node:assert/strict');
 const http = require('node:http');
 const test = require('node:test');
 const express = require('express');
+const morgan = require('morgan');
 
 const {
   xiaohongshuOAuthRouter,
 } = require('../dist/routes/xiaohongshuOAuth.js');
+const {
+  shouldSkipRequestLogging,
+} = require('../dist/middleware/requestLogging.js');
 
-async function withServer(run) {
+async function withServer(run, requestLogs = null) {
   const app = express();
+  if (requestLogs) {
+    app.use(morgan('combined', {
+      skip: shouldSkipRequestLogging,
+      stream: { write: line => requestLogs.push(line) },
+    }));
+  }
   app.use('/api/oauth', xiaohongshuOAuthRouter);
   const server = http.createServer(app);
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -50,4 +60,18 @@ test('rejects callbacks without both an authorization code and state', async () 
     assert.equal(response.headers.get('location'), null);
     assert.doesNotMatch(await response.text(), /short-lived-code/);
   });
+});
+
+test('does not write OAuth callback query strings to Morgan logs', async () => {
+  const requestLogs = [];
+  await withServer(async baseUrl => {
+    const response = await fetch(
+      `${baseUrl}/api/oauth/xiaohongshu/callback?auth_code=must-not-be-logged&state=expected-state`,
+      { redirect: 'manual' },
+    );
+
+    assert.equal(response.status, 302);
+  }, requestLogs);
+
+  assert.deepEqual(requestLogs, []);
 });
