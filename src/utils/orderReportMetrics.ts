@@ -89,10 +89,8 @@ export function orderReportContribution(order: Record<string, any>, start: Date,
   const visibleStages = orderReportSaleStages(order).filter(stage => reportStageInRange(stage, start, end));
   const hasUpgrade = visibleStages.some(stage => stage.kind === 'package');
   return {
-    // Every upgraded customer necessarily passed through the experience-card
-    // stage, so upgrades remain in the experience-card denominator even when
-    // the original card was purchased before the selected reporting period.
-    hasExperienceCard: hasUpgrade || visibleStages.some(stage => stage.kind === 'experience'),
+    // Count the card in its own purchase period, independently of upgrades.
+    hasExperienceCard: visibleStages.some(stage => stage.kind === 'experience'),
     hasUpgrade,
     upgradeSalesAmount: visibleStages
       .filter(stage => stage.kind === 'package')

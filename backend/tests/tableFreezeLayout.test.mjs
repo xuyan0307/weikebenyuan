@@ -170,7 +170,7 @@ test('order follow status filter supports all, single and multiple selections', 
   assert.match(ordersSource, /matchesOrderFollowStatuses\(followInfo\.status, fFollowStatus, FILTER_NONE\)/);
 });
 
-test('data report keeps upgraded customers in experience count and sales include packages only', () => {
+test('data report counts experience cards by purchase period and sales include packages only', () => {
   const upgradedOrder = {
     type: '套餐',
     amount: 6000,
@@ -186,7 +186,7 @@ test('data report keeps upgraded customers in experience count and sales include
   const start = new Date('2026-08-01T00:00:00');
   const end = new Date('2026-08-31T23:59:59');
   assert.deepEqual(orderReportContribution(upgradedOrder, start, end), {
-    hasExperienceCard: true,
+    hasExperienceCard: false,
     hasUpgrade: true,
     upgradeSalesAmount: 6000,
   });

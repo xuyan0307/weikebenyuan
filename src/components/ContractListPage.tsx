@@ -433,7 +433,7 @@ function OrderReportPage() {
       const advisor = normalizeAdvisor(customer?.advisor || o.advisor);
       const row = ensure(advisor);
       const customerId = customer ? String(customer.id || customer._id || customer.customerCode || customer.name) : customerKeyOf(o);
-      row.customerIds.add(customerId);
+      // New customers are counted above by acquisition date, never by sales.
 
       const contribution = orderReportContribution(o, start, end);
       if (contribution.hasExperienceCard) row.trialCustomerIds.add(customerId);
@@ -478,7 +478,7 @@ function OrderReportPage() {
   return (
     <div data-cmp="OrderReportPage" className="flex flex-col gap-4">
       <div className={showMonthlyAssessment ? 'grid grid-cols-5 gap-4' : 'grid grid-cols-4 gap-4'}>
-        <MetricCard title="客户数量" value={summary.customers.toLocaleString()} icon={UsersIcon} color="var(--brand)" />
+        <MetricCard title="新客数量" value={summary.customers.toLocaleString()} icon={UsersIcon} color="var(--brand)" />
         <MetricCard title="已购体验卡" value={summary.trials.toLocaleString()} icon={CreditCardIcon} color="var(--success)" />
         <MetricCard title="升单客户" value={summary.upgrades.toLocaleString()} icon={TrendingUpIcon} color="var(--warning)" />
         <MetricCard title="销售额" value={money(summary.sales)} icon={CoinsIcon} color="var(--success)" />
@@ -566,7 +566,7 @@ function OrderReportPage() {
             <thead>
               <tr>
                 <th>客服名字</th>
-                <th>客户数量</th>
+                <th title="按客户获客日期统计，不包含仅在本期成交的往期客户">新客数量</th>
                 <th>已购体验卡数量</th>
                 <th>购买率</th>
                 {showMonthlyAssessment && <th>月度目标</th>}
