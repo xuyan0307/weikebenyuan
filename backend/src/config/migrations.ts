@@ -918,6 +918,15 @@ migrations.push({
   },
 });
 
+migrations.push({
+  id: '032_dispatch_selection_and_specialty_grade',
+  description: 'Explicit administrator dispatch selection and independent specialty grades',
+  up: async db => {
+    await addColumn(db, 'therapists', 'dispatch_selected', 'tinyint(1) NOT NULL DEFAULT 0');
+    await addColumn(db, 'therapists', 'specialty_grade', 'varchar(20) DEFAULT NULL');
+  },
+});
+
 export async function runMigrations(db: mysql.Pool) {
   const lockConnection = await db.getConnection();
   try {

@@ -277,6 +277,7 @@ export interface Therapist {
   associationCert: MultiCert;     // 协会证书
   remark?: string;
   dispatchEnabled?: boolean;
+  specialtyGrade?: 'observer' | 'B';
   dispatchLocations?: { label: string; address: string; location?: string }[];
   dispatchNote?: string;
 }

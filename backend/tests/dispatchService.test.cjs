@@ -17,10 +17,10 @@ test('dispatch uses archive eligibility and closest valid origin without writing
     return { ok: true, json: async () => ({ status: '1', results: [{ distance: from === '118.1,24.5' ? '10000' : '20000', duration: '1800' }] }) };
   };
   t.after(() => { global.fetch = original; });
-  const archive = { id: 'live', name: '档案人员', status: '在职', therapist_type: '产康师', upgrade_rate: 60,
+  const archive = { id: 'live', name: '档案人员', status: '在职', therapist_type: '产康师', upgrade_rate: 60, dispatch_selected: 1,
     dispatch_locations: [{ address: '近出发点', location: '118.1,24.5' }, { address: '远出发点', location: '118.2,24.5' }] };
   const result = await rankTherapists([
-    archive, { ...archive, id: 'off', status: '离职' }, { ...archive, id: 'disabled', dispatch_enabled: 0 },
+    archive, { ...archive, id: 'off', status: '离职' }, { ...archive, id: 'disabled', dispatch_selected: 0 },
     { ...archive, id: 'other-role', therapist_type: '运动康复师' }, { ...archive, id: 'observer', upgrade_rate: 0 },
     { ...archive, id: 'missing', dispatch_locations: [] },
   ], { city: '厦门', address: '客户小区', location: '118.15,24.51', roles: ['产康师'] }, 'test-only');
@@ -36,7 +36,7 @@ test('bad driving response is clearly marked as an estimate, never zero distance
   const original = global.fetch;
   global.fetch = async () => ({ ok: true, json: async () => ({ status: '1', results: [{ info: 'NO ROUTE' }] }) });
   t.after(() => { global.fetch = original; });
-  const result = await rankTherapists([{ id: 'estimate', name: '估算人员', status: '在职', upgrade_rate: 60,
+  const result = await rankTherapists([{ id: 'estimate', name: '估算人员', status: '在职', upgrade_rate: 60, dispatch_selected: 1,
     dispatch_locations: [{ address: '出发点', location: '118.18,24.55' }] }],
     { city: '厦门', address: '客户地址', location: '118.20,24.56', roles: ['产康师'] }, 'test-only');
   assert.equal(result.results[0].estimated, true);
@@ -49,7 +49,7 @@ test('radius excludes distant staff and optional observation staff remain availa
     distance: new URL(url).searchParams.get('origins') === '118.3,24.5' ? '51000' : '5000', duration: '1200',
   }] }) });
   t.after(() => { global.fetch = original; });
-  const base = { name: '人员', status: '在职', upgrade_rate: 0 };
+  const base = { name: '人员', status: '在职', upgrade_rate: 0, dispatch_selected: 1 };
   const result = await rankTherapists([
     { ...base, id: 'far', dispatch_locations: [{ address: '远', location: '118.3,24.5' }] },
     { ...base, id: 'near', dispatch_locations: [{ address: '近', location: '118.31,24.5' }] },

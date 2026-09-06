@@ -9,11 +9,11 @@ test('dispatch content retains its natural height before the footer', () => {
   assert.ok(shell.indexOf('<RegulatoryFooter') > shell.indexOf('{renderActivePage()}'));
 });
 
-test('mobile date defaults to ISO without locale-dependent separators', () => {
-  const fn = page.match(/function todayValue\(\) \{([\s\S]*?)\n\}/)[1];
-  assert.doesNotMatch(fn, /Intl/);
-  const value = new Function(fn)();
-  assert.match(value, /^\d{4}-\d{2}-\d{2}$/);
+test('dispatch has no appointment date and exactly one default postpartum role', () => {
+  assert.doesNotMatch(page, /appointmentDate|type="date"/);
+  assert.match(page, /useState<string\[\]>\(\['产康师'\]\)/);
+  assert.match(page, /type="radio" name="dispatch-role"/);
+  assert.match(page, /setRoles\(\[role\]\)/);
 });
 
 test('touch submission has visible loading, error, empty states and duplicate protection', () => {

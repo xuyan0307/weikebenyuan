@@ -86,6 +86,13 @@ function normalizedRole(value: unknown): string {
   return '产康师';
 }
 
+export function gradeForTherapist(row: DbTherapist) {
+  const role = normalizedRole(row.therapist_type);
+  if (role === '产康师') return gradeFromUpgradeRate(row.upgrade_rate);
+  const isB = row.specialty_grade === 'B' || (!row.specialty_grade && Number(row.commission_rate) === 5);
+  return { level: isB ? `B档${role}` : '观察池', score: isB ? 3 : 1, observation: !isB };
+}
+
 function roleAllowed(role: string, selectedRoles: string[]): boolean {
   return selectedRoles.some(item => normalizedRole(item) === role);
 }
@@ -192,19 +199,20 @@ export async function rankTherapists(rows: DbTherapist[], input: DispatchInput, 
 
   let failedOrigins = 0;
   let missingOrigins = 0;
+  let pendingGrades = 0;
   const evaluate = async (row: DbTherapist) => {
-    const grade = gradeFromUpgradeRate(row.upgrade_rate);
+    const grade = gradeForTherapist(row);
     const role = normalizedRole(row.therapist_type);
     if (clean(row.status) !== '在职') return null;
-    if (Number(row.dispatch_enabled) === 0) return null;
-    if (grade.observation && !input.includeObservation) return null;
+    if (Number(row.dispatch_selected) !== 1) return null;
     if (!roleAllowed(role, selectedRoles)) return null;
-    if (clean(row.name).includes('吴小玲') && !city.includes('漳州')) return null;
+    if (role !== '产康师' && !row.specialty_grade && ![0, 5].includes(Number(row.commission_rate || 0))) { pendingGrades++; return null; }
+    if (grade.observation && !input.includeObservation) return null;
     const configuredOrigins = parseLocations(row.dispatch_locations);
     const origins = configuredOrigins.length ? configuredOrigins : [{ label: '默认出发点', address: clean(row.detail_address) }];
     if (!origins.some(item => clean(item.address))) { missingOrigins++; return null; }
     try {
-      const measured = (await Promise.all(origins.slice(0, 5).map(async item => {
+      const measured = (await Promise.all(origins.slice(0, 2).map(async item => {
         try {
         const originAddress = clean(item.address);
         if (!originAddress) return null;
@@ -239,8 +247,8 @@ export async function rankTherapists(rows: DbTherapist[], input: DispatchInput, 
   await Promise.all(Array.from({ length: Math.min(2, rows.length) }, async () => {
     while (cursor < rows.length) { const index = cursor++; candidates[index] = await evaluate(rows[index]); }
   }));
-  const warning = [missingOrigins ? `${missingOrigins}位人员未填写出发地址` : '', failedOrigins ? `${failedOrigins}位人员的地址无法计算，请检查地址或稍后重试` : ''].filter(Boolean).join('；');
-  return { customerLocation: customerGeo.formatted, results: sortDispatchCandidates(candidates.filter((item): item is DispatchCandidate => item !== null)).slice(0, 20), warning };
+  const warning = [pendingGrades ? `${pendingGrades}位人员的原提成不符合新档位规则，请管理员在技师档案确认档位` : '', missingOrigins ? `${missingOrigins}位人员未填写出发地址` : '', failedOrigins ? `${failedOrigins}位人员的地址无法计算，请检查地址或稍后重试` : ''].filter(Boolean).join('；');
+  return { customerLocation: customerGeo.formatted, results: sortDispatchCandidates(candidates.filter((item): item is DispatchCandidate => item !== null)), warning };
 }
 
 export async function queryAddressTips(city: string, district: string, keyword: string, apiKey: string) {

@@ -285,6 +285,7 @@ export interface Therapist {
   status: string; orders: number; rating: number; upgradeRate: number; starLevel: number; commissionRate: number;
   healthCert: unknown; firstAidCert: unknown; laborCert: unknown; associationCert: unknown; remark?: string;
   dispatchEnabled?: boolean; dispatchLocations?: { label: string; address: string; location?: string }[]; dispatchNote?: string;
+  specialtyGrade?: 'observer' | 'B';
 }
 export const therapistsApi = {
   list: (params: QueryParams) => api.get<Paged<Therapist>>('/therapists', params),
@@ -305,10 +306,12 @@ export interface DispatchCandidate {
   projectReason: string; note: string; estimated: boolean; score: number;
 }
 export interface DispatchRankInput {
-  city: string; district?: string; address: string; need?: string; appointmentDate?: string;
+  city: string; district?: string; address: string; need?: string;
   roles: string[]; includeObservation: boolean; location?: string;
 }
 export const dispatchApi = {
+  settings: () => api.get<{ therapists: { id: string; name: string; role: string; status: string; selected: boolean }[] }>('/dispatch/settings'),
+  saveSettings: (selections: { id: string; selected: boolean }[]) => api.put<{ message: string }>('/dispatch/settings', { selections }),
   source: () => api.get<{ source: string; total: number; roles: { role: string; count: number }[]; mapConfigured: boolean }>('/dispatch/source'),
   tips: (city: string, district: string, keyword: string) => api.get<{ tips: DispatchTip[] }>('/dispatch/tips', { city, district, keyword }),
   rank: async (body: DispatchRankInput) => {

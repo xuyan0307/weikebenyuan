@@ -32,7 +32,8 @@ interface TherapistForm {
   gradeKey: TherapistGradeKey;
   remark: string;
   dispatchEnabled: boolean;
-  dispatchLocationsText: string;
+  dispatchAddress1: string;
+  dispatchAddress2: string;
   dispatchNote: string;
   healthCert: CertWithExpiry;
   firstAidCert: MultiCertFormValue;
@@ -83,6 +84,23 @@ function calcLegacyStarLevel(upgradeRate: number): 1 | 2 | 3 | 4 | 5 {
   if (grade === 'B') return 3;
   if (grade === 'A') return 2;
   return 1;
+}
+
+function gradeDefsForType(type: string): TherapistGradeDef[] {
+  if (!type.includes('运动') && !type.includes('调理')) return THERAPIST_GRADE_DEFS;
+  const fee = type.includes('运动') ? '课时费' : '手工费';
+  const label = type.includes('运动') ? '运动康复师' : '调理师';
+  return [
+    { ...THERAPIST_GRADE_DEFS[0], range: '独立设置', incomeRule: `仅${fee}，无提成` },
+    { ...THERAPIST_GRADE_DEFS[2], label: `B档${label}`, range: '独立设置', incomeRule: `${fee} + 5%提成`, bonus: '无' },
+  ];
+}
+
+function profileGrade(t: Therapist): TherapistGradeDef {
+  const defs = gradeDefsForType(t.therapistType);
+  if (defs === THERAPIST_GRADE_DEFS) return calcTherapistGrade(t.upgradeRate);
+  if (!t.specialtyGrade && ![0, 5].includes(Number(t.commissionRate))) return { ...defs[0], label: '待确认档位', incomeRule: `原提成${t.commissionRate}%，待管理员确认新档位` };
+  return defs[(t.specialtyGrade === 'B' || (!t.specialtyGrade && Number(t.commissionRate) === 5)) ? 1 : 0];
 }
 
 function calcTherapistGrade(upgradeRate: number): TherapistGradeDef {
@@ -442,7 +460,7 @@ function TherapistDetailModal({ therapist, onClose }: TherapistDetailModalProps)
     </div>
   );
 
-  const grade = calcTherapistGrade(therapist.upgradeRate);
+  const grade = profileGrade(therapist);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.35)' }}>
@@ -544,17 +562,20 @@ function EditModal({ form, onChange, onClose, onSave, onDelete, isNew, canEditGr
     onChange({ ...form, [k]: v });
   }
 
+  const gradeDefs = gradeDefsForType(form.therapistType);
+  const isSpecialty = gradeDefs !== THERAPIST_GRADE_DEFS;
+
   function setGrade(key: TherapistGradeKey) {
     if (!canEditGrade) return;
     onChange({
       ...form,
       gradeKey: key,
-      upgradeRate: GRADE_DEFAULT_RATE[key],
-      commissionRate: GRADE_DEFAULT_COMMISSION[key],
+      upgradeRate: isSpecialty ? form.upgradeRate : GRADE_DEFAULT_RATE[key],
+      commissionRate: isSpecialty ? (key === 'B' ? '5' : '0') : GRADE_DEFAULT_COMMISSION[key],
     });
   }
 
-  const selectedGrade = THERAPIST_GRADE_DEFS.find(g => g.key === form.gradeKey) ?? calcTherapistGrade(Number(form.upgradeRate) || 0);
+  const selectedGrade = gradeDefs.find(g => g.key === form.gradeKey) ?? gradeDefs[0];
 
   const inputCls = 'border border-gray-300 rounded px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400 w-full';
   const labelCls = 'block text-xs text-gray-500 mb-0.5';
@@ -576,7 +597,7 @@ function EditModal({ form, onChange, onClose, onSave, onDelete, isNew, canEditGr
           <div className="grid grid-cols-2 gap-x-4">
             <div className={fieldCls}>
               <label className={labelCls}>技师类型</label>
-              <select className={inputCls} value={form.therapistType} onChange={e => f('therapistType', e.target.value)}>
+              <select className={inputCls} value={form.therapistType} disabled={!canEditGrade && !isNew} onChange={e => onChange({ ...form, therapistType: e.target.value, gradeKey: 'observer', upgradeRate: '0', commissionRate: '0' })}>
                 {['产康师', '运动康复师', '调理师'].map(t => <option key={t}>{t}</option>)}
               </select>
             </div>
@@ -629,15 +650,16 @@ function EditModal({ form, onChange, onClose, onSave, onDelete, isNew, canEditGr
           {/* ── 派单信息 ── */}
           <p className="text-xs font-semibold text-blue-600 uppercase tracking-wider mt-2 mb-3">派单助手</p>
           <div className="grid grid-cols-2 gap-x-4">
-            <label className={`${fieldCls} col-span-2 flex items-center gap-2 text-sm text-gray-700`}>
-              <input type="checkbox" checked={form.dispatchEnabled} onChange={e => onChange({ ...form, dispatchEnabled: e.target.checked })} className="accent-blue-600" />
-              参与派单助手推荐（离职、休假人员仍会自动排除）
-            </label>
-            <div className={`${fieldCls} col-span-2`}>
-              <label className={labelCls}>常驻/出发点（每行一个，格式：名称 | 地址）</label>
-              <textarea className={`${inputCls} resize-y`} rows={3} value={form.dispatchLocationsText} onChange={e => onChange({ ...form, dispatchLocationsText: e.target.value })} placeholder={'家 | 厦门市思明区某小区\n门店 | 厦门市湖里区某街道'} />
-              <p className="mt-1 text-[11px] text-gray-400">留空时使用上方“详细住址”；多个出发点会自动选择距客户最近的一个。</p>
+            <p className="col-span-2 mb-3 text-xs text-gray-500">是否参与派单由管理员在“派单助手 → 设置派单人员”中勾选。</p>
+            <div className={fieldCls}>
+              <label className={labelCls}>出发地址1</label>
+              <input className={inputCls} value={form.dispatchAddress1} onChange={e => f('dispatchAddress1', e.target.value)} placeholder="如：家庭住址" />
             </div>
+            <div className={fieldCls}>
+              <label className={labelCls}>出发地址2（选填）</label>
+              <input className={inputCls} value={form.dispatchAddress2} onChange={e => f('dispatchAddress2', e.target.value)} placeholder="如：门店地址" />
+            </div>
+            <p className="col-span-2 mb-3 text-[11px] text-gray-400">两个地址自动取距客户更近的一个；全部留空时使用详细住址。</p>
             <div className={`${fieldCls} col-span-2`}>
               <label className={labelCls}>派单备注</label>
               <textarea className={`${inputCls} resize-none`} rows={2} value={form.dispatchNote} onChange={e => onChange({ ...form, dispatchNote: e.target.value })} placeholder="仅用于派单判断的补充说明" />
@@ -652,10 +674,11 @@ function EditModal({ form, onChange, onClose, onSave, onDelete, isNew, canEditGr
               {canEditGrade ? (
                 <select
                   className={inputCls}
-                  value={selectedGrade.key}
+                  value={isSpecialty && ![0, 5].includes(Number(form.commissionRate)) ? '' : selectedGrade.key}
                   onChange={e => setGrade(e.target.value as TherapistGradeKey)}
                 >
-                  {THERAPIST_GRADE_DEFS.map(grade => (
+                  {isSpecialty && <option value="" disabled>请选择新档位（原提成暂保留）</option>}
+                  {gradeDefs.map(grade => (
                     <option key={grade.key} value={grade.key}>
                       {grade.label}（{grade.range}｜{grade.incomeRule}｜{grade.bonus}）
                     </option>
@@ -683,7 +706,7 @@ function EditModal({ form, onChange, onClose, onSave, onDelete, isNew, canEditGr
                 max="100"
                 className={`${inputCls} ${!canEditGrade ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : ''}`}
                 value={form.upgradeRate}
-                disabled={!canEditGrade}
+                disabled={!canEditGrade || isSpecialty}
                 onChange={e => {
                   const next = e.target.value;
                   const nextNum = Number(next);
@@ -710,10 +733,10 @@ function EditModal({ form, onChange, onClose, onSave, onDelete, isNew, canEditGr
                 step="0.01"
                 className={`${inputCls} ${!canEditGrade ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : ''}`}
                 value={form.commissionRate}
-                disabled={!canEditGrade}
+                disabled={!canEditGrade || isSpecialty}
                 onChange={e => f('commissionRate', e.target.value)}
               />
-              <p className="text-[11px] text-gray-400 mt-1">切换等级时带出默认比例，也可单独调整；工资结算全局读取此值</p>
+              <p className="text-[11px] text-gray-400 mt-1">产康师沿用原提成规则；运动康复、体质调理按观察池0% / B档5%，工资结算读取档案比例</p>
             </div>
           </div>
 
@@ -804,7 +827,8 @@ const BLANK_FORM: TherapistForm = {
   gradeKey: 'observer',
   remark: '',
   dispatchEnabled: true,
-  dispatchLocationsText: '',
+  dispatchAddress1: '',
+  dispatchAddress2: '',
   dispatchNote: '',
   healthCert: { state: '无证书' },
   firstAidCert: { state: '无', items: [] },
@@ -900,7 +924,7 @@ export default function TherapistListPage() {
     const matchSearch = !q || t.name.includes(q) || t.phone.includes(q) || t.area.includes(q);
     const matchCity = filterCities.length === 0 || filterCities.includes(t.city);
     const matchType = filterTypes.length === 0 || filterTypes.includes(t.therapistType);
-    const grade = calcTherapistGrade(t.upgradeRate);
+    const grade = profileGrade(t);
     const matchGrade = filterGrades.length === 0 || filterGrades.includes(grade.key);
     return matchSearch && matchCity && matchType && matchGrade;
   });
@@ -929,11 +953,12 @@ export default function TherapistListPage() {
       status: t.status,
       rating: String(t.rating),
       upgradeRate: String(t.upgradeRate),
-      commissionRate: String(t.commissionRate ?? GRADE_DEFAULT_COMMISSION[calcTherapistGrade(t.upgradeRate).key]),
-      gradeKey: calcTherapistGrade(t.upgradeRate).key,
+      commissionRate: String(t.commissionRate ?? GRADE_DEFAULT_COMMISSION[profileGrade(t).key]),
+      gradeKey: profileGrade(t).key,
       remark: t.remark ?? '',
       dispatchEnabled: t.dispatchEnabled !== false,
-      dispatchLocationsText: (t.dispatchLocations ?? []).map(item => `${item.label || '出发点'} | ${item.address}`).join('\n'),
+      dispatchAddress1: t.dispatchLocations?.[0]?.address || '',
+      dispatchAddress2: t.dispatchLocations?.[1]?.address || '',
       dispatchNote: t.dispatchNote ?? '',
       healthCert: { ...t.healthCert },
       firstAidCert: {
@@ -966,11 +991,7 @@ export default function TherapistListPage() {
 
     const normalizedUpgradeNum = upgradeNum;
     const star = calcLegacyStarLevel(normalizedUpgradeNum);
-    const dispatchLocations = form.dispatchLocationsText.split(/\r?\n/).map(line => line.trim()).filter(Boolean).map(line => {
-      const [label, ...addressParts] = line.split('|');
-      const address = addressParts.join('|').trim();
-      return address ? { label: label.trim() || '出发点', address } : { label: '出发点', address: label.trim() };
-    }).filter(item => item.address);
+    const dispatchLocations = [form.dispatchAddress1, form.dispatchAddress2].map((address, index) => ({ label: `出发地址${index + 1}`, address: address.trim() })).filter(item => item.address);
 
     try {
       if (editIsNew) {
@@ -997,7 +1018,7 @@ export default function TherapistListPage() {
           laborCert: toMultiCert(form.laborCert),
           associationCert: toMultiCert(form.associationCert),
           remark: form.remark || undefined,
-          dispatchEnabled: form.dispatchEnabled,
+          specialtyGrade: [0, 5].includes(commissionNum) ? (form.gradeKey === 'B' ? 'B' : 'observer') : undefined,
           dispatchLocations,
           dispatchNote: form.dispatchNote || undefined,
         };
@@ -1026,7 +1047,7 @@ export default function TherapistListPage() {
           laborCert: toMultiCert(form.laborCert),
           associationCert: toMultiCert(form.associationCert),
           remark: form.remark || undefined,
-          dispatchEnabled: form.dispatchEnabled,
+          specialtyGrade: [0, 5].includes(commissionNum) ? (form.gradeKey === 'B' ? 'B' : 'observer') : undefined,
           dispatchLocations,
           dispatchNote: form.dispatchNote || undefined,
         } });
@@ -1138,7 +1159,7 @@ export default function TherapistListPage() {
           </thead>
           <tbody>
             {filtered.map((t, idx) => {
-              const grade = calcTherapistGrade(t.upgradeRate);
+              const grade = profileGrade(t);
               return (
                 <tr key={t.id} className="border-b border-gray-100 hover:bg-blue-50/30 transition-colors">
                   <td className="px-2 py-2 text-center text-xs text-gray-400">{idx + 1}</td>

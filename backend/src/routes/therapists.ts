@@ -5,8 +5,40 @@ import { auditLog } from '../middleware/auditLog';
 import { getDb } from '../config/database';
 import { createError } from '../middleware/errorHandler';
 import { parseJson } from '../utils/serialization';
+import Joi from 'joi';
 
 const router: Router = Router();
+
+export function validateProfile(body: any, role: string | undefined, current?: any) {
+  const b = { ...body };
+  if ('dispatchSelected' in b) throw createError('请在派单助手设置中配置派单人员', 400);
+  if (b.dispatchLocations !== undefined) {
+    const { error } = Joi.array().max(2).items(Joi.object({ label: Joi.string().max(80).allow(''), address: Joi.string().trim().max(250).required(), location: Joi.string().max(60).allow('') })).validate(b.dispatchLocations);
+    if (error) throw createError('最多录入两个有效出发地址', 400);
+  }
+  const admin = role === 'admin' || role === 'superadmin';
+  if (!admin) {
+    if (current && b.therapistType && b.therapistType !== current.therapist_type) throw createError('仅管理员可修改技师类型', 403);
+    b.upgradeRate = current?.upgrade_rate ?? 0;
+    b.commissionRate = current?.commission_rate ?? 0;
+    b.starLevel = current?.star_level ?? 1;
+    b.specialtyGrade = current?.specialty_grade ?? (Number(current?.commission_rate ?? 0) === 5 ? 'B' : Number(current?.commission_rate ?? 0) === 0 ? 'observer' : undefined);
+  }
+  const type = b.therapistType || current?.therapist_type || '产康师';
+  if (type.includes('运动') || type.includes('调理')) {
+    if (current && b.specialtyGrade === undefined && !current.specialty_grade && ![0, 5].includes(Number(current.commission_rate))) {
+      b.specialtyGrade = null;
+      b.commissionRate = current.commission_rate;
+      return b;
+    }
+    const grade = b.specialtyGrade ?? current?.specialty_grade ?? (Number(current?.commission_rate) === 5 ? 'B' : 'observer');
+    if (grade !== 'observer' && grade !== 'B') throw createError('该类型仅支持观察池或B档', 400);
+    b.specialtyGrade = grade;
+    // Do not change existing financial profile values during an ordinary staff edit.
+    if (admin || !current) b.commissionRate = grade === 'B' ? 5 : 0;
+  } else b.specialtyGrade = null;
+  return b;
+}
 
 function mapRow(r: any) {
   return {
@@ -36,6 +68,7 @@ function mapRow(r: any) {
     dispatchEnabled: r.dispatch_enabled !== 0,
     dispatchLocations: parseJson(r.dispatch_locations, []),
     dispatchNote: r.dispatch_note || '',
+    specialtyGrade: r.specialty_grade || (Number(r.commission_rate) === 5 ? 'B' : Number(r.commission_rate) === 0 ? 'observer' : undefined),
   };
 }
 
@@ -77,12 +110,12 @@ router.get('/:id', authenticateToken, async (req, res, next) => {
 
 router.post('/', authenticateToken, auditLog('therapists'), async (req, res, next) => {
   try {
-    const b = req.body || {};
+    const b = validateProfile(req.body || {}, req.userRole);
     const db = getDb();
     const id = b.id || randomUUID();
     await db.execute(
-      `INSERT INTO therapists (id, name, therapist_type, birth_year, phone, area, city, detail_address, services, service_method, characteristics, transport, status, orders, rating, upgrade_rate, star_level, commission_rate, health_cert, first_aid_cert, labor_cert, association_cert, remark, dispatch_enabled, dispatch_locations, dispatch_note)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      `INSERT INTO therapists (id, name, therapist_type, birth_year, phone, area, city, detail_address, services, service_method, characteristics, transport, status, orders, rating, upgrade_rate, star_level, commission_rate, health_cert, first_aid_cert, labor_cert, association_cert, remark, dispatch_enabled, dispatch_locations, dispatch_note, specialty_grade)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [
         id, b.name || '', b.therapistType || '产康师', b.birthYear || null, b.phone || '',
         b.area || null, b.city || '厦门', b.detailAddress || null,
@@ -98,6 +131,7 @@ router.post('/', authenticateToken, auditLog('therapists'), async (req, res, nex
         b.dispatchEnabled === false ? 0 : 1,
         b.dispatchLocations ? JSON.stringify(b.dispatchLocations) : null,
         b.dispatchNote || null,
+        b.specialtyGrade,
       ]
     );
     res.status(201).json({ id });
@@ -106,15 +140,18 @@ router.post('/', authenticateToken, auditLog('therapists'), async (req, res, nex
 
 router.put('/:id', authenticateToken, auditLog('therapists'), async (req, res, next) => {
   try {
-    const b = req.body || {};
     const db = getDb();
+    const [existingRows] = await db.query('SELECT * FROM therapists WHERE id = ?', [req.params.id]);
+    const current = (existingRows as any[])[0];
+    if (!current) throw createError('技师不存在', 404);
+    const b = validateProfile(req.body || {}, req.userRole, current);
     await db.execute(
       `UPDATE therapists SET
         name=?, therapist_type=?, birth_year=?, phone=?, area=?, city=?, detail_address=?,
         services=?, service_method=?, characteristics=?, transport=?, status=?,
         orders=?, rating=?, upgrade_rate=?, star_level=?, commission_rate=?,
         health_cert=?, first_aid_cert=?, labor_cert=?, association_cert=?, remark=?,
-        dispatch_enabled=COALESCE(?,dispatch_enabled), dispatch_locations=COALESCE(?,dispatch_locations), dispatch_note=COALESCE(?,dispatch_note)
+        dispatch_enabled=COALESCE(?,dispatch_enabled), dispatch_locations=COALESCE(?,dispatch_locations), dispatch_note=COALESCE(?,dispatch_note), specialty_grade=?
        WHERE id=?`,
       [
         b.name ?? '', b.therapistType ?? '产康师', b.birthYear ?? null, b.phone ?? '',
@@ -129,7 +166,7 @@ router.put('/:id', authenticateToken, auditLog('therapists'), async (req, res, n
         b.associationCert ? JSON.stringify(b.associationCert) : null,
         b.remark ?? null, b.dispatchEnabled == null ? null : b.dispatchEnabled === false ? 0 : 1,
         b.dispatchLocations ? JSON.stringify(b.dispatchLocations) : null,
-        b.dispatchNote ?? null, req.params.id,
+        b.dispatchNote ?? null, b.specialtyGrade, req.params.id,
       ]
     );
     res.json({ message: '更新成功' });

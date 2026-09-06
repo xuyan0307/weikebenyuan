@@ -1,23 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { CalendarDaysIcon, CarIcon, LocateFixedIcon, MapPinIcon, SearchIcon, ShieldCheckIcon, UserRoundSearchIcon } from 'lucide-react';
+import { CarIcon, LocateFixedIcon, MapPinIcon, SearchIcon, ShieldCheckIcon, UserRoundSearchIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import { dispatchApi, type DispatchCandidate, type DispatchTip } from '../api/endpoints';
+import { useApp } from '../hooks/useApp';
+import DispatchSettings from './DispatchSettings';
 
 const CITIES = ['厦门', '泉州', '漳州'];
 const ROLES = ['产康师', '运动康复师', '体质调理师'];
 
-function todayValue() {
-  // WebView locale output can use slashes; date inputs and the API require ISO.
-  return new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
-}
-
 export default function DispatchAssistantPage() {
+  const { currentUser } = useApp();
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const canConfigure = currentUser.role === 'admin' || currentUser.role === 'superadmin';
   const [city, setCity] = useState('厦门');
   const [district, setDistrict] = useState('');
   const [address, setAddress] = useState('');
   const [location, setLocation] = useState('');
   const [need, setNeed] = useState('');
-  const [appointmentDate, setAppointmentDate] = useState(todayValue());
   const [roles, setRoles] = useState<string[]>(['产康师']);
   const [includeObservation, setIncludeObservation] = useState(false);
   const [tips, setTips] = useState<DispatchTip[]>([]);
@@ -49,7 +48,7 @@ export default function DispatchAssistantPage() {
   const roleSummary = useMemo(() => source?.roles.map(item => `${item.role} ${item.count}人`).join(' · ') || '正在读取技师档案', [source]);
 
   function toggleRole(role: string) {
-    setRoles(current => current.includes(role) ? current.filter(item => item !== role) : [...current, role]);
+    setRoles([role]);
   }
 
   async function handleRank() {
@@ -62,7 +61,7 @@ export default function DispatchAssistantPage() {
     setHasSearched(true);
     setResults([]); setCustomerLocation(''); setWarning(''); setTips([]);
     try {
-      const data = await dispatchApi.rank({ city, district, address, location, need, appointmentDate, roles, includeObservation });
+      const data = await dispatchApi.rank({ city, district, address, location, need, roles, includeObservation });
       setCustomerLocation(data.customerLocation);
       setResults(data.results);
       setWarning(data.warning || '');
@@ -83,11 +82,12 @@ export default function DispatchAssistantPage() {
           <div>
             <div className="flex items-center gap-2 text-base font-bold text-foreground"><UserRoundSearchIcon size={20} className="text-blue-600" />派单助手</div>
             <p className="mt-1 text-xs text-muted-foreground">按距离、档位、覆盖区域与项目匹配推荐服务人员，最远展示50公里。</p>
-            <p className="mt-1 text-xs text-muted-foreground">推荐不代表预约日期有空档，不会自动创建预约；请在排期管理确认档期。</p>
+            <p className="mt-1 text-xs text-muted-foreground">30公里内优先按档位、再按距离；30–50公里按距离排序。推荐不代表有空档，请在排期管理确认。</p>
           </div>
           <div className="rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-700">
-            <div className="flex items-center gap-1 font-semibold"><ShieldCheckIcon size={14} />数据源：技师档案（{source?.total ?? '—'}人）</div>
+            <div className="flex items-center gap-1 font-semibold"><ShieldCheckIcon size={14} />技师档案 · 已配置在职人员（{source?.total ?? '—'}人）</div>
             <div className="mt-1 text-blue-500">{roleSummary}</div>
+            {canConfigure && <button type="button" className="mt-2 rounded border border-blue-300 px-3 py-1" onClick={() => setSettingsOpen(true)}>设置派单人员</button>}
           </div>
         </div>
 
@@ -111,11 +111,8 @@ export default function DispatchAssistantPage() {
           <label className="text-xs text-gray-500 xl:col-span-2">服务需求
             <input value={need} onChange={event => setNeed(event.target.value)} placeholder="如：骨盆修复、腹直肌、运动康复" className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
           </label>
-          <label className="text-xs text-gray-500">预约日期
-            <div className="relative mt-1"><CalendarDaysIcon size={16} className="absolute left-3 top-2.5 text-gray-400" /><input type="date" value={appointmentDate} onChange={event => setAppointmentDate(event.target.value)} className="w-full rounded-lg border border-gray-300 py-2 pl-9 pr-3 text-sm" /></div>
-          </label>
-          <div className="text-xs text-gray-500">服务人员类型
-            <div className="mt-1 flex min-h-[38px] flex-wrap items-center gap-2">{ROLES.map(role => <label key={role} className={`cursor-pointer rounded-lg border px-2.5 py-1.5 text-xs ${roles.includes(role) ? 'border-blue-400 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-500'}`}><input type="checkbox" checked={roles.includes(role)} onChange={() => toggleRole(role)} className="mr-1.5 accent-blue-600" />{role}</label>)}</div>
+          <div className="text-xs text-gray-500 xl:col-span-2">服务人员类型（单选）
+            <div className="mt-1 flex min-h-[38px] flex-wrap items-center gap-2">{ROLES.map(role => <label key={role} className={`cursor-pointer rounded-lg border px-2.5 py-1.5 text-xs ${roles.includes(role) ? 'border-blue-400 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-500'}`}><input type="radio" name="dispatch-role" checked={roles.includes(role)} onChange={() => toggleRole(role)} className="mr-1.5 accent-blue-600" />{role}</label>)}</div>
           </div>
         </div>
 
@@ -139,6 +136,8 @@ export default function DispatchAssistantPage() {
           ))}</div>
         )}
       </section>
+      {source?.total === 0 && <p role="status" className="text-sm text-orange-600">暂无已配置的在职派单人员，请管理员在“设置派单人员”中勾选并保存。</p>}
+      {settingsOpen && <DispatchSettings onClose={() => setSettingsOpen(false)} onSaved={() => { dispatchApi.source().then(setSource).catch(() => setSource(null)); setResults([]); setHasSearched(false); setCustomerLocation(''); setWarning(''); }} />}
     </div>
   );
 }
