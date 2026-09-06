@@ -18,7 +18,7 @@ test('dispatch uses archive eligibility and closest valid origin without writing
   };
   t.after(() => { global.fetch = original; });
   const archive = { id: 'live', name: '档案人员', status: '在职', therapist_type: '产康师', upgrade_rate: 60, dispatch_selected: 1,
-    dispatch_locations: [{ address: '近出发点', location: '118.1,24.5' }, { address: '远出发点', location: '118.2,24.5' }] };
+    dispatch_locations: [{ address: '远出发点', location: '118.2,24.5' }, { address: '近出发点', location: '118.1,24.5' }] };
   const result = await rankTherapists([
     archive, { ...archive, id: 'off', status: '离职' }, { ...archive, id: 'disabled', dispatch_selected: 0 },
     { ...archive, id: 'other-role', therapist_type: '运动康复师' }, { ...archive, id: 'observer', upgrade_rate: 0 },
@@ -27,6 +27,7 @@ test('dispatch uses archive eligibility and closest valid origin without writing
   assert.equal(result.results.length, 1);
   assert.equal(result.results[0].id, 'live');
   assert.equal(result.results[0].originAddress, '近出发点');
+  assert.equal(result.results[0].driveKm, 10);
   assert.equal(result.results[0].estimated, false);
   assert.equal(calls, 2);
   assert.match(result.warning, /1位人员未填写出发地址/);

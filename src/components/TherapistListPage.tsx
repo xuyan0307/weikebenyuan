@@ -8,6 +8,7 @@ import { RecordActionButtons } from './ui/record-action-buttons';
 import type { Therapist, CertWithExpiry, MultiCert } from '../data/mockData';
 import { useTherapists, useTherapistMutations } from '../api/hooks';
 import { useApp } from '../hooks/useApp';
+import { therapistOrigins } from '../utils/therapistOrigins';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -491,6 +492,8 @@ function TherapistDetailModal({ therapist, onClose }: TherapistDetailModalProps)
               <InfoRow label="所在城市" value={therapist.city} />
               <InfoRow label="可接单范围" value={therapist.area} />
               <InfoRow label="详细住址" value={therapist.detailAddress} />
+              <InfoRow label="出发地址1" value={therapistOrigins(therapist)[0] || '—'} />
+              <InfoRow label="出发地址2" value={therapistOrigins(therapist)[1] || '—'} />
               <InfoRow label="出行方式" value={therapist.transport} />
               <InfoRow label="在职状态" value={<StatusBadge status={therapist.status} />} />
               <InfoRow label="服务方式" value={therapist.serviceMethod} />
@@ -854,11 +857,11 @@ const TYPE_OPTIONS: MultiSelectOption[] = [
 ];
 
 const THERAPIST_COLUMN_HEADERS = [
-  '序号', '技师类型', '姓名', '出生年份', '可接单范围', '详细住址', '电话',
+  '序号', '技师类型', '姓名', '可接单范围', '出发地址1', '出发地址2', '电话',
   '服务方式', '技师特点', '综合升单率', '服务评分', '等级', '提成比例', '操作',
 ];
-const DEFAULT_THERAPIST_COLUMN_WIDTHS = [3, 6, 5, 5, 9, 10, 7, 10, 10, 6, 5, 6, 7, 11];
-const THERAPIST_COLUMN_WIDTHS_KEY = 'therapist-list-column-widths-v1';
+const DEFAULT_THERAPIST_COLUMN_WIDTHS = [3, 6, 5, 7, 12, 12, 7, 8, 8, 6, 5, 6, 7, 11];
+const THERAPIST_COLUMN_WIDTHS_KEY = 'therapist-list-column-widths-v2-origins';
 
 export default function TherapistListPage() {
   const { currentUser } = useApp();
@@ -957,8 +960,8 @@ export default function TherapistListPage() {
       gradeKey: profileGrade(t).key,
       remark: t.remark ?? '',
       dispatchEnabled: t.dispatchEnabled !== false,
-      dispatchAddress1: t.dispatchLocations?.[0]?.address || '',
-      dispatchAddress2: t.dispatchLocations?.[1]?.address || '',
+      dispatchAddress1: therapistOrigins(t, false)[0],
+      dispatchAddress2: therapistOrigins(t, false)[1],
       dispatchNote: t.dispatchNote ?? '',
       healthCert: { ...t.healthCert },
       firstAidCert: {
@@ -1136,8 +1139,8 @@ export default function TherapistListPage() {
       </div>
 
       {/* ── Table ── */}
-      <div className="mobile-business-table bg-white rounded-xl shadow-custom overflow-y-auto overflow-x-hidden flex-1">
-        <table ref={tableRef} className="w-full text-sm" style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse' }}>
+      <div className="mobile-business-table bg-white rounded-xl shadow-custom overflow-auto flex-1">
+        <table ref={tableRef} className="w-full text-sm" style={{ width: '100%', minWidth: 1400, tableLayout: 'fixed', borderCollapse: 'collapse' }}>
           <colgroup>
             {columnWidths.map((width, index) => <col key={index} style={{ width: `${width}%` }} />)}
           </colgroup>
@@ -1168,10 +1171,9 @@ export default function TherapistListPage() {
                   </td>
                   {/* 姓名 — whitespace-nowrap，不换行 */}
                   <td className="px-2 py-2 text-center font-medium text-gray-800 whitespace-nowrap">{t.name}</td>
-                  <td className="px-2 py-2 text-center text-xs text-gray-600">{t.birthYear ?? '—'}</td>
                   {/* 可接单范围 — text-xs */}
                   <td className="px-1 py-2 text-center text-xs text-gray-700 overflow-hidden text-ellipsis whitespace-nowrap" title={t.area}>{t.area || '—'}</td>
-                  <td className="px-1 py-2 text-center text-xs text-gray-600 overflow-hidden text-ellipsis whitespace-nowrap" title={t.detailAddress}>{t.detailAddress || '—'}</td>
+                  {therapistOrigins(t).map((address, index) => <td key={`origin-${index}`} className="px-2 py-2 text-left text-xs text-gray-600 whitespace-normal break-words" title={address}>{address || '—'}</td>)}
                   <td className="px-1 py-2 text-center text-xs text-gray-600 overflow-hidden text-ellipsis whitespace-nowrap" title={t.phone}>{t.phone || '—'}</td>
                   {/* 服务方式 — 单行截断 + title */}
                   <td className="px-2 py-2 text-center">

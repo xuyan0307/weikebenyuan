@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "test:dispatch": "pnpm --dir backend run build && node --test backend/tests/dispatchService.test.cjs backend/tests/dispatchRoutes.test.cjs backend/tests/dispatchConfiguration.test.cjs backend/tests/dispatchMobile.test.mjs",
+    "test:dispatch": "pnpm --dir backend run build && node --test backend/tests/dispatchService.test.cjs backend/tests/dispatchRoutes.test.cjs backend/tests/dispatchConfiguration.test.cjs backend/tests/dispatchMobile.test.mjs backend/tests/therapistOrigins.test.mjs",
     "build": "vite build",
     "build:all": "pnpm run build && pnpm --dir backend run build",
     "build:api": "pnpm --dir backend run build",
