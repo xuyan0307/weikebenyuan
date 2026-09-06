@@ -856,6 +856,56 @@ const migrations: Migration[] = [
       }
     },
   },
+  {
+    id: '031_juguang_reporting',
+    description: 'Add Xiaohongshu Juguang report snapshots and auditable sync jobs',
+    up: async db => {
+      await db.execute(
+        `CREATE TABLE IF NOT EXISTS juguang_report_rows (
+          id char(36) PRIMARY KEY,
+          advertiser_id varchar(32) NOT NULL,
+          report_type varchar(50) NOT NULL,
+          report_date date NOT NULL,
+          entity_id varchar(191) NOT NULL,
+          entity_name varchar(500) DEFAULT NULL,
+          dimension_hash char(64) NOT NULL,
+          data_caliber tinyint NOT NULL DEFAULT 1,
+          creation_scope varchar(20) NOT NULL DEFAULT 'all',
+          data_status varchar(20) NOT NULL DEFAULT 'provisional',
+          dimensions json NOT NULL,
+          row_data json NOT NULL,
+          request_id varchar(100) DEFAULT NULL,
+          synced_at datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE KEY uk_juguang_report_row
+            (advertiser_id, report_type, report_date, entity_id, dimension_hash, data_caliber, creation_scope),
+          KEY idx_juguang_report_range (advertiser_id, report_type, report_date),
+          KEY idx_juguang_report_entity (report_type, entity_id),
+          KEY idx_juguang_report_synced (synced_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
+      );
+      await db.execute(
+        `CREATE TABLE IF NOT EXISTS juguang_sync_jobs (
+          id char(36) PRIMARY KEY,
+          advertiser_id varchar(32) NOT NULL,
+          trigger_type varchar(30) NOT NULL,
+          start_date date NOT NULL,
+          end_date date NOT NULL,
+          data_status varchar(20) NOT NULL DEFAULT 'provisional',
+          status varchar(20) NOT NULL DEFAULT 'running',
+          reports_total int NOT NULL DEFAULT 0,
+          reports_succeeded int NOT NULL DEFAULT 0,
+          rows_written int NOT NULL DEFAULT 0,
+          result_summary json DEFAULT NULL,
+          error_message text DEFAULT NULL,
+          requested_by varchar(36) DEFAULT NULL,
+          started_at datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          finished_at datetime DEFAULT NULL,
+          KEY idx_juguang_sync_status (advertiser_id, status, started_at),
+          KEY idx_juguang_sync_started (started_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
+      );
+    },
+  },
 ];
 
 migrations.push({

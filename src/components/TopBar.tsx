@@ -25,6 +25,13 @@ const PAGE_TITLES: Record<string, string> = {
   'settings-notify': '通知设置',
   'settings-main': '账号设置',
   'settings-parameters': '系统参数',
+  'juguang-overview': '数据总览',
+  'juguang-delivery': '投放分析',
+  'juguang-search': '搜索与关键词',
+  'juguang-content': '内容与素材',
+  'juguang-leads': '留资与私信',
+  'juguang-audience': '人群与地域',
+  'juguang-sync': '数据同步',
 };
 
 const BREADCRUMBS: Record<string, string[]> = {
@@ -44,6 +51,13 @@ const BREADCRUMBS: Record<string, string[]> = {
   'settings-notify': ['系统设置', '通知设置'],
   'settings-main': ['系统设置', '账号设置'],
   'settings-parameters': ['系统设置', '系统参数'],
+  'juguang-overview': ['小红书聚光', '数据总览'],
+  'juguang-delivery': ['小红书聚光', '投放分析'],
+  'juguang-search': ['小红书聚光', '搜索与关键词'],
+  'juguang-content': ['小红书聚光', '内容与素材'],
+  'juguang-leads': ['小红书聚光', '留资与私信'],
+  'juguang-audience': ['小红书聚光', '人群与地域'],
+  'juguang-sync': ['小红书聚光', '数据同步'],
 };
 
 const ROLE_LABELS: Record<string, string> = {

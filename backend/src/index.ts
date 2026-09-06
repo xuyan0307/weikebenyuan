@@ -22,6 +22,7 @@ import { settingsRouter } from './routes/settings';
 import { assistantRouter } from './routes/assistant';
 import { xiaohongshuOAuthRouter } from './routes/xiaohongshuOAuth';
 import { dispatchRouter } from './routes/dispatch';
+import { juguangRouter } from './routes/juguang';
 import { errorHandler } from './middleware/errorHandler';
 import { shouldSkipRequestLogging } from './middleware/requestLogging';
 import {
@@ -36,6 +37,7 @@ import {
   startSystemParametersScheduler,
   stopSystemParametersScheduler,
 } from './services/systemParametersService';
+import { startJuguangScheduler, stopJuguangScheduler } from './services/juguangService';
 
 // Local development keeps shared secrets in the repository root `.env.local`.
 // Support starting the API from either the repository root or `backend/`.
@@ -96,6 +98,7 @@ app.use('/api/uploads', uploadsRouter);
 app.use('/api/settings', settingsRouter);
 app.use('/api/assistant', assistantRouter);
 app.use('/api/oauth', xiaohongshuOAuthRouter);
+app.use('/api/juguang', juguangRouter);
 
 // 404处理
 app.use((_req: Request, res: Response) => {
@@ -113,6 +116,7 @@ async function startServer() {
     startAppointmentNotificationScheduler();
     startAppointmentAutoCompletionScheduler();
     startSystemParametersScheduler();
+    startJuguangScheduler();
 
     const server = createServer(app);
     server.listen(PORT, () => {
@@ -130,6 +134,7 @@ async function startServer() {
       stopAppointmentNotificationScheduler();
       stopAppointmentAutoCompletionScheduler();
       stopSystemParametersScheduler();
+      stopJuguangScheduler();
       server.close(async () => {
         await closeDatabase();
         console.log('Server closed');

@@ -47,7 +47,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const token = getToken();
     if (!token) {
-      setLoading(false);
       window.location.href = '/login';
       return;
     }
@@ -100,11 +99,11 @@ export function useApp() {
 export function hasPermission(role: Role | string | undefined, module: string): boolean {
   if (!role) return false;
   const perms: Record<string, string[]> = {
-    superadmin: ['dashboard', 'customers', 'orders', 'appointments', 'services', 'therapists', 'finance', 'accounts', 'reports', 'settings'],
-    admin: ['dashboard', 'customers', 'orders', 'appointments', 'services', 'therapists', 'finance', 'reports', 'settings'],
-    service: ['dashboard', 'customers', 'orders', 'appointments', 'services'],
+    superadmin: ['dashboard', 'customers', 'orders', 'appointments', 'services', 'therapists', 'juguang', 'finance', 'accounts', 'reports', 'settings'],
+    admin: ['dashboard', 'customers', 'orders', 'appointments', 'services', 'therapists', 'juguang', 'finance', 'reports', 'settings'],
+    service: ['dashboard', 'customers', 'orders', 'appointments', 'services', 'juguang'],
     therapist: ['dashboard', 'appointments', 'services', 'profile', 'salary'],
-    finance: ['dashboard', 'orders', 'finance'],
+    finance: ['dashboard', 'orders', 'juguang', 'finance'],
   };
   return (perms[role] ?? []).includes(module);
 }

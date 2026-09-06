@@ -43,8 +43,16 @@ services:
       WECOM_CALLBACK_TOKEN: ${WECOM_CALLBACK_TOKEN:-}
       WECOM_ENCODING_AES_KEY: ${WECOM_ENCODING_AES_KEY:-}
       WECOM_APPOINTMENT_URL: ${WECOM_APPOINTMENT_URL:-}
+      XHS_JUGUANG_ADVERTISER_ID: ${XHS_JUGUANG_ADVERTISER_ID:-7890257}
+      XHS_JUGUANG_API_BASE: ${XHS_JUGUANG_API_BASE:-https://adapi.xiaohongshu.com/api/open}
+      XHS_JUGUANG_APP_ID: ${XHS_JUGUANG_APP_ID:-}
+      XHS_JUGUANG_SECRET: ${XHS_JUGUANG_SECRET:-}
+      XHS_JUGUANG_REFRESH_TOKEN_ENDPOINT: ${XHS_JUGUANG_REFRESH_TOKEN_ENDPOINT:-https://adapi.xiaohongshu.com/api/open/oauth2/refresh_token}
+      XHS_JUGUANG_TOKEN_FILE: /app/secrets/juguang/oauth-token.local.json
+      JUGUANG_SCHEDULER_ENABLED: ${JUGUANG_SCHEDULER_ENABLED:-true}
     volumes:
       - backend_uploads:/app/uploads
+      - juguang_secrets:/app/secrets/juguang
     ports:
       - "127.0.0.1:3000:3000"
     networks:
@@ -90,6 +98,8 @@ services:
 
 volumes:
   backend_uploads:
+    driver: local
+  juguang_secrets:
     driver: local
 
 networks:

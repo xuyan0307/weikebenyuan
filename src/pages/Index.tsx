@@ -17,6 +17,7 @@ const FinanceSalaryPage = lazy(() => import('../components/FinanceSalaryPage'));
 const FinanceIncomePage = lazy(() => import('../components/FinanceIncomePage'));
 const SystemSettingsPage = lazy(() => import('../components/SystemSettingsPage'));
 const SystemParametersPage = lazy(() => import('../components/SystemParametersPage'));
+const JuguangPage = lazy(() => import('../components/JuguangPage'));
 
 function PageLoading() {
   return (
@@ -45,6 +46,13 @@ const PAGE_TITLES: Record<string, string> = {
   'finance-income': '收支管理',
   'settings-main': '账号设置',
   'settings-parameters': '系统参数',
+  'juguang-overview': '数据总览',
+  'juguang-delivery': '投放分析',
+  'juguang-search': '搜索与关键词',
+  'juguang-content': '内容与素材',
+  'juguang-leads': '留资与私信',
+  'juguang-audience': '人群与地域',
+  'juguang-sync': '数据同步',
 };
 
 class PageErrorBoundary extends React.Component<
@@ -122,6 +130,14 @@ function AppShell() {
         return <SystemSettingsPage />;
       case 'settings-parameters':
         return <SystemParametersPage />;
+      case 'juguang-overview':
+      case 'juguang-delivery':
+      case 'juguang-search':
+      case 'juguang-content':
+      case 'juguang-leads':
+      case 'juguang-audience':
+      case 'juguang-sync':
+        return <JuguangPage />;
       default:
         return <DashboardPage />;
     }

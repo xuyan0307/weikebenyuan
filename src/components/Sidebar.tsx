@@ -2,12 +2,18 @@ import { useState } from 'react';
 import {
   HomeIcon, UsersIcon, CalendarIcon,
   DollarSignIcon, SettingsIcon,
+  SparklesIcon,
   ChevronDownIcon, ChevronRightIcon,
   ChevronLeftIcon,
 } from 'lucide-react';
 import { useApp, hasPermission } from '../hooks/useApp';
 
-const NAV_ITEMS = [
+interface NavChild { key: string; label: string; roles?: string[] }
+interface NavItem {
+  key: string; label: string; icon: typeof HomeIcon; module: string; children: NavChild[];
+}
+
+const NAV_ITEMS: NavItem[] = [
   {
     key: 'dashboard', label: '首页看板', icon: HomeIcon, module: 'dashboard',
     children: [],
@@ -27,6 +33,18 @@ const NAV_ITEMS = [
       { key: 'dispatch-assistant', label: '派单助手' },
       { key: 'appointments-calendar', label: '排期管理' },
       { key: 'appointments-list', label: '预约列表' },
+    ],
+  },
+  {
+    key: 'juguang', label: '小红书聚光', icon: SparklesIcon, module: 'juguang',
+    children: [
+      { key: 'juguang-overview', label: '数据总览', roles: ['superadmin', 'admin', 'service', 'finance'] },
+      { key: 'juguang-delivery', label: '投放分析', roles: ['superadmin', 'admin', 'finance'] },
+      { key: 'juguang-search', label: '搜索与关键词', roles: ['superadmin', 'admin', 'service'] },
+      { key: 'juguang-content', label: '内容与素材', roles: ['superadmin', 'admin', 'service'] },
+      { key: 'juguang-leads', label: '留资与私信', roles: ['superadmin', 'admin', 'service'] },
+      { key: 'juguang-audience', label: '人群与地域', roles: ['superadmin', 'admin'] },
+      { key: 'juguang-sync', label: '数据同步', roles: ['superadmin', 'admin'] },
     ],
   },
   {
@@ -57,6 +75,9 @@ export default function Sidebar() {
   const [expandedKeys, setExpandedKeys] = useState<string[]>(['dashboard']);
 
   const visibleNavItems = NAV_ITEMS.filter(item => hasPermission(currentUser?.role || '', item.module));
+  const visibleChildren = (item: NavItem) => item.children.filter(
+    child => !child.roles || child.roles.includes(currentUser?.role || ''),
+  );
 
   function toggleExpand(key: string) {
     setExpandedKeys(prev =>
@@ -64,14 +85,15 @@ export default function Sidebar() {
     );
   }
 
-  function handleNavClick(item: typeof NAV_ITEMS[0]) {
-    if (item.children.length === 0) {
+  function handleNavClick(item: NavItem) {
+    const children = visibleChildren(item);
+    if (children.length === 0) {
       setActivePage(item.key);
       setMobileSidebarOpen(false);
     } else {
       toggleExpand(item.key);
-      if (!expandedKeys.includes(item.key) && item.children.length > 0) {
-        setActivePage(item.children[0].key);
+      if (!expandedKeys.includes(item.key)) {
+        setActivePage(children[0].key);
       }
     }
   }
@@ -125,7 +147,8 @@ export default function Sidebar() {
         {visibleNavItems.map(item => {
           const Icon = item.icon;
           const isExpanded = expandedKeys.includes(item.key);
-          const isActive = activePage === item.key || item.children.some(c => c.key === activePage);
+          const children = visibleChildren(item);
+          const isActive = activePage === item.key || children.some(c => c.key === activePage);
           return (
             <div key={item.key}>
               <div
@@ -137,7 +160,7 @@ export default function Sidebar() {
                 {!sidebarCollapsed && (
                   <>
                     <span className="flex-1 truncate">{item.label}</span>
-                    {item.children.length > 0 && (
+                    {children.length > 0 && (
                       isExpanded
                         ? <ChevronDownIcon size={14} />
                         : <ChevronRightIcon size={14} />
@@ -145,7 +168,7 @@ export default function Sidebar() {
                   </>
                 )}
               </div>
-              {!sidebarCollapsed && isExpanded && item.children.map(child => (
+              {!sidebarCollapsed && isExpanded && children.map(child => (
                 <div
                   key={child.key}
                   className={`nav-item-sub ${activePage === child.key ? 'active' : ''}`}

@@ -78,6 +78,67 @@ export const settingsApi = {
   refreshSystemParameters: () => api.post<{ data: SystemParametersSnapshot; message: string }>('/settings/system-parameters/refresh'),
 };
 
+// ====== Xiaohongshu Juguang (read-only reporting) ======
+export type JuguangReportType =
+  | 'account' | 'campaign' | 'unit' | 'creative' | 'note' | 'search_word'
+  | 'geo' | 'audience' | 'easy_campaign' | 'easy_note' | 'easy_group';
+export interface JuguangReportRow {
+  reportDate: string;
+  entityId: string;
+  entityName: string;
+  dataStatus: 'provisional' | 'settled';
+  syncedAt: string;
+  data: Record<string, unknown>;
+}
+export interface JuguangOverviewDto {
+  advertiserId: string;
+  startDate: string;
+  endDate: string;
+  metrics: Record<string, number>;
+  trend: Array<Record<string, string | number>>;
+  leadSources: Array<{ key: string; name: string; value: number; cost: number }>;
+  platform: { customers: number; experienceCards: number; convertedOrders: number };
+  lastSyncedAt: string | null;
+  dataStatus: 'provisional' | 'settled' | 'empty';
+}
+export interface JuguangSyncStatusDto {
+  advertiserId: string;
+  advertiserName: string;
+  tokenConfigured: boolean;
+  authorized: boolean;
+  tokenUpdatedAt: string | null;
+  tokenError: string;
+  running: boolean;
+  nextRuns: { provisionalAt: string; settlementAt: string };
+  jobs: Array<{
+    id: string; triggerType: string; startDate: string; endDate: string;
+    dataStatus: string; status: string; reportsTotal: number; reportsSucceeded: number;
+    rowsWritten: number; startedAt: string; finishedAt: string | null; errorMessage: string;
+  }>;
+}
+export interface JuguangKeywordResult {
+  keyword: string;
+  bagMonthPv: number;
+  wordNum: number;
+  rows: Array<{
+    keyword: string; monthPv: number; competitionLevel: string;
+    bid: number; recommendReason: string[];
+  }>;
+}
+export const juguangApi = {
+  overview: (startDate: string, endDate: string) =>
+    api.get<{ data: JuguangOverviewDto }>('/juguang/overview', { startDate, endDate }),
+  report: (type: JuguangReportType, startDate: string, endDate: string, limit = 5000) =>
+    api.get<{ data: JuguangReportRow[]; total: number }>(`/juguang/reports/${type}`, { startDate, endDate, limit }),
+  syncStatus: () => api.get<{ data: JuguangSyncStatusDto }>('/juguang/sync/status'),
+  refreshOnOpen: (startDate: string, endDate: string) =>
+    api.post<{ accepted: boolean; reason?: string }>('/juguang/sync/on-open', { startDate, endDate }),
+  manualSync: (startDate: string, endDate: string) =>
+    api.post<{ message: string; accepted: boolean }>('/juguang/sync/manual', { startDate, endDate }),
+  recommendKeywords: (keyword: string, limit = 50) =>
+    api.post<{ data: JuguangKeywordResult }>('/juguang/keywords/recommend', { keyword, limit }),
+};
+
 export type ResourceStatus = 'healthy' | 'warning' | 'unavailable';
 export interface StorageParameter {
   status: ResourceStatus;

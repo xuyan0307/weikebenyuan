@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   authApi, customersApi, ordersApi, appointmentsApi, therapistsApi,
   serviceRecordsApi, financeApi, contractsApi, dashboardApi, operationLogsApi,
-  usersApi, settingsApi,
+  usersApi, settingsApi, juguangApi,
 } from './endpoints';
 import type { Customer, CustomerListParams, Order, Appointment, Therapist, ServiceRecord } from './endpoints';
 import type { QueryParams } from './client';
@@ -29,7 +29,54 @@ export const qk = {
   users: () => ['users'] as const,
   setting: (key: string) => ['settings', key] as const,
   systemParameters: () => ['settings', 'system-parameters'] as const,
+  juguangOverview: (startDate: string, endDate: string) => ['juguang', 'overview', startDate, endDate] as const,
+  juguangReport: (type: string, startDate: string, endDate: string) => ['juguang', 'report', type, startDate, endDate] as const,
+  juguangSyncStatus: () => ['juguang', 'sync-status'] as const,
 };
+
+// ====== Xiaohongshu Juguang ======
+export function useJuguangOverview(startDate: string, endDate: string, enabled = true) {
+  return useQuery({
+    queryKey: qk.juguangOverview(startDate, endDate),
+    queryFn: () => juguangApi.overview(startDate, endDate),
+    select: response => response.data,
+    refetchInterval: 60_000,
+    enabled,
+  });
+}
+export function useJuguangReport(type: Parameters<typeof juguangApi.report>[0], startDate: string, endDate: string, enabled = true) {
+  return useQuery({
+    queryKey: qk.juguangReport(type, startDate, endDate),
+    queryFn: () => juguangApi.report(type, startDate, endDate),
+    select: response => response.data,
+    refetchInterval: 60_000,
+    enabled,
+  });
+}
+export function useJuguangSyncStatus() {
+  return useQuery({
+    queryKey: qk.juguangSyncStatus(),
+    queryFn: () => juguangApi.syncStatus(),
+    select: response => response.data,
+    refetchInterval: query => query.state.data?.data.running ? 3_000 : 30_000,
+  });
+}
+export function useJuguangSyncActions() {
+  const qc = useQueryClient();
+  const invalidate = () => qc.invalidateQueries({ queryKey: ['juguang'] });
+  return {
+    refreshOnOpen: useMutation({
+      mutationFn: ({ startDate, endDate }: { startDate: string; endDate: string }) =>
+        juguangApi.refreshOnOpen(startDate, endDate),
+      onSuccess: invalidate,
+    }).mutateAsync,
+    manualSync: useMutation({
+      mutationFn: ({ startDate, endDate }: { startDate: string; endDate: string }) =>
+        juguangApi.manualSync(startDate, endDate),
+      onSuccess: invalidate,
+    }).mutateAsync,
+  };
+}
 
 // ====== Customers ======
 export function useCustomers(params: CustomerListParams) {
