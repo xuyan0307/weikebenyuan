@@ -843,6 +843,20 @@ export async function getJuguangOverview(startDate: string, endDate: string): Pr
   };
 }
 
+export async function getLatestSuccessfulJuguangSnapshot(startDate: string, endDate: string) {
+  const config = getConfig();
+  const [rows] = await getDb().query<RowDataPacket[]>(
+    `SELECT DATE_FORMAT(finished_at, '%Y-%m-%dT%H:%i:%s+08:00') AS finished_at
+     FROM juguang_sync_jobs
+     WHERE advertiser_id = ? AND start_date = ? AND end_date = ?
+       AND status = 'success' AND finished_at IS NOT NULL
+     ORDER BY finished_at DESC
+     LIMIT 1`,
+    [config.advertiserId, startDate, endDate]
+  );
+  return rows[0]?.finished_at ? { finishedAt: String(rows[0].finished_at) } : null;
+}
+
 export async function getJuguangSyncStatus() {
   const config = getConfig();
   let tokenConfigured = false;

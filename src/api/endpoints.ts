@@ -132,7 +132,7 @@ export const juguangApi = {
     api.get<{ data: JuguangReportRow[]; total: number }>(`/juguang/reports/${type}`, { startDate, endDate, limit }),
   syncStatus: () => api.get<{ data: JuguangSyncStatusDto }>('/juguang/sync/status'),
   refreshOnOpen: (startDate: string, endDate: string) =>
-    api.post<{ accepted: boolean; reason?: string }>('/juguang/sync/on-open', { startDate, endDate }),
+    api.post<{ accepted: boolean; reason?: string; hasCachedSnapshot: boolean }>('/juguang/sync/on-open', { startDate, endDate }),
   manualSync: (startDate: string, endDate: string) =>
     api.post<{ message: string; accepted: boolean }>('/juguang/sync/manual', { startDate, endDate }),
   recommendKeywords: (keyword: string, limit = 50) =>

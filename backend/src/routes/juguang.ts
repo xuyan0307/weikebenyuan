@@ -4,6 +4,7 @@ import { authenticateToken, authorizeRoles, type AuthRequest } from '../middlewa
 import { createError } from '../middleware/errorHandler';
 import {
   getJuguangOverview,
+  getLatestSuccessfulJuguangSnapshot,
   getJuguangSyncStatus,
   isJuguangSyncRunning,
   juguangDataStatusForRange,
@@ -20,6 +21,7 @@ const REPORT_TYPES = new Set<JuguangReportType>([
   'account', 'campaign', 'unit', 'creative', 'note', 'search_word', 'geo', 'audience',
   'easy_campaign', 'easy_note', 'easy_group',
 ]);
+
 const REPORT_ROLES: Record<JuguangReportType, string[]> = {
   account: ['superadmin', 'admin', 'service', 'finance'],
   campaign: ['superadmin', 'admin', 'service', 'finance'],
@@ -84,15 +86,17 @@ router.post('/sync/on-open', auditLog('juguang'), async (req: AuthRequest, res, 
     const startDate = String(req.body?.startDate || yesterdayShanghai());
     const endDate = String(req.body?.endDate || startDate);
     validateDateRange(startDate, endDate);
-    const status = await getJuguangSyncStatus();
-    const lastFinishedAt = status.jobs.find(
-      job => job.status === 'success' && job.finishedAt && job.startDate === startDate && job.endDate === endDate,
-    )?.finishedAt;
+    const cachedSnapshot = await getLatestSuccessfulJuguangSnapshot(startDate, endDate);
+    const lastFinishedAt = cachedSnapshot?.finishedAt;
     const fresh = lastFinishedAt
       ? Date.now() - Date.parse(lastFinishedAt) < 5 * 60 * 1000
       : false;
     if (fresh || isJuguangSyncRunning()) {
-      res.json({ accepted: false, reason: fresh ? 'fresh' : 'running' });
+      res.json({
+        accepted: false,
+        reason: fresh ? 'fresh' : 'running',
+        hasCachedSnapshot: Boolean(cachedSnapshot),
+      });
       return;
     }
     void triggerJuguangSync(
@@ -103,7 +107,7 @@ router.post('/sync/on-open', auditLog('juguang'), async (req: AuthRequest, res, 
       req.userId,
     )
       .catch(error => console.error('Juguang page-open sync failed:', error));
-    res.status(202).json({ accepted: true });
+    res.status(202).json({ accepted: true, hasCachedSnapshot: Boolean(cachedSnapshot) });
   } catch (error) {
     next(createError(error instanceof Error ? error.message : '聚光页面刷新失败', 400));
   }
