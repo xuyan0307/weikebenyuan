@@ -86,7 +86,7 @@ router.post('/sync/on-open', auditLog('juguang'), async (req: AuthRequest, res, 
     validateDateRange(startDate, endDate);
     const status = await getJuguangSyncStatus();
     const lastFinishedAt = status.jobs.find(
-      job => job.finishedAt && job.startDate === startDate && job.endDate === endDate,
+      job => job.status === 'success' && job.finishedAt && job.startDate === startDate && job.endDate === endDate,
     )?.finishedAt;
     const fresh = lastFinishedAt
       ? Date.now() - Date.parse(lastFinishedAt) < 5 * 60 * 1000

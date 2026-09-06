@@ -12,10 +12,10 @@ import {
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
 import { useApp } from '../hooks/useApp';
-import { juguangApi, type JuguangOverviewDto, type JuguangReportRow } from '../api/endpoints';
+import { juguangApi, type JuguangOverviewDto, type JuguangReportRow, type JuguangSyncStatusDto } from '../api/endpoints';
 import { useJuguangOverview, useJuguangReport, useJuguangSyncStatus } from '../api/hooks';
 
-type DatePreset = 'today' | 'yesterday' | 'week' | 'month' | 'lastMonth' | 'year' | 'custom';
+type DatePreset = 'today' | 'yesterday' | 'week' | 'month' | 'currentMonth' | 'lastMonth' | 'year' | 'custom';
 type PageKind = 'overview' | 'delivery' | 'search' | 'content' | 'leads' | 'audience' | 'sync';
 
 const PAGE_KIND: Record<string, PageKind> = {
@@ -56,6 +56,7 @@ function presetRange(preset: DatePreset): { startDate: string; endDate: string }
   if (preset === 'yesterday') return { startDate: yesterday, endDate: yesterday };
   if (preset === 'week') return { startDate: ymd(shiftDays(now, -7)), endDate: yesterday };
   if (preset === 'month') return { startDate: ymd(shiftDays(now, -30)), endDate: yesterday };
+  if (preset === 'currentMonth') return { startDate: `${today.slice(0, 7)}-01`, endDate: today };
   const parts = yesterday.split('-').map(Number);
   if (preset === 'lastMonth') {
     const firstThisMonth = new Date(Date.UTC(parts[0], parts[1] - 1, 1, 0, 0));
@@ -93,6 +94,68 @@ function rate(value: unknown): string {
   if (typeof value === 'string' && value.includes('%')) return value;
   const numeric = numberOf(value);
   return `${(Math.abs(numeric) <= 1 ? numeric * 100 : numeric).toFixed(2)}%`;
+}
+
+type SortDirection = 'desc' | 'asc';
+type SortState = { key: string; direction: SortDirection } | null;
+type DataColumn<T> = {
+  key: string;
+  label: string;
+  value: (row: T) => unknown;
+  render?: (row: T) => React.ReactNode;
+  cellClassName?: string;
+};
+
+function compareValues(left: unknown, right: unknown): number {
+  if (typeof left === 'number' && typeof right === 'number') return left - right;
+  return String(left).localeCompare(String(right), 'zh-CN', { numeric: true, sensitivity: 'base' });
+}
+
+function SortableDataTable<T>({
+  rows,
+  columns,
+  rowKey,
+}: {
+  rows: T[];
+  columns: DataColumn<T>[];
+  rowKey: (row: T, index: number) => string;
+}) {
+  const [sort, setSort] = useState<SortState>(null);
+  const sortedRows = useMemo(() => {
+    if (!sort) return rows;
+    const column = columns.find(item => item.key === sort.key);
+    if (!column) return rows;
+    return rows.map((row, index) => ({ row, index })).sort((a, b) => {
+      const left = column.value(a.row);
+      const right = column.value(b.row);
+      const leftEmpty = left === undefined || left === null || left === '';
+      const rightEmpty = right === undefined || right === null || right === '';
+      if (leftEmpty || rightEmpty) return leftEmpty === rightEmpty ? a.index - b.index : leftEmpty ? 1 : -1;
+      const compared = compareValues(left, right);
+      return (sort.direction === 'desc' ? -compared : compared) || a.index - b.index;
+    }).map(item => item.row);
+  }, [columns, rows, sort]);
+
+  function toggleSort(key: string) {
+    setSort(current => current?.key !== key
+      ? { key, direction: 'desc' }
+      : current.direction === 'desc'
+        ? { key, direction: 'asc' }
+        : null);
+  }
+
+  return <table className="data-table w-full">
+    <thead><tr>{columns.map(column => {
+      const active = sort?.key === column.key;
+      const ariaSort = !active ? 'none' : sort?.direction === 'desc' ? 'descending' : 'ascending';
+      return <th key={column.key} aria-sort={ariaSort}>
+        <button type="button" onClick={() => toggleSort(column.key)} className="inline-flex items-center gap-1 whitespace-nowrap" title={`${column.label}：点击按高到低排序，再次点击按低到高排序`}>
+          <span>{column.label}</span><span className={active ? 'text-brand' : 'text-muted-foreground'} aria-hidden="true">{!active ? '↕' : sort?.direction === 'desc' ? '↓' : '↑'}</span>
+        </button>
+      </th>;
+    })}</tr></thead>
+    <tbody>{sortedRows.map((row, index) => <tr key={rowKey(row, index)}>{columns.map(column => <td key={column.key} className={column.cellClassName}>{column.render ? column.render(row) : text(column.value(row))}</td>)}</tr>)}</tbody>
+  </table>;
 }
 
 function Card({ children, className = '' }: { children: React.ReactNode; className?: string }) {
@@ -139,7 +202,24 @@ function Delivery({ standard, easy, loading }: { standard: JuguangReportRow[]; e
   const rows = [...standard, ...easy];
   if (loading) return <Card><EmptyState title="正在加载投放报表…"/></Card>;
   if (!rows.length) return <Card><EmptyState/></Card>;
-  return <div className="flex flex-col gap-5"><Card className="p-5"><div className="mb-4 flex justify-between"><div><h3 className="font-semibold">计划进线表现</h3><p className="mt-1 text-xs text-muted-foreground">标准投与简单投合并展示</p></div><Badge tone="red">按计划</Badge></div><ResponsiveContainer width="100%" height={250}><BarChart data={rows.slice(0, 20).map(row => ({ name: row.entityName, 进线: numberOf(row.data.message_consult), 私信开口: numberOf(row.data.initiative_message) }))}><CartesianGrid strokeDasharray="3 3" stroke="var(--border)"/><XAxis dataKey="name" hide/><YAxis/><Tooltip/><Bar dataKey="进线" fill="#467cf5"/><Bar dataKey="私信开口" fill="#ff385d"/></BarChart></ResponsiveContainer></Card><Card className="overflow-hidden"><div className="border-b border-border p-5"><h3 className="font-semibold">投放计划明细</h3><p className="mt-1 text-xs text-muted-foreground">私信开口、进线和留资均为聚光原始报表字段</p></div><div className="overflow-x-auto"><table className="data-table w-full"><thead><tr><th>日期</th><th>计划名称</th><th>类型</th><th>消耗</th><th>曝光</th><th>点击</th><th>点击率</th><th>私信开口</th><th>进线数</th><th>私信留资</th><th>开口成本</th><th>进线成本</th></tr></thead><tbody>{rows.map((row, i) => <tr key={`${row.reportDate}-${row.entityId}-${i}`}><td>{row.reportDate}</td><td className="font-medium">{row.entityName}</td><td><Badge tone={standard.includes(row) ? 'blue' : 'red'}>{standard.includes(row) ? '标准投' : '简单投'}</Badge></td><td>{money(numberOf(row.data.fee))}</td><td>{integer(numberOf(row.data.impression))}</td><td>{integer(numberOf(row.data.click))}</td><td>{rate(row.data.ctr)}</td><td className="font-semibold text-pink-600">{integer(numberOf(row.data.initiative_message))}</td><td className="font-semibold text-blue-600">{integer(numberOf(row.data.message_consult))}</td><td>{integer(numberOf(row.data.msg_leads_num))}</td><td>{money(numberOf(row.data.initiative_message_cpl))}</td><td>{money(numberOf(row.data.message_consult_cpl))}</td></tr>)}</tbody></table></div></Card></div>;
+  const columns: DataColumn<JuguangReportRow>[] = [
+    { key: 'date', label: '日期', value: row => row.reportDate },
+    { key: 'name', label: '计划名称', value: row => row.entityName, render: row => <span className="font-medium">{row.entityName}</span> },
+    { key: 'type', label: '类型', value: row => standard.includes(row) ? '标准投' : '简单投', render: row => <Badge tone={standard.includes(row) ? 'blue' : 'red'}>{standard.includes(row) ? '标准投' : '简单投'}</Badge> },
+    { key: 'fee', label: '消耗', value: row => numberOf(row.data.fee), render: row => money(numberOf(row.data.fee)) },
+    { key: 'impression', label: '曝光', value: row => numberOf(row.data.impression), render: row => integer(numberOf(row.data.impression)) },
+    { key: 'click', label: '点击', value: row => numberOf(row.data.click), render: row => integer(numberOf(row.data.click)) },
+    { key: 'ctr', label: '点击率', value: row => numberOf(row.data.ctr), render: row => rate(row.data.ctr) },
+    { key: 'initiative_message', label: '私信开口', value: row => numberOf(row.data.initiative_message), render: row => integer(numberOf(row.data.initiative_message)), cellClassName: 'font-semibold text-pink-600' },
+    { key: 'message_consult', label: '进线数', value: row => numberOf(row.data.message_consult), render: row => integer(numberOf(row.data.message_consult)), cellClassName: 'font-semibold text-blue-600' },
+    { key: 'msg_leads_num', label: '私信留资', value: row => numberOf(row.data.msg_leads_num), render: row => integer(numberOf(row.data.msg_leads_num)) },
+    { key: 'initiative_message_cpl', label: '开口成本', value: row => numberOf(row.data.initiative_message_cpl), render: row => money(numberOf(row.data.initiative_message_cpl)) },
+    { key: 'message_consult_cpl', label: '进线成本', value: row => numberOf(row.data.message_consult_cpl), render: row => money(numberOf(row.data.message_consult_cpl)) },
+  ];
+  return <div className="flex flex-col gap-5">
+    <Card className="p-5"><div className="mb-4 flex justify-between"><div><h3 className="font-semibold">计划进线表现</h3><p className="mt-1 text-xs text-muted-foreground">标准投与简单投合并展示</p></div><Badge tone="red">按计划</Badge></div><ResponsiveContainer width="100%" height={250}><BarChart data={rows.slice(0, 20).map(row => ({ name: row.entityName, 进线: numberOf(row.data.message_consult), 私信开口: numberOf(row.data.initiative_message) }))}><CartesianGrid strokeDasharray="3 3" stroke="var(--border)"/><XAxis dataKey="name" hide/><YAxis/><Tooltip/><Bar dataKey="进线" fill="#467cf5"/><Bar dataKey="私信开口" fill="#ff385d"/></BarChart></ResponsiveContainer></Card>
+    <Card className="overflow-hidden"><div className="border-b border-border p-5"><h3 className="font-semibold">投放计划明细</h3><p className="mt-1 text-xs text-muted-foreground">点击任一表头可按高到低、低到高排序</p></div><div className="overflow-x-auto"><SortableDataTable rows={rows} columns={columns} rowKey={(row, index) => `${row.reportDate}-${row.entityId}-${index}`}/></div></Card>
+  </div>;
 }
 
 function SearchReport({ rows, loading }: { rows: JuguangReportRow[]; loading: boolean }) {
@@ -148,35 +228,114 @@ function SearchReport({ rows, loading }: { rows: JuguangReportRow[]; loading: bo
   const [planning, setPlanning] = useState(false);
   const [result, setResult] = useState<Awaited<ReturnType<typeof juguangApi.recommendKeywords>>['data']>();
   async function plan() { try { setPlanning(true); setResult((await juguangApi.recommendKeywords(keyword)).data); } catch (error) { toast.error((error as {message?:string})?.message || '关键词查询失败'); } finally { setPlanning(false); } }
-  return <div className="flex flex-col gap-5"><Card className="p-2"><div className="flex gap-1"><button onClick={() => setMode('actual')} className={`rounded-lg px-4 py-2 text-sm ${mode === 'actual' ? 'bg-brand text-white' : 'text-muted-foreground'}`}>实际搜索词</button><button onClick={() => setMode('planner')} className={`rounded-lg px-4 py-2 text-sm ${mode === 'planner' ? 'bg-brand text-white' : 'text-muted-foreground'}`}>关键词规划</button></div></Card>{mode === 'planner' ? <Card className="p-5"><div className="flex gap-2"><input value={keyword} onChange={e => setKeyword(e.target.value)} className="flex-1 rounded-lg border border-border px-3 py-2 text-sm" placeholder="输入种子关键词"/><button onClick={plan} disabled={planning} className="rounded-lg bg-brand px-4 py-2 text-sm text-white">{planning ? '查询中…' : '查询规划词'}</button></div><div className="mt-5 overflow-x-auto">{!result ? <EmptyState title="输入种子词查询聚光关键词规划数据"/> : <table className="data-table w-full"><thead><tr><th>关键词</th><th>月搜索量</th><th>建议出价</th><th>竞争程度</th><th>推荐原因</th></tr></thead><tbody>{result.rows.map(row => <tr key={row.keyword}><td className="font-medium">{row.keyword}</td><td>{integer(row.monthPv)}</td><td>{money(row.bid)}</td><td>{row.competitionLevel || '待验证'}</td><td>{row.recommendReason.join('、') || '—'}</td></tr>)}</tbody></table>}</div></Card> : loading ? <Card><EmptyState title="正在加载搜索词报表…"/></Card> : !rows.length ? <Card><EmptyState/></Card> : <Card className="overflow-hidden"><div className="border-b border-border p-5"><h3 className="font-semibold">账户真实搜索词</h3><p className="mt-1 text-xs text-muted-foreground">与关键词规划量分开呈现</p></div><div className="overflow-x-auto"><table className="data-table w-full"><thead><tr><th>日期</th><th>搜索词</th><th>计划</th><th>消耗</th><th>曝光</th><th>点击</th><th>点击率</th><th>私信开口</th><th>进线</th><th>留资</th></tr></thead><tbody>{rows.map((row, i) => <tr key={`${row.reportDate}-${row.entityId}-${i}`}><td>{row.reportDate}</td><td className="font-medium">{text(row.data.search_word)}</td><td>{text(row.data.campaign_name)}</td><td>{money(numberOf(row.data.fee))}</td><td>{integer(numberOf(row.data.impression))}</td><td>{integer(numberOf(row.data.click))}</td><td>{text(row.data.ctr)}</td><td>{integer(numberOf(row.data.initiative_message))}</td><td>{integer(numberOf(row.data.message_consult))}</td><td>{integer(numberOf(row.data.msg_leads_num))}</td></tr>)}</tbody></table></div></Card>}</div>;
+  type PlannerRow = NonNullable<typeof result>['rows'][number];
+  const plannerColumns: DataColumn<PlannerRow>[] = [
+    { key: 'keyword', label: '关键词', value: row => row.keyword, render: row => <span className="font-medium">{row.keyword}</span> },
+    { key: 'monthPv', label: '月搜索量', value: row => row.monthPv, render: row => integer(row.monthPv) },
+    { key: 'bid', label: '建议出价', value: row => row.bid, render: row => money(row.bid) },
+    { key: 'competition', label: '竞争程度', value: row => row.competitionLevel, render: row => row.competitionLevel || '待验证' },
+    { key: 'reason', label: '推荐原因', value: row => row.recommendReason.join('、'), render: row => row.recommendReason.join('、') || '—' },
+  ];
+  const actualColumns: DataColumn<JuguangReportRow>[] = [
+    { key: 'date', label: '日期', value: row => row.reportDate },
+    { key: 'word', label: '搜索词', value: row => row.data.search_word, render: row => <span className="font-medium">{text(row.data.search_word)}</span> },
+    { key: 'campaign', label: '计划', value: row => row.data.campaign_name },
+    { key: 'fee', label: '消耗', value: row => numberOf(row.data.fee), render: row => money(numberOf(row.data.fee)) },
+    { key: 'impression', label: '曝光', value: row => numberOf(row.data.impression), render: row => integer(numberOf(row.data.impression)) },
+    { key: 'click', label: '点击', value: row => numberOf(row.data.click), render: row => integer(numberOf(row.data.click)) },
+    { key: 'ctr', label: '点击率', value: row => numberOf(row.data.ctr), render: row => rate(row.data.ctr) },
+    { key: 'initiative', label: '私信开口', value: row => numberOf(row.data.initiative_message), render: row => integer(numberOf(row.data.initiative_message)) },
+    { key: 'consult', label: '进线', value: row => numberOf(row.data.message_consult), render: row => integer(numberOf(row.data.message_consult)) },
+    { key: 'leads', label: '留资', value: row => numberOf(row.data.msg_leads_num), render: row => integer(numberOf(row.data.msg_leads_num)) },
+  ];
+  return <div className="flex flex-col gap-5">
+    <Card className="p-2"><div className="flex gap-1"><button onClick={() => setMode('actual')} className={`rounded-lg px-4 py-2 text-sm ${mode === 'actual' ? 'bg-brand text-white' : 'text-muted-foreground'}`}>实际搜索词</button><button onClick={() => setMode('planner')} className={`rounded-lg px-4 py-2 text-sm ${mode === 'planner' ? 'bg-brand text-white' : 'text-muted-foreground'}`}>关键词规划</button></div></Card>
+    {mode === 'planner'
+      ? <Card className="p-5"><div className="flex gap-2"><input value={keyword} onChange={e => setKeyword(e.target.value)} className="flex-1 rounded-lg border border-border px-3 py-2 text-sm" placeholder="输入种子关键词"/><button onClick={plan} disabled={planning} className="rounded-lg bg-brand px-4 py-2 text-sm text-white">{planning ? '查询中…' : '查询规划词'}</button></div><div className="mt-5 overflow-x-auto">{!result ? <EmptyState title="输入种子词查询聚光关键词规划数据"/> : <SortableDataTable rows={result.rows} columns={plannerColumns} rowKey={row => row.keyword}/>}</div></Card>
+      : loading
+        ? <Card><EmptyState title="正在加载搜索词报表…"/></Card>
+        : !rows.length
+          ? <Card><EmptyState/></Card>
+          : <Card className="overflow-hidden"><div className="border-b border-border p-5"><h3 className="font-semibold">账户真实搜索词</h3><p className="mt-1 text-xs text-muted-foreground">与关键词规划量分开呈现；点击表头切换高低排序</p></div><div className="overflow-x-auto"><SortableDataTable rows={rows} columns={actualColumns} rowKey={(row, index) => `${row.reportDate}-${row.entityId}-${index}`}/></div></Card>}
+  </div>;
 }
 
 function ContentReport({ rows, loading }: { rows: JuguangReportRow[]; loading: boolean }) {
   if (loading) return <Card><EmptyState title="正在加载内容报表…"/></Card>;
   if (!rows.length) return <Card><EmptyState/></Card>;
-  return <Card className="overflow-hidden"><div className="border-b border-border p-5"><h3 className="font-semibold">笔记与素材效果</h3><p className="mt-1 text-xs text-muted-foreground">第一期只读分析，不在平台内编辑或启停广告</p></div><div className="overflow-x-auto"><table className="data-table w-full"><thead><tr><th>日期</th><th>笔记/素材</th><th>消耗</th><th>曝光</th><th>点击</th><th>互动</th><th>收藏</th><th>私信开口</th><th>进线</th><th>留资</th></tr></thead><tbody>{rows.map((row, i) => { const imageUrl = safeExternalUrl(row.data.note_image); const jumpUrl = safeExternalUrl(row.data.note_jump_url); return <tr key={`${row.reportDate}-${row.entityId}-${i}`}><td>{row.reportDate}</td><td><div className="flex items-center gap-2">{imageUrl ? <img src={imageUrl} alt="" className="h-10 w-10 rounded-lg object-cover"/> : <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-muted"><FileTextIcon size={16}/></span>}{jumpUrl ? <a href={jumpUrl} target="_blank" rel="noreferrer" className="max-w-72 truncate font-medium text-brand">{row.entityName}</a> : <span className="max-w-72 truncate font-medium">{row.entityName}</span>}</div></td><td>{money(numberOf(row.data.fee))}</td><td>{integer(numberOf(row.data.impression))}</td><td>{integer(numberOf(row.data.click))}</td><td>{integer(numberOf(row.data.interaction))}</td><td>{integer(numberOf(row.data.collect))}</td><td>{integer(numberOf(row.data.initiative_message))}</td><td>{integer(numberOf(row.data.message_consult))}</td><td>{integer(numberOf(row.data.msg_leads_num))}</td></tr>; })}</tbody></table></div></Card>;
+  const columns: DataColumn<JuguangReportRow>[] = [
+    { key: 'date', label: '日期', value: row => row.reportDate },
+    { key: 'name', label: '笔记/素材', value: row => row.entityName, render: row => { const imageUrl = safeExternalUrl(row.data.note_image); const jumpUrl = safeExternalUrl(row.data.note_jump_url); return <div className="flex items-center gap-2">{imageUrl ? <img src={imageUrl} alt="" className="h-10 w-10 rounded-lg object-cover"/> : <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-muted"><FileTextIcon size={16}/></span>}{jumpUrl ? <a href={jumpUrl} target="_blank" rel="noreferrer" className="max-w-72 truncate font-medium text-brand">{row.entityName}</a> : <span className="max-w-72 truncate font-medium">{row.entityName}</span>}</div>; } },
+    { key: 'fee', label: '消耗', value: row => numberOf(row.data.fee), render: row => money(numberOf(row.data.fee)) },
+    { key: 'impression', label: '曝光', value: row => numberOf(row.data.impression), render: row => integer(numberOf(row.data.impression)) },
+    { key: 'click', label: '点击', value: row => numberOf(row.data.click), render: row => integer(numberOf(row.data.click)) },
+    { key: 'interaction', label: '互动', value: row => numberOf(row.data.interaction), render: row => integer(numberOf(row.data.interaction)) },
+    { key: 'collect', label: '收藏', value: row => numberOf(row.data.collect), render: row => integer(numberOf(row.data.collect)) },
+    { key: 'initiative', label: '私信开口', value: row => numberOf(row.data.initiative_message), render: row => integer(numberOf(row.data.initiative_message)) },
+    { key: 'consult', label: '进线', value: row => numberOf(row.data.message_consult), render: row => integer(numberOf(row.data.message_consult)) },
+    { key: 'leads', label: '留资', value: row => numberOf(row.data.msg_leads_num), render: row => integer(numberOf(row.data.msg_leads_num)) },
+  ];
+  return <Card className="overflow-hidden"><div className="border-b border-border p-5"><h3 className="font-semibold">笔记与素材效果</h3><p className="mt-1 text-xs text-muted-foreground">只读分析；点击表头切换高低排序</p></div><div className="overflow-x-auto"><SortableDataTable rows={rows} columns={columns} rowKey={(row, index) => `${row.reportDate}-${row.entityId}-${index}`}/></div></Card>;
 }
 
 function LeadsReport({ overview, campaigns, loading }: { overview?: JuguangOverviewDto; campaigns: JuguangReportRow[]; loading: boolean }) {
   const m = overview?.metrics || {};
   const sources = overview?.leadSources || [];
+  const columns: DataColumn<JuguangReportRow>[] = [
+    { key: 'campaign', label: '计划', value: row => row.entityName, render: row => <span className="font-medium">{row.entityName}</span> },
+    { key: 'consult', label: '进线', value: row => numberOf(row.data.message_consult), render: row => integer(numberOf(row.data.message_consult)) },
+    { key: 'initiative', label: '开口', value: row => numberOf(row.data.initiative_message), render: row => integer(numberOf(row.data.initiative_message)) },
+    { key: 'msgLeads', label: '私信留资', value: row => numberOf(row.data.msg_leads_num), render: row => integer(numberOf(row.data.msg_leads_num)) },
+    { key: 'leads', label: '表单', value: row => numberOf(row.data.leads), render: row => integer(numberOf(row.data.leads)) },
+    { key: 'validLeads', label: '有效表单', value: row => numberOf(row.data.valid_leads), render: row => integer(numberOf(row.data.valid_leads)) },
+    { key: 'wechatAdd', label: '企微添加', value: row => numberOf(row.data.add_wechat_suc_count), render: row => integer(numberOf(row.data.add_wechat_suc_count)) },
+    { key: 'wechatCopy', label: '微信复制', value: row => numberOf(row.data.wechat_copy_cnt), render: row => integer(numberOf(row.data.wechat_copy_cnt)) },
+    { key: 'phone', label: '电话拨打', value: row => numberOf(row.data.phone_call_cnt), render: row => integer(numberOf(row.data.phone_call_cnt)) },
+  ];
   return <div className="flex flex-col gap-5"><div className="grid gap-4 md:grid-cols-4">{[
     ['私信进线', integer(m.message_consult || 0), `成本 ${money(m.message_consult_cpl || 0)}`], ['私信开口', integer(m.initiative_message || 0), `成本 ${money(m.initiative_message_cpl || 0)}`], ['私信留资', integer(m.msg_leads_num || 0), `成本 ${money(m.msg_leads_cost || 0)}`], ['平均首次响应', `${numberOf(m.message_fst_reply_time_avg).toFixed(1)}分`, `1分钟回复率 ${text(m.message_reply_in_1min_rate)}`],
-  ].map(([a,b,c]) => <Card key={a} className="p-4"><div className="text-sm text-muted-foreground">{a}</div><div className="mt-2 text-2xl font-bold">{loading ? '…' : b}</div><div className="mt-2 text-xs text-muted-foreground">{c}</div></Card>)}</div><div className="grid gap-5 xl:grid-cols-[0.8fr_1.4fr]"><Card className="p-5"><div className="mb-4"><h3 className="font-semibold">留资来源</h3><p className="mt-1 text-xs text-muted-foreground">来源字段来自聚光账户报表</p></div>{sources.length ? <div className="space-y-3">{sources.map(source => <div key={source.key} className="rounded-lg border border-border p-3"><div className="flex justify-between"><span className="text-sm font-medium">{source.name}</span><strong>{integer(source.value)}</strong></div><div className="mt-2 text-xs text-muted-foreground">{source.value ? `平均成本 ${money(source.cost)}` : '当前范围无数据'}</div></div>)}</div> : <EmptyState/>}</Card><Card className="overflow-hidden"><div className="border-b border-border p-5"><h3 className="font-semibold">计划来源表现</h3><p className="mt-1 text-xs text-muted-foreground">展示聚合指标，不读取或展示私信原文和个人联系方式</p></div>{campaigns.length ? <div className="overflow-x-auto"><table className="data-table w-full"><thead><tr><th>计划</th><th>进线</th><th>开口</th><th>私信留资</th><th>表单</th><th>有效表单</th><th>企微添加</th><th>微信复制</th><th>电话拨打</th></tr></thead><tbody>{campaigns.map((row,i) => <tr key={`${row.entityId}-${i}`}><td className="font-medium">{row.entityName}</td><td>{integer(numberOf(row.data.message_consult))}</td><td>{integer(numberOf(row.data.initiative_message))}</td><td>{integer(numberOf(row.data.msg_leads_num))}</td><td>{integer(numberOf(row.data.leads))}</td><td>{integer(numberOf(row.data.valid_leads))}</td><td>{integer(numberOf(row.data.add_wechat_suc_count))}</td><td>{integer(numberOf(row.data.wechat_copy_cnt))}</td><td>{integer(numberOf(row.data.phone_call_cnt))}</td></tr>)}</tbody></table></div> : <EmptyState/>}</Card></div><Card className="border-amber-200 bg-amber-50 p-4 text-xs text-amber-800"><InfoIcon size={14} className="mr-1 inline"/>聚光留资按广告归因时间统计；平台客户、体验卡和升单目前只按相同时间范围并列展示，不代表已经完成客户级匹配。</Card></div>;
+  ].map(([a,b,c]) => <Card key={a} className="p-4"><div className="text-sm text-muted-foreground">{a}</div><div className="mt-2 text-2xl font-bold">{loading ? '…' : b}</div><div className="mt-2 text-xs text-muted-foreground">{c}</div></Card>)}</div><div className="grid gap-5 xl:grid-cols-[0.8fr_1.4fr]"><Card className="p-5"><div className="mb-4"><h3 className="font-semibold">留资来源</h3><p className="mt-1 text-xs text-muted-foreground">来源字段来自聚光账户报表</p></div>{sources.length ? <div className="space-y-3">{sources.map(source => <div key={source.key} className="rounded-lg border border-border p-3"><div className="flex justify-between"><span className="text-sm font-medium">{source.name}</span><strong>{integer(source.value)}</strong></div><div className="mt-2 text-xs text-muted-foreground">{source.value ? `平均成本 ${money(source.cost)}` : '当前范围无数据'}</div></div>)}</div> : <EmptyState/>}</Card><Card className="overflow-hidden"><div className="border-b border-border p-5"><h3 className="font-semibold">计划来源表现</h3><p className="mt-1 text-xs text-muted-foreground">不读取私信原文；点击表头切换高低排序</p></div>{campaigns.length ? <div className="overflow-x-auto"><SortableDataTable rows={campaigns} columns={columns} rowKey={(row, index) => `${row.entityId}-${index}`}/></div> : <EmptyState/>}</Card></div><Card className="border-amber-200 bg-amber-50 p-4 text-xs text-amber-800"><InfoIcon size={14} className="mr-1 inline"/>聚光留资按广告归因时间统计；平台客户、体验卡和升单目前只按相同时间范围并列展示，不代表已经完成客户级匹配。</Card></div>;
 }
 
 function AudienceReport({ geo, audience, loading }: { geo: JuguangReportRow[]; audience: JuguangReportRow[]; loading: boolean }) {
   if (loading) return <Card><EmptyState title="正在加载地域与人群报表…"/></Card>;
   if (!geo.length && !audience.length) return <Card><EmptyState/></Card>;
   const chart = geo.slice(0, 20).map(row => ({ name: row.entityName, 进线: numberOf(row.data.message_consult), 消耗: numberOf(row.data.fee) }));
-  return <div className="flex flex-col gap-5"><Card className="p-5"><div className="mb-4"><h3 className="font-semibold">城市获客表现</h3><p className="mt-1 text-xs text-muted-foreground">按省、市拆分账户报表</p></div><ResponsiveContainer width="100%" height={280}><BarChart data={chart} layout="vertical"><CartesianGrid strokeDasharray="3 3" stroke="var(--border)"/><XAxis type="number"/><YAxis type="category" dataKey="name" width={80}/><Tooltip/><Bar dataKey="进线" fill="#467cf5" radius={[0,5,5,0]}/></BarChart></ResponsiveContainer></Card><div className="grid gap-5 xl:grid-cols-2"><Card className="overflow-hidden"><div className="border-b border-border p-4 font-semibold">地域明细</div><div className="max-h-[440px] overflow-auto"><table className="data-table w-full"><thead><tr><th>日期</th><th>省份</th><th>城市</th><th>消耗</th><th>进线</th><th>开口</th><th>留资</th></tr></thead><tbody>{geo.map((row,i) => <tr key={`${row.entityId}-${i}`}><td>{row.reportDate}</td><td>{text(row.data.province)}</td><td>{text(row.data.city)}</td><td>{money(numberOf(row.data.fee))}</td><td>{integer(numberOf(row.data.message_consult))}</td><td>{integer(numberOf(row.data.initiative_message))}</td><td>{integer(numberOf(row.data.msg_leads_num))}</td></tr>)}</tbody></table></div></Card><Card className="overflow-hidden"><div className="border-b border-border p-4 font-semibold">人群明细</div><div className="max-h-[440px] overflow-auto"><table className="data-table w-full"><thead><tr><th>日期</th><th>性别</th><th>年龄</th><th>设备</th><th>消耗</th><th>进线</th></tr></thead><tbody>{audience.map((row,i) => <tr key={`${row.entityId}-${i}`}><td>{row.reportDate}</td><td>{text(row.data.gender)}</td><td>{text(row.data.age)}</td><td>{text(row.data.device)}</td><td>{money(numberOf(row.data.fee))}</td><td>{integer(numberOf(row.data.message_consult))}</td></tr>)}</tbody></table></div></Card></div></div>;
+  const geoColumns: DataColumn<JuguangReportRow>[] = [
+    { key: 'date', label: '日期', value: row => row.reportDate },
+    { key: 'province', label: '省份', value: row => row.data.province },
+    { key: 'city', label: '城市', value: row => row.data.city },
+    { key: 'fee', label: '消耗', value: row => numberOf(row.data.fee), render: row => money(numberOf(row.data.fee)) },
+    { key: 'consult', label: '进线', value: row => numberOf(row.data.message_consult), render: row => integer(numberOf(row.data.message_consult)) },
+    { key: 'initiative', label: '开口', value: row => numberOf(row.data.initiative_message), render: row => integer(numberOf(row.data.initiative_message)) },
+    { key: 'leads', label: '留资', value: row => numberOf(row.data.msg_leads_num), render: row => integer(numberOf(row.data.msg_leads_num)) },
+  ];
+  const audienceColumns: DataColumn<JuguangReportRow>[] = [
+    { key: 'date', label: '日期', value: row => row.reportDate },
+    { key: 'gender', label: '性别', value: row => row.data.gender },
+    { key: 'age', label: '年龄', value: row => row.data.age },
+    { key: 'device', label: '设备', value: row => row.data.device },
+    { key: 'fee', label: '消耗', value: row => numberOf(row.data.fee), render: row => money(numberOf(row.data.fee)) },
+    { key: 'consult', label: '进线', value: row => numberOf(row.data.message_consult), render: row => integer(numberOf(row.data.message_consult)) },
+  ];
+  return <div className="flex flex-col gap-5"><Card className="p-5"><div className="mb-4"><h3 className="font-semibold">城市获客表现</h3><p className="mt-1 text-xs text-muted-foreground">按省、市拆分账户报表</p></div><ResponsiveContainer width="100%" height={280}><BarChart data={chart} layout="vertical"><CartesianGrid strokeDasharray="3 3" stroke="var(--border)"/><XAxis type="number"/><YAxis type="category" dataKey="name" width={80}/><Tooltip/><Bar dataKey="进线" fill="#467cf5" radius={[0,5,5,0]}/></BarChart></ResponsiveContainer></Card><div className="grid gap-5 xl:grid-cols-2"><Card className="overflow-hidden"><div className="border-b border-border p-4"><div className="font-semibold">地域明细</div><div className="mt-1 text-xs text-muted-foreground">点击表头切换高低排序</div></div><div className="max-h-[440px] overflow-auto"><SortableDataTable rows={geo} columns={geoColumns} rowKey={(row, index) => `${row.entityId}-${index}`}/></div></Card><Card className="overflow-hidden"><div className="border-b border-border p-4"><div className="font-semibold">人群明细</div><div className="mt-1 text-xs text-muted-foreground">点击表头切换高低排序</div></div><div className="max-h-[440px] overflow-auto"><SortableDataTable rows={audience} columns={audienceColumns} rowKey={(row, index) => `${row.entityId}-${index}`}/></div></Card></div></div>;
 }
 
 function SyncReport() {
   const query = useJuguangSyncStatus();
   const data = query.data;
+  type SyncJob = JuguangSyncStatusDto['jobs'][number];
+  const columns: DataColumn<SyncJob>[] = [
+    { key: 'startedAt', label: '开始时间', value: job => job.startedAt },
+    { key: 'triggerType', label: '触发方式', value: job => job.triggerType },
+    { key: 'range', label: '数据区间', value: job => `${job.startDate}-${job.endDate}`, render: job => `${job.startDate} 至 ${job.endDate}` },
+    { key: 'reports', label: '成功报表', value: job => job.reportsSucceeded, render: job => `${job.reportsSucceeded}/${job.reportsTotal}` },
+    { key: 'rows', label: '写入行数', value: job => job.rowsWritten },
+    { key: 'dataStatus', label: '数据状态', value: job => job.dataStatus, render: job => <Badge tone={job.dataStatus === 'settled' ? 'green' : 'amber'}>{job.dataStatus === 'settled' ? '已结算' : '暂定'}</Badge> },
+    { key: 'status', label: '任务结果', value: job => job.status, render: job => <Badge tone={job.status === 'success' ? 'green' : job.status === 'partial' ? 'amber' : 'red'}>{job.status}</Badge> },
+  ];
   if (query.error) return <ErrorState error={query.error}/>;
-  return <div className="flex flex-col gap-5"><div className="grid gap-4 md:grid-cols-3"><Card className="p-5"><div className="text-sm text-muted-foreground">授权账户</div><div className="mt-2 text-xl font-bold">{data?.advertiserId || '—'}</div><div className="mt-2"><Badge tone={data?.authorized ? 'green' : 'red'}>{data?.authorized ? '授权正常' : '需要处理授权'}</Badge></div></Card><Card className="p-5"><div className="text-sm text-muted-foreground">账户名称</div><div className="mt-2 text-xl font-bold">{data?.advertiserName || '—'}</div><div className="mt-2 text-xs text-muted-foreground">令牌内容不会在页面展示</div></Card><Card className="p-5"><div className="text-sm text-muted-foreground">同步状态</div><div className="mt-2 text-xl font-bold">{data?.running ? '同步中' : '空闲'}</div><div className="mt-2 text-xs text-muted-foreground">00:10增量 · 10:15结算回补</div></Card></div>{data?.tokenError && <Card className="border-red-200 bg-red-50 p-4 text-sm text-red-700">{data.tokenError}</Card>}<Card className="overflow-hidden"><div className="border-b border-border p-5"><h3 className="font-semibold">同步记录</h3><p className="mt-1 text-xs text-muted-foreground">仅保留批次、结果和请求错误，不保存明文令牌</p></div>{data?.jobs.length ? <div className="overflow-x-auto"><table className="data-table w-full"><thead><tr><th>开始时间</th><th>触发方式</th><th>数据区间</th><th>成功报表</th><th>写入行数</th><th>数据状态</th><th>任务结果</th></tr></thead><tbody>{data.jobs.map(job => <tr key={job.id}><td>{job.startedAt}</td><td>{job.triggerType}</td><td>{job.startDate} 至 {job.endDate}</td><td>{job.reportsSucceeded}/{job.reportsTotal}</td><td>{job.rowsWritten}</td><td><Badge tone={job.dataStatus === 'settled' ? 'green' : 'amber'}>{job.dataStatus === 'settled' ? '已结算' : '暂定'}</Badge></td><td><Badge tone={job.status === 'success' ? 'green' : job.status === 'partial' ? 'amber' : 'red'}>{job.status}</Badge></td></tr>)}</tbody></table></div> : <EmptyState title="尚无同步任务记录"/>}</Card></div>;
+  return <div className="flex flex-col gap-5"><div className="grid gap-4 md:grid-cols-3"><Card className="p-5"><div className="text-sm text-muted-foreground">授权账户</div><div className="mt-2 text-xl font-bold">{data?.advertiserId || '—'}</div><div className="mt-2"><Badge tone={data?.authorized ? 'green' : 'red'}>{data?.authorized ? '授权正常' : '需要处理授权'}</Badge></div></Card><Card className="p-5"><div className="text-sm text-muted-foreground">账户名称</div><div className="mt-2 text-xl font-bold">{data?.advertiserName || '—'}</div><div className="mt-2 text-xs text-muted-foreground">令牌内容不会在页面展示</div></Card><Card className="p-5"><div className="text-sm text-muted-foreground">同步状态</div><div className="mt-2 text-xl font-bold">{data?.running ? '同步中' : '空闲'}</div><div className="mt-2 text-xs text-muted-foreground">00:10增量 · 10:15结算回补</div></Card></div>{data?.tokenError && <Card className="border-red-200 bg-red-50 p-4 text-sm text-red-700">{data.tokenError}</Card>}<Card className="overflow-hidden"><div className="border-b border-border p-5"><h3 className="font-semibold">同步记录</h3><p className="mt-1 text-xs text-muted-foreground">不保存明文令牌；点击表头切换高低排序</p></div>{data?.jobs.length ? <div className="overflow-x-auto"><SortableDataTable rows={data.jobs} columns={columns} rowKey={job => job.id}/></div> : <EmptyState title="尚无同步任务记录"/>}</Card></div>;
 }
 
 export default function JuguangPage() {
@@ -187,10 +346,12 @@ export default function JuguangPage() {
   const [startDate, setStartDate] = useState(initial.startDate);
   const [endDate, setEndDate] = useState(initial.endDate);
   const [refreshing, setRefreshing] = useState(false);
+  const [rangeSyncing, setRangeSyncing] = useState(true);
   const queryClient = useQueryClient();
   const canManualSync = currentUser.role === 'superadmin' || currentUser.role === 'admin';
 
   function selectPreset(value: DatePreset) {
+    setRangeSyncing(true);
     setPreset(value);
     if (value !== 'custom') { const range = presetRange(value); setStartDate(range.startDate); setEndDate(range.endDate); }
   }
@@ -205,9 +366,34 @@ export default function JuguangPage() {
 
   useEffect(() => {
     if (page === 'sync') return;
-    void juguangApi.refreshOnOpen(startDate, endDate).then(result => {
-      if (result.accepted) window.setTimeout(() => void queryClient.invalidateQueries({ queryKey: ['juguang'] }), 2500);
-    }).catch(() => undefined);
+    let cancelled = false;
+    let timer: number | undefined;
+    let attempts = 0;
+    const reconcileRange = async () => {
+      attempts += 1;
+      try {
+        const result = await juguangApi.refreshOnOpen(startDate, endDate);
+        await queryClient.invalidateQueries({ queryKey: ['juguang'] });
+        if (cancelled) return;
+        if (!result.accepted && result.reason === 'fresh') {
+          setRangeSyncing(false);
+          return;
+        }
+        if (attempts >= 60) {
+          setRangeSyncing(false);
+          toast.warning('当前时间范围同步时间较长，可稍后点击手动刷新');
+          return;
+        }
+        timer = window.setTimeout(() => void reconcileRange(), 5_000);
+      } catch {
+        if (!cancelled) setRangeSyncing(false);
+      }
+    };
+    void reconcileRange();
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
   }, [activePage, startDate, endDate, page, queryClient]);
 
   async function manualRefresh() {
@@ -247,8 +433,8 @@ export default function JuguangPage() {
   const primaryError = overviewQ.error || campaignQ.error || searchQ.error || noteQ.error || geoQ.error || audienceQ.error;
   return <div data-cmp="JuguangPage" className="flex flex-col gap-5">
     <div className="flex flex-wrap items-end justify-between gap-3"><div><div className="flex items-center gap-2"><h2 className="text-lg font-bold">{PAGE_TITLES[page]}</h2><Badge tone="red">账户 7890257</Badge></div><p className="mt-1 text-sm text-muted-foreground">{PAGE_DESCRIPTIONS[page]}</p></div>{page !== 'sync' && <div className="text-xs text-muted-foreground">{currentLastSyncedAt ? `最近同步：${currentLastSyncedAt}` : '尚未同步当前时间范围'}</div>}</div>
-    {page !== 'sync' && <Card className="flex flex-wrap items-center gap-2 p-3"><label className="relative"><span className="sr-only">选择统计时间</span><select value={preset} onChange={e => selectPreset(e.target.value as DatePreset)} className="min-w-32 appearance-none rounded-lg border border-border bg-card py-2 pl-3 pr-9 text-sm"><option value="today">当天</option><option value="yesterday">前一天</option><option value="week">近7天</option><option value="month">近1个月</option><option value="lastMonth">上个月</option><option value="year">今年</option><option value="custom">自定义时间</option></select><ChevronDownIcon size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"/></label>{preset === 'custom' && <><input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="rounded-lg border border-border px-3 py-2 text-sm"/><span className="text-muted-foreground">至</span><input type="date" value={endDate} min={startDate} onChange={e => setEndDate(e.target.value)} className="rounded-lg border border-border px-3 py-2 text-sm"/></>}<div className="ml-auto flex items-center gap-2"><Badge tone={currentDataStatus === 'settled' ? 'green' : currentDataStatus === 'provisional' ? 'amber' : 'gray'}>{currentDataStatus === 'settled' ? '已结算' : currentDataStatus === 'provisional' ? '暂定数据' : '待同步'}</Badge>{canManualSync && <button onClick={manualRefresh} disabled={refreshing} className="flex items-center gap-2 rounded-lg bg-[#ff385d] px-4 py-2 text-sm font-medium text-white disabled:opacity-60"><RefreshCwIcon size={15} className={refreshing ? 'animate-spin' : ''}/>{refreshing ? '同步中…' : '手动刷新'}</button>}</div></Card>}
-    {primaryError && page !== 'sync' ? <ErrorState error={primaryError}/> : page === 'overview' ? <Overview data={overviewQ.data} loading={overviewQ.isLoading}/> : page === 'delivery' ? <Delivery standard={campaignQ.data || []} easy={easyCampaignQ.data || []} loading={campaignQ.isLoading || easyCampaignQ.isLoading}/> : page === 'search' ? <SearchReport rows={searchQ.data || []} loading={searchQ.isLoading}/> : page === 'content' ? <ContentReport rows={noteQ.data || []} loading={noteQ.isLoading}/> : page === 'leads' ? <LeadsReport overview={overviewQ.data} campaigns={campaignQ.data || []} loading={overviewQ.isLoading || campaignQ.isLoading}/> : page === 'audience' ? <AudienceReport geo={geoQ.data || []} audience={audienceQ.data || []} loading={geoQ.isLoading || audienceQ.isLoading}/> : <SyncReport/>}
+    {page !== 'sync' && <Card className="flex flex-wrap items-center gap-2 p-3"><label className="relative"><span className="sr-only">选择统计时间</span><select value={preset} onChange={e => selectPreset(e.target.value as DatePreset)} className="min-w-32 appearance-none rounded-lg border border-border bg-card py-2 pl-3 pr-9 text-sm"><option value="today">当天</option><option value="yesterday">前一天</option><option value="week">近7天</option><option value="month">近1个月</option><option value="currentMonth">当月</option><option value="lastMonth">上个月</option><option value="year">今年</option><option value="custom">自定义时间</option></select><ChevronDownIcon size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"/></label>{preset === 'custom' && <><input type="date" value={startDate} onChange={e => { setRangeSyncing(true); setStartDate(e.target.value); }} className="rounded-lg border border-border px-3 py-2 text-sm"/><span className="text-muted-foreground">至</span><input type="date" value={endDate} min={startDate} onChange={e => { setRangeSyncing(true); setEndDate(e.target.value); }} className="rounded-lg border border-border px-3 py-2 text-sm"/></>}<div className="ml-auto flex items-center gap-2">{rangeSyncing ? <Badge tone="blue">正在同步当前范围</Badge> : <Badge tone={currentDataStatus === 'settled' ? 'green' : currentDataStatus === 'provisional' ? 'amber' : 'gray'}>{currentDataStatus === 'settled' ? '已结算' : currentDataStatus === 'provisional' ? '暂定数据' : '待同步'}</Badge>}{canManualSync && <button onClick={manualRefresh} disabled={refreshing || rangeSyncing} className="flex items-center gap-2 rounded-lg bg-[#ff385d] px-4 py-2 text-sm font-medium text-white disabled:opacity-60"><RefreshCwIcon size={15} className={refreshing || rangeSyncing ? 'animate-spin' : ''}/>{refreshing ? '同步中…' : '手动刷新'}</button>}</div></Card>}
+    {primaryError && page !== 'sync' ? <ErrorState error={primaryError}/> : page === 'overview' ? <Overview data={rangeSyncing ? undefined : overviewQ.data} loading={overviewQ.isLoading || rangeSyncing}/> : page === 'delivery' ? <Delivery standard={campaignQ.data || []} easy={easyCampaignQ.data || []} loading={campaignQ.isLoading || easyCampaignQ.isLoading || rangeSyncing}/> : page === 'search' ? <SearchReport rows={searchQ.data || []} loading={searchQ.isLoading || rangeSyncing}/> : page === 'content' ? <ContentReport rows={noteQ.data || []} loading={noteQ.isLoading || rangeSyncing}/> : page === 'leads' ? <LeadsReport overview={rangeSyncing ? undefined : overviewQ.data} campaigns={campaignQ.data || []} loading={overviewQ.isLoading || campaignQ.isLoading || rangeSyncing}/> : page === 'audience' ? <AudienceReport geo={geoQ.data || []} audience={audienceQ.data || []} loading={geoQ.isLoading || audienceQ.isLoading || rangeSyncing}/> : <SyncReport/>}
     {page !== 'sync' && <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground"><InfoIcon size={13}/>页面只展示已同步的真实聚光报表；缺失字段显示为“—”或0，不使用示例数据补齐。</div>}
   </div>;
 }
