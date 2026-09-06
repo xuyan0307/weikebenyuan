@@ -293,6 +293,13 @@ function parseApiPayload(text: string): ApiPayload {
   }
 }
 
+export function isTransientJuguangFailure(httpStatus: number, code: unknown, message: unknown): boolean {
+  return httpStatus === 429
+    || httpStatus >= 500
+    || Number(code) === 10005
+    || /系统错误|请求频繁|稍后重试/iu.test(String(message || ''));
+}
+
 async function postOpenApi(apiPath: string, body: Record<string, unknown>): Promise<ApiPayload> {
   const config = getConfig();
   let tokenRecord = await usableTokenRecord();
@@ -301,19 +308,29 @@ async function postOpenApi(apiPath: string, body: Record<string, unknown>): Prom
     headers: { 'Access-Token': tokenRecord.data.access_token, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
-  let response = await request();
-  let payload = parseApiPayload(await response.text());
-  const tokenFailure = response.status === 401 || /token|授权|过期/iu.test(String(payload.msg || ''));
-  if ((!response.ok || payload.success === false || Number(payload.code || 0) !== 0) && tokenFailure) {
-    tokenRecord = await refreshToken(tokenRecord);
-    response = await request();
-    payload = parseApiPayload(await response.text());
-  }
-  if (!response.ok || payload.success === false || Number(payload.code || 0) !== 0) {
+  let tokenRetried = false;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const response = await request();
+    const payload = parseApiPayload(await response.text());
+    const failed = !response.ok || payload.success === false || Number(payload.code || 0) !== 0;
+    if (!failed) return payload;
+
+    const tokenFailure = response.status === 401 || /token|授权|过期/iu.test(String(payload.msg || ''));
+    if (tokenFailure && !tokenRetried) {
+      tokenRecord = await refreshToken(tokenRecord);
+      tokenRetried = true;
+      continue;
+    }
+
     const code = payload.code === undefined ? response.status : payload.code;
+    const transient = isTransientJuguangFailure(response.status, code, payload.msg);
+    if (transient && attempt < 3) {
+      await new Promise(resolve => setTimeout(resolve, attempt * 1000));
+      continue;
+    }
     throw new Error(`聚光接口请求失败 (${code}): ${payload.msg || response.statusText}`);
   }
-  return payload;
+  throw new Error('聚光接口请求失败：超过最大重试次数');
 }
 
 export function metricNumber(value: unknown): number {

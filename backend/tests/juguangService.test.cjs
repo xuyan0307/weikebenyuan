@@ -7,6 +7,7 @@ const {
   normalizeRealtimeReportRows,
   juguangFetchWindows,
   juguangDataStatusForRange,
+  isTransientJuguangFailure,
   summarizeJuguangMetrics,
   shouldRefreshJuguangToken,
   validateDateRange,
@@ -144,4 +145,12 @@ test('refreshes shortly before access token expiry but not when expiry metadata 
   assert.equal(shouldRefreshJuguangToken(issuedAt, 3600, new Date('2026-09-06T00:54:59.000Z')), false);
   assert.equal(shouldRefreshJuguangToken(issuedAt, 3600, new Date('2026-09-06T00:55:00.000Z')), true);
   assert.equal(shouldRefreshJuguangToken(undefined, undefined, new Date('2026-09-06T00:55:00.000Z')), false);
+});
+
+test('retries only transient Juguang report failures', () => {
+  assert.equal(isTransientJuguangFailure(200, 10005, '系统错误'), true);
+  assert.equal(isTransientJuguangFailure(429, 0, ''), true);
+  assert.equal(isTransientJuguangFailure(503, 0, ''), true);
+  assert.equal(isTransientJuguangFailure(200, 1970001, '指标不存在'), false);
+  assert.equal(isTransientJuguangFailure(403, 10001, '无权限'), false);
 });
