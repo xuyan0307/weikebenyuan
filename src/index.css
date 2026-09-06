@@ -967,3 +967,10 @@
     font-variant-numeric: tabular-nums;
   }
 }
+/* Global filing row stays outside the clipped/scrolling business content. */
+.app-regulatory-footer {
+  flex-shrink: 0;
+  box-sizing: content-box;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  background: var(--page-bg);
+}

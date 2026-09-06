@@ -4,9 +4,9 @@ import { readFile } from 'node:fs/promises';
 const read = path => readFile(new URL('../../' + path, import.meta.url), 'utf8');
 const [page, shell, endpoints, client] = await Promise.all(['src/components/DispatchAssistantPage.tsx', 'src/pages/Index.tsx', 'src/api/endpoints.ts', 'src/api/client.ts'].map(read));
 
-test('dispatch content retains its natural height before the footer', () => {
-  assert.match(shell, /activePage === 'dispatch-assistant' \? 'flex grow shrink-0 flex-col'/);
-  assert.ok(shell.indexOf('<RegulatoryFooter') > shell.indexOf('{renderActivePage()}'));
+test('dispatch uses the global footer outside scrolling content', () => {
+  assert.ok(shell.indexOf('<RegulatoryFooter') > shell.indexOf('</main>'));
+  assert.match(shell, /RegulatoryFooter className="app-regulatory-footer"/);
 });
 
 test('dispatch has no appointment date and exactly one default postpartum role', () => {

@@ -24,3 +24,17 @@ test('the global ICP filing keeps a single compact bottom row', () => {
   assert.match(shellSource, /pt-5 pb-0/);
   assert.doesNotMatch(shellSource, /RegulatoryFooter className="mt-4"/);
 });
+
+test('all platform pages share one footer outside the scrollable main area', async () => {
+  assert.equal((shellSource.match(/<RegulatoryFooter/g) || []).length, 1);
+  const main = shellSource.slice(shellSource.indexOf('<main'), shellSource.indexOf('</main>'));
+  assert.doesNotMatch(main, /RegulatoryFooter/);
+  assert.ok(shellSource.indexOf('<RegulatoryFooter') > shellSource.indexOf('</main>'));
+  assert.doesNotMatch(main, /activePage === 'dispatch-assistant'/);
+  assert.match(main, /overflow-y-auto/);
+  const css = await readFile(new URL('../../src/index.css', import.meta.url), 'utf8');
+  const rule = css.match(/\.app-regulatory-footer\s*\{([^}]+)\}/)[1];
+  assert.match(rule, /flex-shrink: 0/);
+  assert.match(rule, /safe-area-inset-bottom/);
+  assert.doesNotMatch(rule, /position:\s*(fixed|absolute)/);
+});

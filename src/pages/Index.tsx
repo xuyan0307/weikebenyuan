@@ -172,15 +172,16 @@ function AppShell() {
 
         {/* Page content */}
         <main className="app-main-content flex flex-1 min-h-0 flex-col overflow-y-auto px-6 pt-5 pb-0">
-          <div className={activePage === 'dispatch-assistant' ? 'flex grow shrink-0 flex-col' : 'flex flex-1 min-h-0 flex-col'}>
+          <div className="flex flex-1 min-h-0 flex-col">
             <PageErrorBoundary pageKey={activePage} key={activePage}>
               <Suspense fallback={<PageLoading />}>
                 {renderActivePage()}
               </Suspense>
             </PageErrorBoundary>
           </div>
-          <RegulatoryFooter />
         </main>
+        {/* Separate layout row: scrolling content cannot overlap the filing link. */}
+        <RegulatoryFooter className="app-regulatory-footer" />
       </div>
     </div>
   );
