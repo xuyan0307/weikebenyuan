@@ -32,7 +32,7 @@ function getErrorMessage(data: unknown, fallback: string): string {
   return typeof error === 'string' && error ? error : fallback;
 }
 
-async function request<T>(method: HttpMethod, path: string, body?: unknown, params?: QueryParams): Promise<T> {
+async function request<T>(method: HttpMethod, path: string, body?: unknown, params?: QueryParams, signal?: AbortSignal): Promise<T> {
   if (DEMO_MODE) {
     const { handleDemoRequest } = await import('./demo');
     return handleDemoRequest<T>(method, path, body, params);
@@ -55,6 +55,7 @@ async function request<T>(method: HttpMethod, path: string, body?: unknown, para
   const resp = await fetch(url, {
     method,
     headers,
+    signal,
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
 
@@ -145,7 +146,7 @@ async function upload<T>(path: string, formData: FormData): Promise<T> {
 
 export const api = {
   get: <T>(path: string, params?: QueryParams) => request<T>('GET', path, undefined, params),
-  post: <T>(path: string, body?: unknown) => request<T>('POST', path, body),
+  post: <T>(path: string, body?: unknown, signal?: AbortSignal) => request<T>('POST', path, body, undefined, signal),
   put: <T>(path: string, body?: unknown) => request<T>('PUT', path, body),
   patch: <T>(path: string, body?: unknown) => request<T>('PATCH', path, body),
   delete: <T>(path: string) => request<T>('DELETE', path),

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { CalendarDaysIcon, CarIcon, LocateFixedIcon, MapPinIcon, SearchIcon, ShieldCheckIcon, UserRoundSearchIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import { dispatchApi, type DispatchCandidate, type DispatchTip } from '../api/endpoints';
@@ -7,7 +7,8 @@ const CITIES = ['厦门', '泉州', '漳州'];
 const ROLES = ['产康师', '运动康复师', '体质调理师'];
 
 function todayValue() {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+  // WebView locale output can use slashes; date inputs and the API require ISO.
+  return new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
 export default function DispatchAssistantPage() {
@@ -24,6 +25,10 @@ export default function DispatchAssistantPage() {
   const [customerLocation, setCustomerLocation] = useState('');
   const [loading, setLoading] = useState(false);
   const [warning, setWarning] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
+  const [hasSearched, setHasSearched] = useState(false);
+  const resultRef = useRef<HTMLElement>(null);
+  const requestInFlight = useRef(false);
   const [source, setSource] = useState<{ total: number; roles: { role: string; count: number }[]; mapConfigured: boolean } | null>(null);
 
   useEffect(() => {
@@ -48,9 +53,13 @@ export default function DispatchAssistantPage() {
   }
 
   async function handleRank() {
-    if (!address.trim()) { toast.error('请填写客户详细地址'); return; }
-    if (!roles.length) { toast.error('请至少选择一种服务人员'); return; }
+    if (requestInFlight.current) return;
+    setErrorMessage('');
+    if (!address.trim()) { setErrorMessage('请填写客户详细地址'); return; }
+    if (!roles.length) { setErrorMessage('请至少选择一种服务人员'); return; }
+    requestInFlight.current = true;
     setLoading(true);
+    setHasSearched(true);
     setResults([]); setCustomerLocation(''); setWarning(''); setTips([]);
     try {
       const data = await dispatchApi.rank({ city, district, address, location, need, appointmentDate, roles, includeObservation });
@@ -59,9 +68,13 @@ export default function DispatchAssistantPage() {
       setWarning(data.warning || '');
       if (!data.results.length) toast.info('50公里内暂无符合条件的服务人员');
     } catch (error: any) {
-      toast.error(error?.message || '派单计算失败');
-    } finally { setLoading(false); }
+      setErrorMessage(error?.message || '派单计算失败，请检查网络后重试');
+    } finally { setLoading(false); requestInFlight.current = false; }
   }
+
+  useEffect(() => {
+    if (hasSearched) resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [hasSearched, loading]);
 
   return (
     <div className="flex flex-col gap-4 pb-4">
@@ -108,15 +121,16 @@ export default function DispatchAssistantPage() {
 
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
           <label className="flex items-center gap-2 text-xs text-gray-500"><input type="checkbox" checked={includeObservation} onChange={event => setIncludeObservation(event.target.checked)} className="accent-blue-600" />包含观察池（始终排在正式人员之后，需主管复核）</label>
-          <button onClick={handleRank} disabled={loading || source?.mapConfigured === false} className="flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"><SearchIcon size={17} />{loading ? '正在计算…' : '开始智能派单'}</button>
+          <button type="button" onClick={handleRank} disabled={loading || source?.mapConfigured === false} className="flex min-h-11 touch-manipulation items-center gap-2 rounded-lg bg-blue-600 px-5 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"><SearchIcon size={17} />{loading ? '正在计算…' : '开始智能派单'}</button>
         </div>
+        {errorMessage && <p role="alert" className="mt-3 text-sm text-red-600">{errorMessage}</p>}
         {source?.mapConfigured === false && <p className="mt-2 text-right text-xs text-orange-600">地图服务尚未配置，管理员配置后即可使用距离派单。</p>}
       </section>
 
-      <section className="min-h-[240px] rounded-xl bg-card p-4 shadow-custom" style={{ border: '1px solid var(--border)' }}>
+      <section ref={resultRef} aria-busy={loading} aria-live="polite" className="min-h-[240px] scroll-mt-4 rounded-xl bg-card p-4 shadow-custom" style={{ border: '1px solid var(--border)' }}>
         {warning && <p role="status" className="mb-3 text-xs text-orange-600">{warning}</p>}
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2"><h2 className="text-sm font-bold text-gray-800">推荐结果 <span className="ml-1 font-normal text-gray-400">{results.length ? `${results.length}人` : ''}</span></h2>{customerLocation && <div className="flex items-center gap-1 text-xs text-gray-500"><LocateFixedIcon size={14} />已定位：{customerLocation}</div>}</div>
-        {!results.length ? <div className="flex min-h-[180px] flex-col items-center justify-center text-gray-400"><UserRoundSearchIcon size={42} strokeWidth={1.3} /><p className="mt-2 text-sm">填写客户地址和需求后开始派单</p></div> : (
+        {!results.length ? <div className="flex min-h-[180px] flex-col items-center justify-center text-gray-400"><UserRoundSearchIcon size={42} strokeWidth={1.3} /><p role="status" className="mt-2 text-sm">{loading ? '正在查询技师并计算距离，请稍候…' : errorMessage ? errorMessage : hasSearched ? '50公里内暂无符合条件的服务人员，可调整条件后重试' : '填写客户地址后开始派单（服务需求选填）'}</p></div> : (
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 xl:grid-cols-3">{results.map((item, index) => (
             <article key={item.id} className="rounded-xl border border-gray-200 p-4 hover:border-blue-300 hover:shadow-sm">
               <div className="flex items-start justify-between gap-2"><div className="flex items-center gap-2"><span className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold ${index < 3 ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-500'}`}>{index + 1}</span><div><div className="font-semibold text-gray-800">{item.name} <span className="ml-1 text-xs font-normal text-gray-400">{item.role}</span></div><div className="mt-0.5 text-xs text-gray-500">{item.level}{item.isObservation ? ' · 需复核' : ''}</div></div></div><div className="text-right"><div className="text-base font-bold text-blue-600">{item.driveKm} km</div><div className="text-xs text-gray-400">约 {item.driveMinutes} 分钟{item.estimated ? '（估算）' : ''}</div></div></div>

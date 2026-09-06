@@ -250,7 +250,16 @@ export interface DispatchRankInput {
 export const dispatchApi = {
   source: () => api.get<{ source: string; total: number; roles: { role: string; count: number }[]; mapConfigured: boolean }>('/dispatch/source'),
   tips: (city: string, district: string, keyword: string) => api.get<{ tips: DispatchTip[] }>('/dispatch/tips', { city, district, keyword }),
-  rank: (body: DispatchRankInput) => api.post<{ customerLocation: string; results: DispatchCandidate[]; warning: string }>('/dispatch/rank', body),
+  rank: async (body: DispatchRankInput) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 55000);
+    try {
+      return await api.post<{ customerLocation: string; results: DispatchCandidate[]; warning: string }>('/dispatch/rank', body, controller.signal);
+    } catch (error) {
+      if (controller.signal.aborted) throw new Error('派单查询超时，请检查网络后重试');
+      throw error;
+    } finally { clearTimeout(timer); }
+  },
 };
 
 // ====== Service Records ======
