@@ -8,6 +8,7 @@ const {
   juguangFetchWindows,
   juguangDataStatusForRange,
   isTransientJuguangFailure,
+  mergeJuguangRefreshTokenRecord,
   summarizeJuguangMetrics,
   shouldRefreshJuguangToken,
   validateDateRange,
@@ -145,6 +146,49 @@ test('refreshes shortly before access token expiry but not when expiry metadata 
   assert.equal(shouldRefreshJuguangToken(issuedAt, 3600, new Date('2026-09-06T00:54:59.000Z')), false);
   assert.equal(shouldRefreshJuguangToken(issuedAt, 3600, new Date('2026-09-06T00:55:00.000Z')), true);
   assert.equal(shouldRefreshJuguangToken(undefined, undefined, new Date('2026-09-06T00:55:00.000Z')), false);
+});
+
+test('keeps advertiser authorization and refresh token when refresh response only rotates access token', () => {
+  const previous = {
+    platform: 'xhs_juguang',
+    updatedAt: '2026-09-06T00:00:00.000Z',
+    data: {
+      access_token: 'old-access',
+      refresh_token: 'old-refresh',
+      approval_advertisers: [{ advertiser_id: 7890257, advertiser_name: '代理子账户' }],
+    },
+  };
+  const merged = mergeJuguangRefreshTokenRecord(
+    previous,
+    { access_token: 'new-access', access_token_expires_in: 86399 },
+    'request-id',
+    '2026-09-07T00:00:00.000Z',
+  );
+
+  assert.equal(merged.data.access_token, 'new-access');
+  assert.equal(merged.data.refresh_token, 'old-refresh');
+  assert.deepEqual(merged.data.approval_advertisers, previous.data.approval_advertisers);
+  assert.equal(merged.updatedAt, '2026-09-07T00:00:00.000Z');
+});
+
+test('uses rotated refresh token and advertiser list when refresh response supplies them', () => {
+  const merged = mergeJuguangRefreshTokenRecord(
+    {
+      data: {
+        access_token: 'old-access',
+        refresh_token: 'old-refresh',
+        approval_advertisers: [{ advertiser_id: 7727572 }],
+      },
+    },
+    {
+      access_token: 'new-access',
+      refresh_token: 'new-refresh',
+      approval_advertisers: [{ advertiser_id: 7890257 }],
+    },
+  );
+
+  assert.equal(merged.data.refresh_token, 'new-refresh');
+  assert.deepEqual(merged.data.approval_advertisers, [{ advertiser_id: 7890257 }]);
 });
 
 test('retries only transient Juguang report failures', () => {

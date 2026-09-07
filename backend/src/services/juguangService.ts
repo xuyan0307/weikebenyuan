@@ -253,24 +253,17 @@ async function refreshToken(record: TokenRecord): Promise<TokenRecord> {
       }),
     });
     const payload = parseApiPayload(await response.text());
-    const data = objectRecord(payload.data);
-    const advertisers = Array.isArray(data.approval_advertisers)
-      ? data.approval_advertisers.map(item => objectRecord(item) as TokenAdvertiser)
-      : [];
-    const authorized = advertisers.some(item => String(item.advertiser_id || '') === config.advertiserId);
-    if (!response.ok || payload.success === false || Number(payload.code || 0) !== 0 || !data.access_token || !authorized) {
+    if (!response.ok || payload.success === false || Number(payload.code || 0) !== 0) {
       throw new Error('聚光访问令牌刷新失败，请重新授权');
     }
-    const refreshed: TokenRecord = {
-      platform: 'xhs_juguang',
-      updatedAt: new Date().toISOString(),
-      requestId: String(payload.request_id || ''),
-      data: {
-        ...data,
-        access_token: String(data.access_token),
-        approval_advertisers: advertisers,
-      },
-    };
+    const refreshed = mergeJuguangRefreshTokenRecord(
+      record,
+      payload.data,
+      String(payload.request_id || ''),
+    );
+    const authorized = (refreshed.data.approval_advertisers || [])
+      .some(item => String(item.advertiser_id || '') === config.advertiserId);
+    if (!authorized) throw new Error('聚光访问令牌刷新失败，请重新授权');
     writeTokenRecord(config.tokenFile, refreshed);
     return refreshed;
   })().finally(() => { tokenRefreshPromise = null; });
@@ -291,6 +284,36 @@ function parseApiPayload(text: string): ApiPayload {
   } catch {
     throw new Error('聚光 OpenAPI 返回了无法解析的数据');
   }
+}
+
+export function mergeJuguangRefreshTokenRecord(
+  record: TokenRecord,
+  refreshData: unknown,
+  requestId = '',
+  updatedAt = new Date().toISOString(),
+): TokenRecord {
+  const data = objectRecord(refreshData);
+  const accessToken = String(data.access_token || '');
+  if (!accessToken) throw new Error('聚光访问令牌刷新失败，请重新授权');
+  const previousAdvertisers = Array.isArray(record.data.approval_advertisers)
+    ? record.data.approval_advertisers
+    : [];
+  const advertisers = Array.isArray(data.approval_advertisers)
+    ? data.approval_advertisers.map(item => objectRecord(item) as TokenAdvertiser)
+    : previousAdvertisers;
+  return {
+    ...record,
+    platform: 'xhs_juguang',
+    updatedAt,
+    requestId,
+    data: {
+      ...record.data,
+      ...data,
+      access_token: accessToken,
+      refresh_token: String(data.refresh_token || record.data.refresh_token || ''),
+      approval_advertisers: advertisers,
+    },
+  };
 }
 
 export function isTransientJuguangFailure(httpStatus: number, code: unknown, message: unknown): boolean {
