@@ -413,6 +413,15 @@ function previousDate(date: string): string {
   return isoDate(new Date(Date.parse(`${date}T00:00:00+08:00`) - 86_400_000));
 }
 
+function beforeShanghaiSettlement(now: Date): boolean {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', hour12: false,
+  }).formatToParts(now);
+  const hour = Number(parts.find(part => part.type === 'hour')?.value || 0);
+  const minute = Number(parts.find(part => part.type === 'minute')?.value || 0);
+  return hour * 60 + minute < 10 * 60 + 15;
+}
+
 export function juguangFetchWindows(
   startDate: string,
   endDate: string,
@@ -421,12 +430,19 @@ export function juguangFetchWindows(
 ): JuguangFetchWindow[] {
   validateDateRange(startDate, endDate);
   const today = isoDate(now);
-  if (!supportsRealtime || endDate < today) {
+  if (!supportsRealtime) {
     return dateChunks(startDate, endDate).map(chunk => ({ ...chunk, realtime: false }));
   }
+  const yesterday = previousDate(today);
+  const useRealtimeYesterday = beforeShanghaiSettlement(now);
+  const firstRealtimeDate = useRealtimeYesterday ? yesterday : today;
   const windows: JuguangFetchWindow[] = [];
-  if (startDate < today) {
-    windows.push(...dateChunks(startDate, previousDate(today)).map(chunk => ({ ...chunk, realtime: false })));
+  if (startDate < firstRealtimeDate) {
+    const offlineEnd = endDate < firstRealtimeDate ? endDate : previousDate(firstRealtimeDate);
+    windows.push(...dateChunks(startDate, offlineEnd).map(chunk => ({ ...chunk, realtime: false })));
+  }
+  if (useRealtimeYesterday && startDate <= yesterday && endDate >= yesterday) {
+    windows.push({ startDate: yesterday, endDate: yesterday, realtime: true });
   }
   if (startDate <= today && endDate >= today) {
     windows.push({ startDate: today, endDate: today, realtime: true });

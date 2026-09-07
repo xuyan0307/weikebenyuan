@@ -148,6 +148,25 @@ test('refreshes shortly before access token expiry but not when expiry metadata 
   assert.equal(shouldRefreshJuguangToken(undefined, undefined, new Date('2026-09-06T00:55:00.000Z')), false);
 });
 
+test('uses yesterday realtime reports before the 10:15 Shanghai settlement run', () => {
+  const beforeSettlement = new Date('2026-09-07T00:00:00.000Z');
+  assert.deepEqual(juguangFetchWindows('2026-09-06', '2026-09-06', true, beforeSettlement), [
+    { startDate: '2026-09-06', endDate: '2026-09-06', realtime: true },
+  ]);
+  assert.deepEqual(juguangFetchWindows('2026-09-05', '2026-09-07', true, beforeSettlement), [
+    { startDate: '2026-09-05', endDate: '2026-09-05', realtime: false },
+    { startDate: '2026-09-06', endDate: '2026-09-06', realtime: true },
+    { startDate: '2026-09-07', endDate: '2026-09-07', realtime: true },
+  ]);
+});
+
+test('switches yesterday back to offline reports at the settlement cutoff', () => {
+  const atSettlement = new Date('2026-09-07T02:15:00.000Z');
+  assert.deepEqual(juguangFetchWindows('2026-09-06', '2026-09-06', true, atSettlement), [
+    { startDate: '2026-09-06', endDate: '2026-09-06', realtime: false },
+  ]);
+});
+
 test('keeps advertiser authorization and refresh token when refresh response only rotates access token', () => {
   const previous = {
     platform: 'xhs_juguang',
