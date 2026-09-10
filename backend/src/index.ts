@@ -37,7 +37,7 @@ import {
   startSystemParametersScheduler,
   stopSystemParametersScheduler,
 } from './services/systemParametersService';
-import { startJuguangScheduler, stopJuguangScheduler } from './services/juguangService';
+import { ensureJuguangTokenStorage, startJuguangScheduler, stopJuguangScheduler } from './services/juguangService';
 
 // Local development keeps shared secrets in the repository root `.env.local`.
 // Support starting the API from either the repository root or `backend/`.
@@ -113,6 +113,7 @@ async function startServer() {
   try {
     // 初始化数据库连接
     await initDatabase();
+    ensureJuguangTokenStorage();
     startAppointmentNotificationScheduler();
     startAppointmentAutoCompletionScheduler();
     startSystemParametersScheduler();

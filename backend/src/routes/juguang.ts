@@ -5,6 +5,7 @@ import { createError } from '../middleware/errorHandler';
 import {
   getJuguangOverview,
   getLatestSuccessfulJuguangSnapshot,
+  getJuguangSyncGate,
   getJuguangSyncStatus,
   isJuguangSyncRunning,
   juguangDataStatusForRange,
@@ -99,6 +100,18 @@ router.post('/sync/on-open', auditLog('juguang'), async (req: AuthRequest, res, 
       });
       return;
     }
+    const gate = await getJuguangSyncGate(startDate, endDate);
+    if (gate.blocked) {
+      res.json({
+        accepted: false,
+        reason: gate.reason,
+        error: gate.message,
+        retryAfterSeconds: gate.retryAfterSeconds,
+        requiresReauthorization: gate.reason === 'reauthorization_required' || gate.reason === 'storage_error',
+        hasCachedSnapshot: Boolean(cachedSnapshot),
+      });
+      return;
+    }
     void triggerJuguangSync(
       startDate,
       endDate,
@@ -122,6 +135,11 @@ router.post(
       const startDate = String(req.body?.startDate || yesterdayShanghai());
       const endDate = String(req.body?.endDate || startDate);
       validateDateRange(startDate, endDate);
+      const gate = await getJuguangSyncGate(startDate, endDate);
+      if (gate.blocked && gate.reason !== 'failed') {
+        next(createError(gate.message || '聚光同步当前不可用', 409));
+        return;
+      }
       if (isJuguangSyncRunning()) {
         next(createError('已有聚光同步任务正在执行，请稍后重试', 409));
         return;

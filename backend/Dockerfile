@@ -16,16 +16,19 @@ FROM node:20-alpine AS production
 
 WORKDIR /app
 
-RUN addgroup -g 1001 -S appuser && \
+RUN apk add --no-cache su-exec && \
+    addgroup -g 1001 -S appuser && \
     adduser -S -u 1001 -G appuser appuser
 
 COPY --from=builder --chown=appuser:appuser /app/node_modules ./node_modules
 COPY --from=builder --chown=appuser:appuser /app/dist ./dist
 COPY --from=builder --chown=appuser:appuser /app/package.json ./package.json
 COPY --from=builder --chown=appuser:appuser /app/init.sql ./init.sql
+COPY --chown=root:root backend/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
-USER appuser
+RUN chmod 755 /usr/local/bin/docker-entrypoint.sh
 
 EXPOSE 3000
 
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["node", "dist/index.js"]

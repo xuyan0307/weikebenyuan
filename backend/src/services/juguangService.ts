@@ -10,6 +10,19 @@ const DEFAULT_API_BASE = 'https://adapi.xiaohongshu.com/api/open';
 const DEFAULT_REFRESH_ENDPOINT = `${DEFAULT_API_BASE}/oauth2/refresh_token`;
 const PAGE_SIZE = 500;
 const MAX_PAGES = 100;
+const FAILED_SYNC_COOLDOWN_MS = 2 * 60 * 1000;
+
+export type JuguangTokenHealth = 'valid' | 'reauthorization_required' | 'storage_error';
+
+class JuguangTokenError extends Error {
+  constructor(
+    message: string,
+    readonly reason: Exclude<JuguangTokenHealth, 'valid'>,
+  ) {
+    super(message);
+    this.name = 'JuguangTokenError';
+  }
+}
 
 export type JuguangReportType =
   | 'account'
@@ -82,7 +95,7 @@ const METRIC_KEYS = [
 const REALTIME_COLUMNS: Record<'account' | 'campaign' | 'unit' | 'creative', readonly string[]> = {
   account: [
     'fee', 'impression', 'click', 'ctr', 'acp', 'cpm', 'like', 'comment', 'collect',
-    'follow', 'share', 'interaction', 'cpi', 'action_button_click', 'screenshot', 'pic_save',
+    'follow', 'share', 'interaction', 'cpi', 'action_button_click', 'screenshot',
     'message_user', 'message', 'message_consult', 'message_consult_cpl', 'initiative_message',
     'initiative_message_cpl', 'msg_leads_num', 'msg_leads_cost', 'message_fst_reply_time_avg',
     'message_reply_in_30s_rate', 'fst_message_reply_in_45s_rate', 'message_reply_in_1min_rate',
@@ -94,7 +107,7 @@ const REALTIME_COLUMNS: Record<'account' | 'campaign' | 'unit' | 'creative', rea
   ],
   campaign: [
     'fee', 'impression', 'click', 'ctr', 'acp', 'cpm', 'like', 'comment', 'collect',
-    'follow', 'share', 'interaction', 'cpi', 'action_button_click', 'screenshot', 'pic_save',
+    'follow', 'share', 'interaction', 'cpi', 'action_button_click', 'screenshot',
     'message_user', 'message', 'message_consult', 'message_consult_cpl', 'initiative_message',
     'initiative_message_cpl', 'msg_leads_num', 'msg_leads_cost', 'leads', 'leads_cpl',
     'valid_leads', 'valid_leads_cpl', 'external_leads', 'external_leads_cpl',
@@ -217,10 +230,31 @@ function readTokenRecord(): TokenRecord {
 
 function writeTokenRecord(tokenFile: string, record: TokenRecord): void {
   const tempFile = `${tokenFile}.${process.pid}.${Date.now()}.tmp`;
-  fs.mkdirSync(path.dirname(tokenFile), { recursive: true });
-  fs.writeFileSync(tempFile, `${JSON.stringify(record, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
-  fs.renameSync(tempFile, tokenFile);
-  try { fs.chmodSync(tokenFile, 0o600); } catch { /* Best effort on Windows. */ }
+  try {
+    fs.mkdirSync(path.dirname(tokenFile), { recursive: true });
+    fs.accessSync(path.dirname(tokenFile), fs.constants.W_OK);
+    fs.writeFileSync(tempFile, `${JSON.stringify(record, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
+    fs.renameSync(tempFile, tokenFile);
+    try { fs.chmodSync(tokenFile, 0o600); } catch { /* Best effort on Windows. */ }
+  } catch {
+    try { if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile); } catch { /* Best effort cleanup. */ }
+    throw new JuguangTokenError('聚光令牌存储不可写，自动续期结果未保存', 'storage_error');
+  }
+}
+
+export function ensureJuguangTokenStorage(): void {
+  const tokenFile = getConfig().tokenFile;
+  if (!tokenFile) return;
+  try {
+    fs.mkdirSync(path.dirname(tokenFile), { recursive: true });
+    fs.accessSync(path.dirname(tokenFile), fs.constants.W_OK);
+    if (fs.existsSync(tokenFile)) {
+      fs.accessSync(tokenFile, fs.constants.R_OK | fs.constants.W_OK);
+      try { fs.chmodSync(tokenFile, 0o600); } catch { /* Best effort on Windows. */ }
+    }
+  } catch {
+    throw new JuguangTokenError('聚光令牌存储不可写，请检查密钥目录权限', 'storage_error');
+  }
 }
 
 export function shouldRefreshJuguangToken(
@@ -254,7 +288,12 @@ async function refreshToken(record: TokenRecord): Promise<TokenRecord> {
     });
     const payload = parseApiPayload(await response.text());
     if (!response.ok || payload.success === false || Number(payload.code || 0) !== 0) {
-      throw new Error('聚光访问令牌刷新失败，请重新授权');
+      const code = Number(payload.code || response.status);
+      const message = String(payload.msg || '');
+      if (code === 410016 || /refresh_token|刷新令牌/iu.test(message)) {
+        throw new JuguangTokenError('聚光授权已失效，请重新授权', 'reauthorization_required');
+      }
+      throw new JuguangTokenError('聚光访问令牌刷新失败，请重新授权', 'reauthorization_required');
     }
     const refreshed = mergeJuguangRefreshTokenRecord(
       record,
@@ -263,7 +302,7 @@ async function refreshToken(record: TokenRecord): Promise<TokenRecord> {
     );
     const authorized = (refreshed.data.approval_advertisers || [])
       .some(item => String(item.advertiser_id || '') === config.advertiserId);
-    if (!authorized) throw new Error('聚光访问令牌刷新失败，请重新授权');
+    if (!authorized) throw new JuguangTokenError('聚光授权范围异常，请重新授权', 'reauthorization_required');
     writeTokenRecord(config.tokenFile, refreshed);
     return refreshed;
   })().finally(() => { tokenRefreshPromise = null; });
@@ -321,6 +360,17 @@ export function isTransientJuguangFailure(httpStatus: number, code: unknown, mes
     || httpStatus >= 500
     || Number(code) === 10005
     || /系统错误|请求频繁|稍后重试/iu.test(String(message || ''));
+}
+
+export function classifyJuguangSyncFailure(message: unknown): Exclude<JuguangTokenHealth, 'valid'> | 'other' {
+  const value = String(message || '');
+  if (/令牌存储不可写|EACCES|permission denied/iu.test(value)) return 'storage_error';
+  if (/授权已失效|重新授权|refresh_token|访问令牌刷新失败/iu.test(value)) return 'reauthorization_required';
+  return 'other';
+}
+
+function isFatalJuguangSyncFailure(error: unknown): boolean {
+  return error instanceof JuguangTokenError || classifyJuguangSyncFailure(error instanceof Error ? error.message : error) !== 'other';
 }
 
 async function postOpenApi(apiPath: string, body: Record<string, unknown>): Promise<ApiPayload> {
@@ -645,7 +695,20 @@ async function runSync(
 
   const details: JuguangSyncResult['details'] = [];
   let rowsWritten = 0;
-  for (const definition of REPORT_DEFINITIONS) {
+  try {
+    // Refresh once before fan-out so an authorization/storage failure creates
+    // one failed job instead of eleven duplicate refresh attempts.
+    await usableTokenRecord();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    details.push(...REPORT_DEFINITIONS.map(definition => ({
+      type: definition.type,
+      status: 'failed' as const,
+      rows: 0,
+      error: message.slice(0, 500),
+    })));
+  }
+  for (const definition of details.length ? [] : REPORT_DEFINITIONS) {
     try {
       let reportRows = 0;
       for (const chunk of juguangFetchWindows(startDate, endDate, Boolean(definition.realtimePath))) {
@@ -686,6 +749,16 @@ async function runSync(
       const message = error instanceof Error ? error.message : String(error);
       details.push({ type: definition.type, status: 'failed', rows: 0, error: message.slice(0, 500) });
       if (!definition.optional) console.error(`Juguang ${definition.type} sync failed:`, message);
+      if (isFatalJuguangSyncFailure(error)) {
+        const completed = new Set(details.map(item => item.type));
+        details.push(...REPORT_DEFINITIONS.filter(item => !completed.has(item.type)).map(item => ({
+          type: item.type,
+          status: 'failed' as const,
+          rows: 0,
+          error: message.slice(0, 500),
+        })));
+        break;
+      }
     }
   }
 
@@ -896,6 +969,63 @@ export async function getLatestSuccessfulJuguangSnapshot(startDate: string, endD
   return rows[0]?.finished_at ? { finishedAt: String(rows[0].finished_at) } : null;
 }
 
+export interface JuguangSyncGate {
+  blocked: boolean;
+  reason?: 'reauthorization_required' | 'storage_error' | 'failed';
+  message?: string;
+  retryAfterSeconds?: number;
+}
+
+export function evaluateJuguangSyncGate(
+  latest: { status: string; finishedAt: string | null; errorMessage: string } | null,
+  tokenUpdatedAt: string | null,
+  now = new Date(),
+): JuguangSyncGate {
+  if (!latest || latest.status !== 'failed' || !latest.finishedAt) return { blocked: false };
+  const finished = Date.parse(latest.finishedAt);
+  const tokenUpdated = Date.parse(String(tokenUpdatedAt || ''));
+  const failure = classifyJuguangSyncFailure(latest.errorMessage);
+  if (failure !== 'other' && (!Number.isFinite(tokenUpdated) || tokenUpdated <= finished)) {
+    return {
+      blocked: true,
+      reason: failure,
+      message: failure === 'storage_error'
+        ? '聚光令牌存储异常，请联系管理员处理后重新授权'
+        : '聚光授权已失效，请在数据同步页重新授权',
+    };
+  }
+  const remaining = FAILED_SYNC_COOLDOWN_MS - (now.getTime() - finished);
+  if (remaining > 0) {
+    return {
+      blocked: true,
+      reason: 'failed',
+      message: '最近一次同步失败，系统将在稍后自动重试',
+      retryAfterSeconds: Math.ceil(remaining / 1000),
+    };
+  }
+  return { blocked: false };
+}
+
+export async function getJuguangSyncGate(startDate: string, endDate: string): Promise<JuguangSyncGate> {
+  const config = getConfig();
+  const [rows] = await getDb().query<RowDataPacket[]>(
+    `SELECT status,
+            DATE_FORMAT(finished_at, '%Y-%m-%dT%H:%i:%s+08:00') AS finished_at,
+            error_message
+     FROM juguang_sync_jobs
+     WHERE advertiser_id = ? AND start_date = ? AND end_date = ? AND finished_at IS NOT NULL
+     ORDER BY started_at DESC LIMIT 1`,
+    [config.advertiserId, startDate, endDate],
+  );
+  let tokenUpdatedAt: string | null = null;
+  try { tokenUpdatedAt = readTokenRecord().updatedAt || null; } catch { /* Status below uses the job error. */ }
+  return evaluateJuguangSyncGate(rows[0] ? {
+    status: String(rows[0].status),
+    finishedAt: rows[0].finished_at ? String(rows[0].finished_at) : null,
+    errorMessage: String(rows[0].error_message || ''),
+  } : null, tokenUpdatedAt);
+}
+
 export async function getJuguangSyncStatus() {
   const config = getConfig();
   let tokenConfigured = false;
@@ -926,6 +1056,21 @@ export async function getJuguangSyncStatus() {
      ORDER BY started_at DESC LIMIT 20`,
     [config.advertiserId]
   );
+  const latestJob = jobs[0];
+  const latestFailure = latestJob?.status === 'failed'
+    ? classifyJuguangSyncFailure(latestJob.error_message)
+    : 'other';
+  const latestFinishedAt = Date.parse(String(latestJob?.finished_at || ''));
+  const tokenUpdatedTime = Date.parse(String(tokenUpdatedAt || ''));
+  const unresolvedTokenFailure = latestFailure !== 'other'
+    && (!Number.isFinite(tokenUpdatedTime) || tokenUpdatedTime <= latestFinishedAt);
+  const tokenHealth: JuguangTokenHealth = unresolvedTokenFailure ? latestFailure : 'valid';
+  if (unresolvedTokenFailure) {
+    authorized = false;
+    tokenError = tokenHealth === 'storage_error'
+      ? '聚光令牌存储异常，请联系管理员处理后重新授权'
+      : '聚光授权已失效，请重新授权';
+  }
   return {
     advertiserId: config.advertiserId,
     advertiserName,
@@ -933,6 +1078,7 @@ export async function getJuguangSyncStatus() {
     authorized,
     tokenUpdatedAt,
     tokenError,
+    tokenHealth,
     running: isJuguangSyncRunning(),
     nextRuns: nextJuguangRuns(),
     jobs: jobs.map(row => ({

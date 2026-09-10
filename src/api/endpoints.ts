@@ -108,6 +108,7 @@ export interface JuguangSyncStatusDto {
   authorized: boolean;
   tokenUpdatedAt: string | null;
   tokenError: string;
+  tokenHealth: 'valid' | 'reauthorization_required' | 'storage_error';
   running: boolean;
   nextRuns: { provisionalAt: string; settlementAt: string };
   jobs: Array<{
@@ -132,7 +133,14 @@ export const juguangApi = {
     api.get<{ data: JuguangReportRow[]; total: number }>(`/juguang/reports/${type}`, { startDate, endDate, limit }),
   syncStatus: () => api.get<{ data: JuguangSyncStatusDto }>('/juguang/sync/status'),
   refreshOnOpen: (startDate: string, endDate: string) =>
-    api.post<{ accepted: boolean; reason?: string; hasCachedSnapshot: boolean }>('/juguang/sync/on-open', { startDate, endDate }),
+    api.post<{
+      accepted: boolean;
+      reason?: string;
+      error?: string;
+      retryAfterSeconds?: number;
+      requiresReauthorization?: boolean;
+      hasCachedSnapshot: boolean;
+    }>('/juguang/sync/on-open', { startDate, endDate }),
   manualSync: (startDate: string, endDate: string) =>
     api.post<{ message: string; accepted: boolean }>('/juguang/sync/manual', { startDate, endDate }),
   recommendKeywords: (keyword: string, limit = 50) =>

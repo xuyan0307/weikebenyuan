@@ -348,6 +348,7 @@ export default function JuguangPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [rangeSyncing, setRangeSyncing] = useState(true);
   const [rangeReady, setRangeReady] = useState(false);
+  const [syncError, setSyncError] = useState('');
   const queryClient = useQueryClient();
   const canManualSync = currentUser.role === 'superadmin' || currentUser.role === 'admin';
 
@@ -356,6 +357,7 @@ export default function JuguangPage() {
     if (value === preset && nextRange.startDate === startDate && nextRange.endDate === endDate) return;
     setRangeSyncing(true);
     setRangeReady(false);
+    setSyncError('');
     setPreset(value);
     if (value !== 'custom') { setStartDate(nextRange.startDate); setEndDate(nextRange.endDate); }
   }
@@ -379,6 +381,11 @@ export default function JuguangPage() {
         const result = await juguangApi.refreshOnOpen(startDate, endDate);
         if (cancelled) return;
         if (result.hasCachedSnapshot) setRangeReady(true);
+        if (!result.accepted && ['reauthorization_required', 'storage_error', 'failed'].includes(String(result.reason))) {
+          setRangeSyncing(false);
+          setSyncError(result.error || '聚光同步失败，请稍后重试');
+          return;
+        }
         if (!result.accepted && result.reason === 'fresh') {
           await queryClient.invalidateQueries({ queryKey: ['juguang'] });
           if (cancelled) return;
@@ -394,8 +401,11 @@ export default function JuguangPage() {
           return;
         }
         timer = window.setTimeout(() => void reconcileRange(), 5_000);
-      } catch {
-        if (!cancelled) setRangeSyncing(false);
+      } catch (error) {
+        if (!cancelled) {
+          setRangeSyncing(false);
+          setSyncError((error as {message?: string})?.message || '聚光同步状态查询失败');
+        }
       }
     };
     void reconcileRange();
@@ -408,6 +418,7 @@ export default function JuguangPage() {
   async function manualRefresh() {
     try {
       setRefreshing(true);
+      setSyncError('');
       await juguangApi.manualSync(startDate, endDate);
       await queryClient.invalidateQueries({ queryKey: ['juguang'] });
       [5_000, 30_000, 90_000].forEach(delay => window.setTimeout(
@@ -416,7 +427,9 @@ export default function JuguangPage() {
       ));
       toast.success('聚光数据同步任务已开始，完成后页面会自动更新');
     } catch (error) {
-      toast.error((error as {message?: string})?.message || '同步失败');
+      const message = (error as {message?: string})?.message || '同步失败';
+      setSyncError(message);
+      toast.error(message);
     } finally { setRefreshing(false); }
   }
 
@@ -448,6 +461,7 @@ export default function JuguangPage() {
   return <div data-cmp="JuguangPage" className="flex flex-col gap-5">
     <div className="flex flex-wrap items-end justify-between gap-3"><div><div className="flex items-center gap-2"><h2 className="text-lg font-bold">{PAGE_TITLES[page]}</h2><Badge tone="red">账户 7890257</Badge></div><p className="mt-1 text-sm text-muted-foreground">{PAGE_DESCRIPTIONS[page]}</p></div>{page !== 'sync' && <div className="text-xs text-muted-foreground">{currentLastSyncedAt ? `最近同步：${currentLastSyncedAt}` : '尚未同步当前时间范围'}</div>}</div>
     {page !== 'sync' && <Card className="flex flex-wrap items-center gap-2 p-3"><label className="relative"><span className="sr-only">选择统计时间</span><select value={preset} onChange={e => selectPreset(e.target.value as DatePreset)} className="min-w-32 appearance-none rounded-lg border border-border bg-card py-2 pl-3 pr-9 text-sm"><option value="today">当天</option><option value="yesterday">前一天</option><option value="week">近7天</option><option value="month">近1个月</option><option value="currentMonth">当月</option><option value="lastMonth">上个月</option><option value="year">今年</option><option value="custom">自定义时间</option></select><ChevronDownIcon size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"/></label>{preset === 'custom' && <><input type="date" value={startDate} onChange={e => { setRangeSyncing(true); setRangeReady(false); setStartDate(e.target.value); }} className="rounded-lg border border-border px-3 py-2 text-sm"/><span className="text-muted-foreground">至</span><input type="date" value={endDate} min={startDate} onChange={e => { setRangeSyncing(true); setRangeReady(false); setEndDate(e.target.value); }} className="rounded-lg border border-border px-3 py-2 text-sm"/></>}<div className="ml-auto flex items-center gap-2">{rangeSyncing ? <Badge tone="blue">{displayReady ? '后台更新中' : '正在首次同步'}</Badge> : <Badge tone={currentDataStatus === 'settled' ? 'green' : currentDataStatus === 'provisional' ? 'amber' : 'gray'}>{currentDataStatus === 'settled' ? '已结算' : currentDataStatus === 'provisional' ? '暂定数据' : '待同步'}</Badge>}{canManualSync && <button onClick={manualRefresh} disabled={refreshing || rangeSyncing} className="flex items-center gap-2 rounded-lg bg-[#ff385d] px-4 py-2 text-sm font-medium text-white disabled:opacity-60"><RefreshCwIcon size={15} className={refreshing || rangeSyncing ? 'animate-spin' : ''}/>{refreshing ? '同步中…' : '手动刷新'}</button>}</div></Card>}
+    {syncError && page !== 'sync' && <Card className="border-red-200 bg-red-50 p-4 text-sm text-red-700">{syncError}</Card>}
     {primaryError && page !== 'sync' ? <ErrorState error={primaryError}/> : page === 'overview' ? <Overview data={displayReady ? overviewQ.data : undefined} loading={overviewQ.isLoading || !displayReady}/> : page === 'delivery' ? <Delivery standard={campaignQ.data || []} easy={easyCampaignQ.data || []} loading={campaignQ.isLoading || easyCampaignQ.isLoading || !displayReady}/> : page === 'search' ? <SearchReport rows={searchQ.data || []} loading={searchQ.isLoading || !displayReady}/> : page === 'content' ? <ContentReport rows={noteQ.data || []} loading={noteQ.isLoading || !displayReady}/> : page === 'leads' ? <LeadsReport overview={displayReady ? overviewQ.data : undefined} campaigns={campaignQ.data || []} loading={overviewQ.isLoading || campaignQ.isLoading || !displayReady}/> : page === 'audience' ? <AudienceReport geo={geoQ.data || []} audience={audienceQ.data || []} loading={geoQ.isLoading || audienceQ.isLoading || !displayReady}/> : <SyncReport/>}
     {page !== 'sync' && <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground"><InfoIcon size={13}/>页面只展示已同步的真实聚光报表；缺失字段显示为“—”或0，不使用示例数据补齐。</div>}
   </div>;

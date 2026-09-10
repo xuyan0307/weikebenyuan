@@ -8,6 +8,8 @@ const {
   juguangFetchWindows,
   juguangDataStatusForRange,
   isTransientJuguangFailure,
+  classifyJuguangSyncFailure,
+  evaluateJuguangSyncGate,
   mergeJuguangRefreshTokenRecord,
   summarizeJuguangMetrics,
   shouldRefreshJuguangToken,
@@ -216,4 +218,51 @@ test('retries only transient Juguang report failures', () => {
   assert.equal(isTransientJuguangFailure(503, 0, ''), true);
   assert.equal(isTransientJuguangFailure(200, 1970001, '指标不存在'), false);
   assert.equal(isTransientJuguangFailure(403, 10001, '无权限'), false);
+});
+
+test('classifies authorization and token storage failures without exposing raw credentials', () => {
+  assert.equal(classifyJuguangSyncFailure('聚光授权已失效，请重新授权'), 'reauthorization_required');
+  assert.equal(classifyJuguangSyncFailure("EACCES: permission denied, open '/app/secrets/juguang/token.tmp'"), 'storage_error');
+  assert.equal(classifyJuguangSyncFailure('聚光接口请求失败 (1970001): 指标不存在'), 'other');
+});
+
+test('blocks page-open retry storms until authorization is newer than the fatal failure', () => {
+  const failed = {
+    status: 'failed',
+    finishedAt: '2026-09-10T08:00:00+08:00',
+    errorMessage: 'account: 聚光授权已失效，请重新授权',
+  };
+  assert.deepEqual(
+    evaluateJuguangSyncGate(failed, '2026-09-08T08:00:00+08:00', new Date('2026-09-10T01:00:00Z')),
+    {
+      blocked: true,
+      reason: 'reauthorization_required',
+      message: '聚光授权已失效，请在数据同步页重新授权',
+    },
+  );
+  assert.deepEqual(
+    evaluateJuguangSyncGate(failed, '2026-09-10T08:05:00+08:00', new Date('2026-09-10T01:00:00Z')),
+    { blocked: false },
+  );
+});
+
+test('applies a short cooldown to ordinary failures but allows a later retry', () => {
+  const failed = {
+    status: 'failed',
+    finishedAt: '2026-09-10T08:00:00+08:00',
+    errorMessage: '网络暂时不可用',
+  };
+  assert.deepEqual(
+    evaluateJuguangSyncGate(failed, null, new Date('2026-09-10T00:01:00Z')),
+    {
+      blocked: true,
+      reason: 'failed',
+      message: '最近一次同步失败，系统将在稍后自动重试',
+      retryAfterSeconds: 60,
+    },
+  );
+  assert.deepEqual(
+    evaluateJuguangSyncGate(failed, null, new Date('2026-09-10T00:02:01Z')),
+    { blocked: false },
+  );
 });
