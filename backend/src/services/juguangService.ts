@@ -133,6 +133,13 @@ const REALTIME_COLUMNS: Record<'account' | 'campaign' | 'unit' | 'creative', rea
   ],
 };
 
+const realtimeUnsupportedColumns: Record<keyof typeof REALTIME_COLUMNS, Set<string>> = {
+  account: new Set(),
+  campaign: new Set(),
+  unit: new Set(),
+  creative: new Set(),
+};
+
 export interface JuguangRow {
   reportDate: string;
   entityId: string;
@@ -369,6 +376,11 @@ export function classifyJuguangSyncFailure(message: unknown): Exclude<JuguangTok
   return 'other';
 }
 
+export function invalidMetricFromJuguangFailure(message: unknown): string {
+  const match = String(message || '').match(/指标不存在\s*[:：]\s*([a-zA-Z0-9_]+)/u);
+  return match?.[1] || '';
+}
+
 function isFatalJuguangSyncFailure(error: unknown): boolean {
   return error instanceof JuguangTokenError || classifyJuguangSyncFailure(error instanceof Error ? error.message : error) !== 'other';
 }
@@ -557,19 +569,37 @@ async function fetchReportChunk(
   const rows: Record<string, unknown>[] = [];
   const requestIds: string[] = [];
   const pageSize = realtime ? 100 : PAGE_SIZE;
+  const realtimeType = definition.type as keyof typeof REALTIME_COLUMNS;
+  const unsupportedColumns = realtimeUnsupportedColumns[realtimeType];
   for (let pageNum = 1; pageNum <= MAX_PAGES; pageNum += 1) {
-    const payload = await postOpenApi(realtime ? String(definition.realtimePath) : definition.apiPath, realtime
-      ? {
-          advertiser_id: Number(config.advertiserId), start_date: startDate, end_date: endDate,
-          page_num: pageNum, page_size: pageSize, data_caliber: 1,
-          columns: REALTIME_COLUMNS[definition.type as keyof typeof REALTIME_COLUMNS],
-          ...(definition.type === 'account' ? { need_hourly_data: false } : {}),
-        }
-      : {
-          advertiser_id: Number(config.advertiserId), start_date: startDate, end_date: endDate,
-          time_unit: 'DAY', page_num: pageNum, page_size: pageSize, data_caliber: 1,
-          creation_type: [0, 1, 2, 4], ...definition.extras,
-        });
+    let payload: ApiPayload;
+    while (true) {
+      const columns = realtime
+        ? REALTIME_COLUMNS[realtimeType].filter(column => !unsupportedColumns.has(column))
+        : [];
+      try {
+        payload = await postOpenApi(realtime ? String(definition.realtimePath) : definition.apiPath, realtime
+          ? {
+              advertiser_id: Number(config.advertiserId), start_date: startDate, end_date: endDate,
+              page_num: pageNum, page_size: pageSize, data_caliber: 1,
+              columns,
+              ...(definition.type === 'account' ? { need_hourly_data: false } : {}),
+            }
+          : {
+              advertiser_id: Number(config.advertiserId), start_date: startDate, end_date: endDate,
+              time_unit: 'DAY', page_num: pageNum, page_size: pageSize, data_caliber: 1,
+              creation_type: [0, 1, 2, 4], ...definition.extras,
+            });
+        break;
+      } catch (error) {
+        const invalidMetric = realtime
+          ? invalidMetricFromJuguangFailure(error instanceof Error ? error.message : error)
+          : '';
+        if (!invalidMetric || !columns.includes(invalidMetric)) throw error;
+        unsupportedColumns.add(invalidMetric);
+        console.warn(`Juguang realtime ${definition.type} does not support metric ${invalidMetric}; retrying without it`);
+      }
+    }
     const pageRows = realtime
       ? normalizeRealtimeReportRows(definition, payload, startDate)
       : dataRows(payload);

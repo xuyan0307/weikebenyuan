@@ -10,6 +10,7 @@ const {
   isTransientJuguangFailure,
   classifyJuguangSyncFailure,
   evaluateJuguangSyncGate,
+  invalidMetricFromJuguangFailure,
   mergeJuguangRefreshTokenRecord,
   summarizeJuguangMetrics,
   shouldRefreshJuguangToken,
@@ -224,6 +225,15 @@ test('classifies authorization and token storage failures without exposing raw c
   assert.equal(classifyJuguangSyncFailure('聚光授权已失效，请重新授权'), 'reauthorization_required');
   assert.equal(classifyJuguangSyncFailure("EACCES: permission denied, open '/app/secrets/juguang/token.tmp'"), 'storage_error');
   assert.equal(classifyJuguangSyncFailure('聚光接口请求失败 (1970001): 指标不存在'), 'other');
+});
+
+test('extracts unsupported realtime metrics for adaptive report retry', () => {
+  assert.equal(
+    invalidMetricFromJuguangFailure('聚光接口请求失败 (1970001): 指标不存在:message_fst_reply_time_avg'),
+    'message_fst_reply_time_avg',
+  );
+  assert.equal(invalidMetricFromJuguangFailure('指标不存在：pic_save'), 'pic_save');
+  assert.equal(invalidMetricFromJuguangFailure('无权限'), '');
 });
 
 test('blocks page-open retry storms until authorization is newer than the fatal failure', () => {
