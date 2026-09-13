@@ -958,7 +958,7 @@ function ServicePersonRow({
   const statusText = status.label === '服务中' ? status.detail : status.label;
 
   return (
-    <div className="flex items-center gap-3 py-2" style={{ borderBottom: '1px solid var(--border)' }}>
+    <div className={`service-person-row ${isExperience ? 'service-person-experience' : 'service-person-package'} flex items-center gap-3 py-2`} style={{ borderBottom: '1px solid var(--border)' }}>
       <span className="text-sm font-medium w-24 flex-shrink-0" style={{ color: 'var(--foreground)' }}>{label === '调理师' ? '体质调理师' : label}</span>
       {!isExperience && <input aria-label={`${label}服务项目`} className="w-36 flex-shrink-0 text-sm rounded-lg px-2 py-1.5" style={{ background: 'var(--muted)', border: '1px solid var(--border)' }} value={value.serviceItems ?? ''} placeholder={`${label === '产康师' ? '产康' : label === '运动康复师' ? '运动康复' : '体质调理'}项目`} disabled={assignmentDisabled} onChange={e => onChange({ ...value, serviceItems: e.target.value })} />}
       <select
@@ -2879,9 +2879,9 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
                       {form.orderType === '套餐' ? `套餐${form.activePackageNumber}` : '体验卡阶段'} · 服务人员与服务记录
                     </div>
                     <div className="text-xs mb-3" style={{ color: 'var(--muted-foreground)' }}>服务人员、排期及服务照片均归属于当前订单阶段。</div>
-                    <div className="rounded-xl overflow-x-auto" style={{ border: '1px solid var(--border)' }}>
-                      <div style={{ minWidth: form.orderType === '套餐' ? 900 : 600 }}>
-                      <div className="px-4 py-2 text-xs font-medium flex gap-3" style={{ background: 'var(--muted)', color: 'var(--muted-foreground)', borderBottom: '1px solid var(--border)' }}>
+                    <div className="service-person-table rounded-xl" style={{ border: '1px solid var(--border)' }}>
+                      <div>
+                      <div className={`service-person-heading ${form.orderType === '套餐' ? 'service-person-package' : 'service-person-experience'} px-4 py-2 text-xs font-medium flex gap-3`} style={{ background: 'var(--muted)', color: 'var(--muted-foreground)', borderBottom: '1px solid var(--border)' }}>
                         <span className="w-24">服务类型</span>
                         {form.orderType !== '体验卡' && <span className="w-36 flex-shrink-0">服务项目</span>}
                         <span className="flex-1">分配人员</span>

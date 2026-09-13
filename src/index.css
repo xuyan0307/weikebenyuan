@@ -974,3 +974,38 @@
   padding-bottom: env(safe-area-inset-bottom, 0px);
   background: var(--page-bg);
 }
+
+/* Keep all service inputs within the order dialog instead of a 900px scroller. */
+.service-person-table { container-type: inline-size; min-width: 0; }
+.service-person-table .service-person-heading,
+.service-person-table .service-person-row {
+  display: grid;
+  gap: 8px;
+  align-items: center;
+}
+.service-person-table .service-person-package {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.7fr) minmax(0, 1.5fr) minmax(0, .8fr) minmax(0, .8fr) minmax(0, 1.1fr);
+}
+.service-person-table .service-person-experience {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) minmax(0, 1fr);
+}
+.service-person-table .service-person-row > *,
+.service-person-table .service-person-heading > * {
+  width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.service-person-table input,
+.service-person-table select { min-width: 0; max-width: 100%; }
+@container (max-width: 520px) {
+  .service-person-table .service-person-heading { display: none; }
+  .service-person-table .service-person-row { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .service-person-table .service-person-row > :first-child,
+  .service-person-table .service-person-package > :nth-child(2),
+  .service-person-table .service-person-package > :nth-child(3),
+  .service-person-table .service-person-package > :nth-child(6) { grid-column: 1 / -1; }
+  .service-person-table .service-person-package > :nth-child(4)::before { content: '服务总次数'; }
+  .service-person-table .service-person-package > :nth-child(5)::before { content: '已服务次数'; }
+  .service-person-table .service-person-package > :nth-child(6)::before { content: '服务状态'; }
+  .service-person-table .service-person-package > div::before { display: block; margin-bottom: 4px; font-size: 12px; color: var(--muted-foreground); }
+}
