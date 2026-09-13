@@ -80,6 +80,7 @@ function matchesPurchaseDateRange(value: string, range: PurchaseDateRange): bool
 }
 
 interface ServicePerson {
+  serviceItems?: string;
   type: TherapistType;
   assign: TherapistAssign;
   totalTimes?: string;
@@ -959,6 +960,7 @@ function ServicePersonRow({
   return (
     <div className="flex items-center gap-3 py-2" style={{ borderBottom: '1px solid var(--border)' }}>
       <span className="text-sm font-medium w-24 flex-shrink-0" style={{ color: 'var(--foreground)' }}>{label === '调理师' ? '体质调理师' : label}</span>
+      {!isExperience && <input aria-label={`${label}服务项目`} className="w-36 flex-shrink-0 text-sm rounded-lg px-2 py-1.5" style={{ background: 'var(--muted)', border: '1px solid var(--border)' }} value={value.serviceItems ?? ''} placeholder={`${label === '产康师' ? '产康' : label === '运动康复师' ? '运动康复' : '体质调理'}项目`} disabled={assignmentDisabled} onChange={e => onChange({ ...value, serviceItems: e.target.value })} />}
       <select
         className="text-sm rounded-lg px-2 py-1.5 outline-none flex-1"
         style={{ background: 'var(--muted)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
@@ -1165,7 +1167,7 @@ function snapshotOrderStage(
     amount: form.amount,
     payStatus: form.payStatus,
     purchaseDate: form.purchaseDate,
-    serviceItems: form.serviceItems,
+    serviceItems: type === '套餐' ? [form.servicePerson1.serviceItems, form.servicePerson2.serviceItems, form.servicePerson3.serviceItems].filter(Boolean).join('、') : form.serviceItems,
     serviceNote: form.serviceNote,
     servicePeople: {
       sp1: { ...form.servicePerson1 },
@@ -1380,7 +1382,7 @@ function formFromOrder(order: any): OrderForm {
     packageHistory,
     activePackageNumber: Math.max(1, Number(orderPeople?.activePackageNumber) || (packageHistory.length + 1)),
     contractStatus: getContractStatus(order),
-    servicePerson1: savedTherapists?.sp1 || { type: '产康师', assign: '待分配' },
+    servicePerson1: { ...(savedTherapists?.sp1 || { type: '产康师', assign: '待分配' }), serviceItems: savedTherapists?.sp1?.serviceItems ?? order?.serviceItems ?? '' },
     servicePerson2: savedTherapists?.sp2 || { type: '运动康复师', assign: '待分配' },
     servicePerson3: savedTherapists?.sp3 || { type: '调理师', assign: '待分配' },
     serviceItems: order?.serviceItems || orderServiceItemsMap.get(orderId) || '',
@@ -1924,7 +1926,7 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
         serviceNote: stage.serviceNote,
         contractAttachments: [...(stage.contractAttachments || [])],
         servicePhotoRecords: [...(stage.servicePhotoRecords || [])],
-        servicePerson1: { ...stage.servicePeople.sp1 },
+        servicePerson1: { ...stage.servicePeople.sp1, serviceItems: stage.servicePeople.sp1.serviceItems ?? stage.serviceItems },
         servicePerson2: { ...stage.servicePeople.sp2 },
         servicePerson3: { ...stage.servicePeople.sp3 },
         followRecords: sortFollowRecords(stage.followRecords || []),
@@ -1961,7 +1963,7 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
       serviceNote: stage.serviceNote,
       contractAttachments: [...(stage.contractAttachments || [])],
       servicePhotoRecords: [...(stage.servicePhotoRecords || [])],
-      servicePerson1: { ...stage.servicePeople.sp1 },
+      servicePerson1: { ...stage.servicePeople.sp1, serviceItems: stage.servicePeople.sp1.serviceItems ?? stage.serviceItems },
       servicePerson2: { ...stage.servicePeople.sp2 },
       servicePerson3: { ...stage.servicePeople.sp3 },
       followRecords: sortFollowRecords(stage.followRecords || []),
@@ -2145,7 +2147,7 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
       amount: Number(sourceForm.amount) || 0,
       payStatus,
       purchaseDate: sourceForm.purchaseDate,
-      serviceItems: sourceForm.serviceItems,
+      serviceItems: sourceForm.orderType === '套餐' ? [sourceForm.servicePerson1.serviceItems, sourceForm.servicePerson2.serviceItems, sourceForm.servicePerson3.serviceItems].filter(Boolean).join('、') : sourceForm.serviceItems,
       totalTimes: sourceForm.orderType === '套餐' || order?.isUpgrade
         ? Math.max(1, Number(sourceForm.totalTimes) || 1)
         : 1,
@@ -2783,10 +2785,12 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
                   </div>
 
                   {/* 服务项目 */}
+                  {form.orderType !== '套餐' && (
                   <div className="flex flex-col gap-1">
                     <label className="text-xs font-medium" style={{ color: 'var(--muted-foreground)' }}>服务项目</label>
                     <ServiceItemsPicker value={form.serviceItems} onChange={v => set('serviceItems', v)} />
                   </div>
+                  )}
 
                   {form.orderType === '套餐' && (
                   <div className="flex flex-col gap-2">
@@ -2875,9 +2879,11 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
                       {form.orderType === '套餐' ? `套餐${form.activePackageNumber}` : '体验卡阶段'} · 服务人员与服务记录
                     </div>
                     <div className="text-xs mb-3" style={{ color: 'var(--muted-foreground)' }}>服务人员、排期及服务照片均归属于当前订单阶段。</div>
-                    <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+                    <div className="rounded-xl overflow-x-auto" style={{ border: '1px solid var(--border)' }}>
+                      <div style={{ minWidth: form.orderType === '套餐' ? 900 : 600 }}>
                       <div className="px-4 py-2 text-xs font-medium flex gap-3" style={{ background: 'var(--muted)', color: 'var(--muted-foreground)', borderBottom: '1px solid var(--border)' }}>
                         <span className="w-24">服务类型</span>
+                        {form.orderType !== '体验卡' && <span className="w-36 flex-shrink-0">服务项目</span>}
                         <span className="flex-1">分配人员</span>
                         <span className="w-28">{form.orderType === '体验卡' ? '服务状态' : '服务总次数'}</span>
                         {form.orderType !== '体验卡' && <span className="w-28">已服务次数</span>}
@@ -2926,7 +2932,7 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
                               set('usedTimes', experienceOverallUsedTimes(form.servicePerson1, v, form.servicePerson3));
                             }
                           }}
-                          totalTimes={form.servicePerson2.totalTimes || form.totalTimes}
+                          totalTimes={form.servicePerson2.totalTimes || '1'}
                           usedTimes={form.servicePerson2.usedTimes || '0'}
                           isExperience={form.orderType === '体验卡'}
                           canEditProgress={canEditServiceProgress}
@@ -2939,7 +2945,7 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
                           }}
                           onUsedTimesChange={v => {
                             if (!canEditServiceProgress) return;
-                            const used = Math.max(0, Math.min(form.orderType === '体验卡' ? 1 : Math.max(1, Number(form.servicePerson2.totalTimes || form.totalTimes) || 1), Number(v) || 0));
+                            const used = Math.max(0, Math.min(form.orderType === '体验卡' ? 1 : Math.max(1, Number(form.servicePerson2.totalTimes) || 1), Number(v) || 0));
                             set('servicePerson2', { ...form.servicePerson2, usedTimes: String(used) });
                             if (form.orderType === '体验卡') {
                               set('usedTimes', experienceOverallUsedTimes(form.servicePerson1, { ...form.servicePerson2, usedTimes: String(used) }, form.servicePerson3));
@@ -2957,7 +2963,7 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
                               set('usedTimes', experienceOverallUsedTimes(form.servicePerson1, form.servicePerson2, v));
                             }
                           }}
-                          totalTimes={form.servicePerson3.totalTimes || form.totalTimes}
+                          totalTimes={form.servicePerson3.totalTimes || '1'}
                           usedTimes={form.servicePerson3.usedTimes || '0'}
                           isExperience={form.orderType === '体验卡'}
                           canEditProgress={canEditServiceProgress}
@@ -2970,7 +2976,7 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
                           }}
                           onUsedTimesChange={v => {
                             if (!canEditServiceProgress) return;
-                            const used = Math.max(0, Math.min(form.orderType === '体验卡' ? 1 : Math.max(1, Number(form.servicePerson3.totalTimes || form.totalTimes) || 1), Number(v) || 0));
+                            const used = Math.max(0, Math.min(form.orderType === '体验卡' ? 1 : Math.max(1, Number(form.servicePerson3.totalTimes) || 1), Number(v) || 0));
                             set('servicePerson3', { ...form.servicePerson3, usedTimes: String(used) });
                             if (form.orderType === '体验卡') {
                               set('usedTimes', experienceOverallUsedTimes(form.servicePerson1, form.servicePerson2, { ...form.servicePerson3, usedTimes: String(used) }));
@@ -2979,6 +2985,7 @@ function OrderModal({ visible, onClose, mode = 'create', order = null, editOrder
                           }}
                         />
                       </div>
+                    </div>
                     </div>
                     <div className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
                       {form.orderType === '体验卡'

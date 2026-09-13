@@ -102,7 +102,7 @@ test('calendar cards use a stable compact read model and open details in place',
   assert.match(calendarSource, /\{isPackage \? \(/);
   assert.match(calendarSource, /次数：\{progressLabel\}/);
   assert.match(calendarSource, /experiencePaymentLabel/);
-  assert.match(calendarSource, /order\?\.payStatus === '已付款'/);
+  assert.match(calendarSource, /\['已付款', '已支付'\]\.includes\(order\?\.payStatus/);
   assert.match(calendarSource, /付款：\{experiencePaymentLabel\}/);
   assert.match(calendarSource, /onView=\{\(\) => setDetailTarget\(appt\)\}/);
   assert.match(calendarSource, /detailTarget &&/);
@@ -156,7 +156,7 @@ test('appointments retain an exact order link and display the live order total',
   assert.match(appointmentServiceSource, /currentOrder\?\.id \?\? null/);
   assert.match(appointmentRouteSource, /o\.total_times AS order_total_times/);
   assert.match(appointmentRouteSource, /r\.order_total_times == null/);
-  assert.match(calendarSource, /order\?\.totalTimes \?\? appt\.serviceTotalTimes/);
+  assert.match(calendarSource, /appt\.serviceTotalTimes \?\? order\?\.totalTimes/);
 });
 
 test('an upgraded order does not rewrite its historical experience appointment as a package visit', () => {

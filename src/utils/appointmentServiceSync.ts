@@ -2,6 +2,7 @@ export interface AppointmentServiceOrder {
   type?: string;
   isUpgrade?: boolean;
   serviceItems?: string;
+  servicePeople?: any;
 }
 
 export interface AppointmentServiceCustomer {
@@ -18,8 +19,17 @@ function normalizedText(value: unknown): string {
  */
 export function getAppointmentServiceFromRecord(
   order: AppointmentServiceOrder | null | undefined,
-  customer: AppointmentServiceCustomer | null | undefined
+  customer: AppointmentServiceCustomer | null | undefined,
+  therapistName = ''
 ): string {
+  if (therapistName && (order?.type === '套餐' || order?.isUpgrade)) {
+    const people = order.servicePeople || {};
+    const key = ['sp1', 'sp2', 'sp3'].find(key => people[key]?.assign === therapistName);
+    const person = key ? people[key] : undefined;
+    if (person && typeof person.serviceItems === 'string') return person.serviceItems.trim();
+    // Legacy package text belongs to the primary service, never to another specialty.
+    if (key === 'sp2' || key === 'sp3') return '';
+  }
   const recordedService = normalizedText(order?.serviceItems)
     || normalizedText(customer?.intendedProduct);
 

@@ -38,6 +38,7 @@ import {
   formatAppointmentDistrict,
 } from '../utils/appointmentCalendarDisplay';
 import { isOrderAssignedToTherapist, orderTherapistServiceProgress } from '../utils/appointmentTherapistOrders';
+import { experienceStageForAppointment } from '../utils/appointmentOrderStage';
 
 type ApptStatus = '待确认' | '已确认' | '已取消' | '已完成' | '已冲销';
 
@@ -184,6 +185,8 @@ function getOrderForAppointment(appt: Pick<Appointment, 'orderId' | 'customerId'
   const exactOrder = appt.orderId
     ? orders.find(order => order.id === appt.orderId || order._id === appt.orderId)
     : null;
+  const experienceStage = appt.orderType === '体验卡' ? experienceStageForAppointment(exactOrder) : null;
+  if (experienceStage) return { ...experienceStage, id: exactOrder!.id } as Order;
   const exactOrderMatchesStage = exactOrder && (
     appt.orderType === '套餐'
       ? exactOrder.type === '套餐' || exactOrder.isUpgrade
@@ -196,7 +199,10 @@ function getOrderForAppointment(appt: Pick<Appointment, 'orderId' | 'customerId'
     || order.customerCode === appt.customerId
     || order.customerName === appt.customerName
   ));
-  const sameStageOrders = customerOrders.filter(order => (
+  const stageOrders = appt.orderType === '体验卡'
+    ? customerOrders.map(order => (experienceStageForAppointment(order) ?? order) as Order)
+    : customerOrders;
+  const sameStageOrders = stageOrders.filter(order => (
     appt.orderType === '套餐'
       ? order.type === '套餐' || order.isUpgrade
       : order.type === '体验卡' && !order.isUpgrade
@@ -437,9 +443,9 @@ function AppointmentCard({
     ?? (appt.status === '已完成'
       ? displayUsedTimes
       : Math.min(Number(order?.totalTimes) || 1, displayUsedTimes + 1));
-  const displayServiceTotal = order?.totalTimes ?? appt.serviceTotalTimes ?? 1;
+  const displayServiceTotal = appt.serviceTotalTimes ?? order?.totalTimes ?? 1;
   const progressLabel = appointmentProgressLabel(displayServiceSequence, displayServiceTotal);
-  const experiencePaymentLabel = order?.payStatus === '已付款' ? '已付款' : '未付款';
+  const experiencePaymentLabel = ['已付款', '已支付'].includes(order?.payStatus || '') ? '已付款' : '未付款';
   const area = formatAppointmentDistrict(appt.area);
   const isCompleted = appt.status === '已完成';
   const canComplete = !editMode
@@ -1056,9 +1062,12 @@ function CreateModal({
       ?? CUSTOMERS.find(c => c.name === selectedOrder.customerName)
       ?? null)
     : null;
-  const syncedService = getAppointmentServiceFromRecord(selectedOrder, selectedCustomer);
+  const syncedService = getAppointmentServiceFromRecord(selectedOrder, selectedCustomer, therapist?.name || '');
+  const [serviceOverride, setServiceOverride] = useState<string | null>(null);
+  useEffect(() => { setServiceOverride(null); }, [selectedOrderId, therapist?.id, syncedService]);
+  const appointmentService = serviceOverride ?? syncedService;
   const serviceRecordRequired = requiresRecordedAppointmentService(selectedOrder);
-  const serviceRecordMissing = serviceRecordRequired && !syncedService;
+  const serviceRecordMissing = serviceRecordRequired && !appointmentService.trim();
 
   // Current used times for selected order
   const selectedTherapistProgress = selectedOrder
@@ -1145,7 +1154,7 @@ function CreateModal({
       return;
     }
     const area = selectedOrder?.area || selectedCustomer?.area || '';
-    const service = syncedService;
+    const service = appointmentService.trim();
     const newAppt: Appointment = {
       id: `A${Date.now()}`,
       orderId: selectedOrder.id,
@@ -1367,19 +1376,20 @@ function CreateModal({
                       {serviceRecordMissing ? '档案未配置' : '已从客户档案同步'}
                     </div>
                   </div>
-                  <div
+                  <textarea
                     className="w-full rounded-lg px-3 py-2.5 text-sm"
+                    value={appointmentService}
+                    onChange={e => setServiceOverride(e.target.value)}
+                    placeholder="填写本次对应服务项目"
                     style={{
                       border: `1px solid ${serviceRecordMissing ? '#FCD34D' : 'var(--border)'}`,
                       background: serviceRecordMissing ? '#FFFBEB' : 'var(--muted)',
                       color: serviceRecordMissing ? '#B45309' : 'var(--foreground)',
                       minHeight: 40,
                     }}
-                  >
-                    {syncedService || '客户档案尚未配置服务项目，请先到订单列表补充'}
-                  </div>
+                  />
                   <div className="mt-1.5 text-xs" style={{ color: 'var(--muted-foreground)' }}>
-                    预约服务项目与客户档案保持一致，此处不可手动修改
+                    从对应服务人员项目同步，可编辑本次预约项目，不影响订单原项目
                   </div>
                 </div>
 
