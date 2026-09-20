@@ -2527,7 +2527,7 @@ export default function AppointmentsCalendarPage() {
             || detailTarget.advisorName === currentUser.name
           ));
         return (
-          <div className="fixed inset-0 z-[55] flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.45)' }} role="dialog" aria-modal="true" aria-label="预约详情">
+          <div className="fixed inset-0 z-[80] flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.45)' }} role="dialog" aria-modal="true" aria-label="预约详情">
             <div className="w-[560px] max-w-[calc(100vw-32px)] rounded-xl shadow-custom overflow-hidden" style={{ background: 'var(--card)' }}>
               <div className="px-5 py-4 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border)' }}>
                 <div>

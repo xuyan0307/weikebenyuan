@@ -191,6 +191,10 @@ test('reversal actions are labeled clearly and expose scoped history', () => {
   assert.match(appointmentServiceSource, /listAppointmentReversalHistory/);
 });
 
+test('appointment detail modal stays above the sticky calendar toolbar', () => {
+  assert.match(calendarSource, /fixed inset-0 z-\[80\].*aria-label="预约详情"/s);
+});
+
 test('mobile calendar uses compact adaptive rows, readable clipped card fields and pinch zoom', () => {
   assert.match(calendarSource, /data-calendar-table/);
   assert.match(calendarSource, /data-calendar-card/);
