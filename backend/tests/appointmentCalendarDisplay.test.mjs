@@ -132,7 +132,7 @@ test('service completion is offered only for today or an earlier date', () => {
 });
 
 test('historical appointment creation is rendered above the sticky toolbar and marked as a non-counting backfill', () => {
-  assert.match(calendarSource, /z-\[100\]/);
+  assert.match(calendarSource, /z-\[1000\]/);
   assert.match(calendarSource, /data-backfill-warning/);
   assert.match(calendarSource, /data-appointment-backfill/);
   assert.match(calendarSource, /isBackfill \? '已完成' : '待确认'/);
@@ -192,7 +192,13 @@ test('reversal actions are labeled clearly and expose scoped history', () => {
 });
 
 test('appointment detail modal stays above the sticky calendar toolbar', () => {
-  assert.match(calendarSource, /fixed inset-0 z-\[80\].*aria-label="预约详情"/s);
+  assert.match(calendarSource, /fixed inset-0 z-\[1000\].*aria-label="预约详情"/s);
+});
+
+test('calendar therapist and filter popovers are not clipped by the sticky toolbar', () => {
+  assert.match(globalCssSource, /data-calendar-sticky='filters'\]\s*\{[\s\S]*overflow:\s*visible/);
+  assert.match(globalCssSource, /calendar-toolbar-popover[\s\S]*z-index:\s*220\s*!important/);
+  assert.match(calendarSource, /calendar-toolbar-popover absolute z-\[220\]/);
 });
 
 test('mobile calendar uses compact adaptive rows, readable clipped card fields and pinch zoom', () => {

@@ -287,7 +287,7 @@ function TherapistMultiSelect({ therapists, selectedIds, onChange, disabled = fa
 
       {open && (
         <div
-          className="absolute z-50 rounded-xl shadow-custom py-1.5"
+          className="calendar-toolbar-popover absolute z-[220] rounded-xl shadow-custom py-1.5"
           style={{
             top: 'calc(100% + 4px)', left: 0,
             background: 'var(--card)',
@@ -700,7 +700,7 @@ function WeekPicker({ weekOffset, onClose, onSelect }: WeekPickerProps) {
   return (
     <div
       ref={ref}
-      className="absolute z-50 rounded-xl shadow-custom p-4"
+      className="calendar-toolbar-popover absolute z-[220] rounded-xl shadow-custom p-4"
       style={{
         top: '110%', left: '50%', transform: 'translateX(-50%)',
         background: 'var(--card)', border: '1px solid var(--border)',
@@ -869,7 +869,7 @@ function RescheduleModal({
   const changed = selectedDate !== appointment.date || `${startHour}:${startMin}` !== appointment.timeSlot;
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.45)' }}>
+    <div className="fixed inset-0 z-[1000] flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.45)' }}>
       <div className="rounded-2xl shadow-custom overflow-hidden" style={{ width: 760, maxWidth: 'calc(100vw - 32px)', background: 'var(--card)' }}>
         <div className="px-6 py-4 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border)' }}>
           <div>
@@ -1185,7 +1185,7 @@ function CreateModal({
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center transition-opacity duration-200"
+      className="fixed inset-0 z-[1000] flex items-center justify-center transition-opacity duration-200"
       style={{
         background: 'rgba(0,0,0,0.45)',
         opacity: visible ? 1 : 0,
@@ -2446,7 +2446,7 @@ export default function AppointmentsCalendarPage() {
       </div>
 
       {showReversalHistory && (
-        <div className="fixed inset-0 z-[56] flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.45)' }} role="dialog" aria-modal="true" aria-label="冲销记录">
+        <div className="fixed inset-0 z-[1000] flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.45)' }} role="dialog" aria-modal="true" aria-label="冲销记录">
           <div className="w-[880px] max-w-[calc(100vw-24px)] max-h-[calc(100vh-32px)] rounded-xl shadow-custom overflow-hidden flex flex-col" style={{ background: 'var(--card)' }}>
             <div className="px-5 py-4 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border)' }}>
               <div>
@@ -2527,7 +2527,7 @@ export default function AppointmentsCalendarPage() {
             || detailTarget.advisorName === currentUser.name
           ));
         return (
-          <div className="fixed inset-0 z-[80] flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.45)' }} role="dialog" aria-modal="true" aria-label="预约详情">
+          <div className="fixed inset-0 z-[1000] flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.45)' }} role="dialog" aria-modal="true" aria-label="预约详情">
             <div className="w-[560px] max-w-[calc(100vw-32px)] rounded-xl shadow-custom overflow-hidden" style={{ background: 'var(--card)' }}>
               <div className="px-5 py-4 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border)' }}>
                 <div>
@@ -2567,7 +2567,7 @@ export default function AppointmentsCalendarPage() {
       })()}
 
       {completionTarget && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.45)' }}>
+        <div className="fixed inset-0 z-[1000] flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.45)' }}>
           <div className="w-[520px] max-w-[calc(100vw-32px)] rounded-xl shadow-custom overflow-hidden" style={{ background: 'var(--card)' }}>
             <div className="px-5 py-4 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border)' }}>
               <div>

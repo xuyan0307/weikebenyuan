@@ -236,8 +236,27 @@
  * screens. */
 [data-cmp='AppointmentsCalendarPage'] [data-calendar-sticky='filters'] {
   flex-wrap: nowrap;
-  overflow-x: auto;
-  scrollbar-width: thin;
+  /* Keep popovers visible below the sticky toolbar. Horizontal clipping here
+   * would clip the therapist menu before its z-index can take effect. */
+  overflow: visible;
+}
+
+[data-cmp='AppointmentsCalendarPage'] [data-calendar-sticky='filters'] .calendar-toolbar-popover,
+[data-cmp='AppointmentsCalendarPage'] [data-calendar-sticky='filters'] .global-multi-select-filter__menu {
+  z-index: 220 !important;
+}
+
+[data-cmp='AppointmentsCalendarPage'] [data-calendar-sticky='filters'] button,
+[data-cmp='AppointmentsCalendarPage'] [data-calendar-sticky='filters'] [role='button'] {
+  white-space: nowrap;
+  word-break: keep-all;
+}
+
+[data-cmp='AppointmentsCalendarPage'] .calendar-toolbar-row-primary,
+[data-cmp='AppointmentsCalendarPage'] .calendar-toolbar-row-secondary,
+[data-cmp='AppointmentsCalendarPage'] .calendar-toolbar-row-tertiary {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 /*
