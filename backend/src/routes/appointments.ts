@@ -9,6 +9,7 @@ import {
   updateAppointment,
   updateAppointmentStatus,
   reverseCompletedAppointment,
+  listAppointmentReversalHistory,
   synchronizeAllAppointmentOrderProgress,
   synchronizeAppointmentOrderProgress,
 } from '../services/appointmentService';
@@ -397,6 +398,20 @@ router.post(
   }
 );
 
+router.get(
+  '/reversal-history',
+  authenticateToken,
+  authorizeRoles('superadmin', 'admin', 'service'),
+  async (req: AuthRequest, res, next) => {
+    try {
+      const data = await listAppointmentReversalHistory({
+        id: req.userId || '', name: req.userName || '', role: req.userRole || '',
+      });
+      res.json({ data });
+    } catch (err) { next(err); }
+  }
+);
+
 router.post(
   '/:id/sync-order-progress',
   authenticateToken,
@@ -422,7 +437,7 @@ router.post(
       const result = await reverseCompletedAppointment(req.params.id, req.body?.reason, {
         id: req.userId || '', name: req.userName || '', role: req.userRole || '',
       });
-      res.json({ message: '错误完成服务已冲销', ...result });
+      res.json({ message: '冲销错误已记录', ...result });
     } catch (err) { next(err); }
   }
 );

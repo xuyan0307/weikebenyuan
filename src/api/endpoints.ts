@@ -253,6 +253,24 @@ export interface AppointmentBulkProgressResult {
   ordersUpdated: number;
   appointmentsUpdated: number;
 }
+export interface AppointmentReversalHistoryItem {
+  id: string;
+  appointmentId: string;
+  appointmentNo: string;
+  customerId: string;
+  customerName: string;
+  advisorName: string;
+  therapistName: string;
+  date: string | null;
+  timeSlot: string;
+  service: string;
+  reason: string;
+  operatorName: string;
+  operatorRole: string;
+  createdAt: string;
+  orderBefore: Record<string, unknown> | null;
+  orderAfter: Record<string, unknown> | null;
+}
 export const appointmentsApi = {
   list: (params: QueryParams) => api.get<Paged<Appointment>>('/appointments', params),
   create: (body: Partial<Appointment>) => api.post<{
@@ -271,6 +289,8 @@ export const appointmentsApi = {
     api.post<{ message: string } & AppointmentProgressResult>(`/appointments/${id}/sync-order-progress`, {}),
   syncAllOrderProgress: () =>
     api.post<{ message: string } & AppointmentBulkProgressResult>('/appointments/sync-order-progress', {}),
+  reversalHistory: () =>
+    api.get<{ data: AppointmentReversalHistoryItem[] }>('/appointments/reversal-history'),
   reverseCompletion: (id: string, reason: string) =>
     api.post<{ message: string; reversalId: string }>(`/appointments/${id}/reverse-completion`, { reason }),
   replyNotified: (id: string) =>

@@ -231,6 +231,15 @@
   display: contents;
 }
 
+/* Keep the desktop schedule controls on one stable line. The touch/mobile
+ * breakpoint below restores wrapping so the controls remain usable on narrow
+ * screens. */
+[data-cmp='AppointmentsCalendarPage'] [data-calendar-sticky='filters'] {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
 /*
  * Mobile baseline: optimized for the Huawei Pura 80 browser viewport
  * (about 412 CSS px wide), while remaining usable from 360px to 767px.
@@ -796,6 +805,8 @@
 
   [data-cmp='AppointmentsCalendarPage'] [data-calendar-sticky='filters'] {
     align-items: stretch !important;
+    flex-wrap: wrap !important;
+    overflow-x: visible;
     gap: 6px !important;
     padding: 8px !important;
   }

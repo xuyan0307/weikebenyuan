@@ -30,6 +30,25 @@ export interface AppointmentOperator {
   role: string;
 }
 
+export interface AppointmentReversalHistoryItem {
+  id: string;
+  appointmentId: string;
+  appointmentNo: string;
+  customerId: string;
+  customerName: string;
+  advisorName: string;
+  therapistName: string;
+  date: string | null;
+  timeSlot: string;
+  service: string;
+  reason: string;
+  operatorName: string;
+  operatorRole: string;
+  createdAt: string | Date;
+  orderBefore: Record<string, unknown> | null;
+  orderAfter: Record<string, unknown> | null;
+}
+
 interface AppointmentRow {
   id: string;
   appointment_no?: string;
@@ -706,10 +725,15 @@ export async function reverseCompletedAppointment(
     const [rows] = await connection.execute(
       `SELECT a.*, sr.id AS service_record_id, sr.service_date, sr.service_items,
               pe.id AS progress_event_id, pe.order_id AS progress_order_id,
-              pe.before_used_times, pe.after_used_times
+              pe.before_used_times, pe.after_used_times,
+              COALESCE(c.advisor_id, JSON_UNQUOTE(JSON_EXTRACT(o.customer_snapshot, '$.advisorId'))) AS advisor_id,
+              COALESCE(u.name, JSON_UNQUOTE(JSON_EXTRACT(o.customer_snapshot, '$.advisor'))) AS advisor_name
        FROM appointments a
        LEFT JOIN service_records sr ON sr.appointment_id = a.id
        LEFT JOIN appointment_progress_events pe ON pe.appointment_id = a.id
+       LEFT JOIN customers c ON c.id = a.customer_id
+       LEFT JOIN orders o ON o.id = a.order_id
+       LEFT JOIN users u ON u.id = COALESCE(c.advisor_id, JSON_UNQUOTE(JSON_EXTRACT(o.customer_snapshot, '$.advisorId')))
        WHERE a.id = ? OR a.appointment_no = ?
        LIMIT 1 FOR UPDATE`,
       [appointmentId, appointmentId]
@@ -718,8 +742,15 @@ export async function reverseCompletedAppointment(
       service_record_id: string | null; service_date: unknown; service_items: unknown;
       progress_event_id: string | null; progress_order_id: string | null;
       before_used_times: number | null; after_used_times: number | null;
+      advisor_id: string | null;
+      advisor_name: string | null;
     }>)[0];
     if (!appointment) throw createError('预约不存在', 404);
+    if (operator.role === 'service'
+      && String(appointment.advisor_id || '').trim() !== operator.id.trim()
+      && String(appointment.advisor_name || '').trim() !== operator.name.trim()) {
+      throw createError('客服顾问只能冲销自己客户的服务', 403);
+    }
     if (appointment.status === '已冲销') throw createError('该服务已经冲销，不能重复操作', 409);
     if (appointment.status !== '已完成' && !appointment.progress_applied_at && !appointment.service_record_id) {
       throw createError('只有已完成并产生服务凭证的预约可以冲销', 409);
@@ -819,4 +850,60 @@ export async function reverseCompletedAppointment(
   } finally {
     connection.release();
   }
+}
+
+export async function listAppointmentReversalHistory(
+  operator: AppointmentOperator,
+  pool: Pool = getDb()
+): Promise<AppointmentReversalHistoryItem[]> {
+  const serviceScope = operator.role === 'service';
+  const params: string[] = serviceScope ? [operator.id, operator.id, operator.name] : [];
+  const where = serviceScope
+    ? `WHERE (c.advisor_id = ?
+          OR JSON_UNQUOTE(JSON_EXTRACT(o.customer_snapshot, '$.advisorId')) = ?
+          OR COALESCE(u.name, JSON_UNQUOTE(JSON_EXTRACT(o.customer_snapshot, '$.advisor'))) = ?)`
+    : '';
+  const [rows] = await pool.query(
+    `SELECT r.id, r.appointment_id, r.customer_id, r.reason,
+            r.operator_name, r.operator_role, r.created_at,
+            r.affected_data_snapshot,
+            a.appointment_no, a.date, a.time_slot, a.service,
+            COALESCE(c.name, JSON_UNQUOTE(JSON_EXTRACT(o.customer_snapshot, '$.name'))) AS customer_name,
+            COALESCE(u.name, JSON_UNQUOTE(JSON_EXTRACT(o.customer_snapshot, '$.advisor'))) AS advisor_name,
+            t.name AS therapist_name
+     FROM appointment_service_reversals r
+     INNER JOIN appointments a ON a.id = r.appointment_id
+     LEFT JOIN customers c ON c.id = a.customer_id
+     LEFT JOIN orders o ON o.id = COALESCE(a.order_id, r.order_id)
+     LEFT JOIN users u ON u.id = COALESCE(c.advisor_id, JSON_UNQUOTE(JSON_EXTRACT(o.customer_snapshot, '$.advisorId')))
+     LEFT JOIN therapists t ON t.id = a.therapist_id
+     ${where}
+     ORDER BY r.created_at DESC
+     LIMIT 500`,
+    params
+  );
+  return (rows as Array<Record<string, unknown>>).map(row => {
+    const snapshot = parseJson(row.affected_data_snapshot, {}) as {
+      orderBefore?: Record<string, unknown>;
+      orderAfter?: Record<string, unknown>;
+    };
+    return {
+      id: String(row.id || ''),
+      appointmentId: String(row.appointment_id || ''),
+      appointmentNo: String(row.appointment_no || ''),
+      customerId: String(row.customer_id || ''),
+      customerName: String(row.customer_name || ''),
+      advisorName: String(row.advisor_name || ''),
+      therapistName: String(row.therapist_name || ''),
+      date: row.date ? formatDateOnly(row.date as string | Date) : null,
+      timeSlot: String(row.time_slot || ''),
+      service: String(row.service || ''),
+      reason: String(row.reason || ''),
+      operatorName: String(row.operator_name || ''),
+      operatorRole: String(row.operator_role || ''),
+      createdAt: row.created_at as string | Date,
+      orderBefore: snapshot.orderBefore || null,
+      orderAfter: snapshot.orderAfter || null,
+    };
+  });
 }

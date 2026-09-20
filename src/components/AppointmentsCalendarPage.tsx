@@ -7,7 +7,7 @@ import {
 import { uploadsApi } from '../api/endpoints';
 import type { Appointment, Order, UploadedFile } from '../api/endpoints';
 import { useApp } from '../hooks/useApp';
-import { useAppointments, useTherapists, useOrders, useCustomers, useCustomerFilterOptions, useAppointmentMutations } from '../api/hooks';
+import { useAppointments, useTherapists, useOrders, useCustomers, useCustomerFilterOptions, useAppointmentMutations, useAppointmentReversalHistory } from '../api/hooks';
 import { toast } from 'sonner';
 import {
   bookingWeekRangeLabel,
@@ -1660,6 +1660,8 @@ export default function AppointmentsCalendarPage() {
   const [completionUploading, setCompletionUploading] = useState(false);
   const [completionSaving, setCompletionSaving] = useState(false);
   const [progressActionSaving, setProgressActionSaving] = useState(false);
+  const [showReversalHistory, setShowReversalHistory] = useState(false);
+  const reversalHistoryQ = useAppointmentReversalHistory(showReversalHistory);
   const [calendarZoom, setCalendarZoom] = useState(1);
   const calendarPinchRef = useRef<{ distance: number; zoom: number } | null>(null);
 
@@ -2124,6 +2126,17 @@ export default function AppointmentsCalendarPage() {
             更新
           </button>
         )}
+        {!isTherapist && (
+          <button
+            type="button"
+            className="calendar-toolbar-history px-3 py-1.5 rounded-lg text-sm font-medium hover:opacity-90"
+            style={{ height: 36, color: 'var(--muted-foreground)', border: '1px solid var(--border)', background: '#fff' }}
+            onClick={() => setShowReversalHistory(true)}
+            title="查看历史冲销记录"
+          >
+            冲销记录
+          </button>
+        )}
 
         <div className="calendar-toolbar-spacer flex-1" />
 
@@ -2432,6 +2445,58 @@ export default function AppointmentsCalendarPage() {
         </div>
       </div>
 
+      {showReversalHistory && (
+        <div className="fixed inset-0 z-[56] flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.45)' }} role="dialog" aria-modal="true" aria-label="冲销记录">
+          <div className="w-[880px] max-w-[calc(100vw-24px)] max-h-[calc(100vh-32px)] rounded-xl shadow-custom overflow-hidden flex flex-col" style={{ background: 'var(--card)' }}>
+            <div className="px-5 py-4 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border)' }}>
+              <div>
+                <div className="font-semibold text-foreground">历史冲销记录</div>
+                <div className="text-xs mt-1" style={{ color: 'var(--muted-foreground)' }}>管理员和超管可查看全部记录，客服顾问仅显示自己客户的记录</div>
+              </div>
+              <button type="button" className="p-2 rounded-lg hover:bg-muted" onClick={() => setShowReversalHistory(false)} aria-label="关闭冲销记录">
+                <XIcon size={18} />
+              </button>
+            </div>
+            <div className="p-4 overflow-auto">
+              {reversalHistoryQ.isLoading ? (
+                <div className="py-10 text-center text-sm" style={{ color: 'var(--muted-foreground)' }}>正在加载记录…</div>
+              ) : reversalHistoryQ.isError ? (
+                <div className="py-10 text-center text-sm" style={{ color: '#DC2626' }}>冲销记录加载失败，请稍后重试</div>
+              ) : (reversalHistoryQ.data?.data || []).length === 0 ? (
+                <div className="py-10 text-center text-sm" style={{ color: 'var(--muted-foreground)' }}>暂无冲销记录</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm" style={{ minWidth: 760 }}>
+                    <thead>
+                      <tr style={{ color: 'var(--muted-foreground)', borderBottom: '1px solid var(--border)' }}>
+                        <th className="text-left px-3 py-2 font-medium">时间</th>
+                        <th className="text-left px-3 py-2 font-medium">客户</th>
+                        <th className="text-left px-3 py-2 font-medium">客服</th>
+                        <th className="text-left px-3 py-2 font-medium">技师/项目</th>
+                        <th className="text-left px-3 py-2 font-medium">操作人</th>
+                        <th className="text-left px-3 py-2 font-medium">冲销原因</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(reversalHistoryQ.data?.data || []).map(item => (
+                        <tr key={item.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                          <td className="px-3 py-3 whitespace-nowrap">{new Date(item.createdAt).toLocaleString('zh-CN')}</td>
+                          <td className="px-3 py-3">{item.customerName || item.customerId || '—'}<div className="text-xs" style={{ color: 'var(--muted-foreground)' }}>{item.appointmentNo || item.appointmentId}</div></td>
+                          <td className="px-3 py-3">{item.advisorName || '—'}</td>
+                          <td className="px-3 py-3">{item.therapistName || '—'}<div className="text-xs" style={{ color: 'var(--muted-foreground)' }}>{item.service || '—'}</div></td>
+                          <td className="px-3 py-3 whitespace-nowrap">{item.operatorName || '—'}</td>
+                          <td className="px-3 py-3 break-words">{item.reason || '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {detailTarget && (() => {
         const detailOrder = getOrderForAppointment(detailTarget, ORDERS);
         const detailIsPackage = detailOrder
@@ -2456,6 +2521,11 @@ export default function AppointmentsCalendarPage() {
           ['备注', detailTarget.remark || '—'],
         ];
         const canManageProgress = ['superadmin', 'admin', 'service'].includes(currentUser.role);
+        const canReverse = ['superadmin', 'admin'].includes(currentUser.role)
+          || (currentUser.role === 'service' && (
+            detailTarget.advisorId === currentUser.id
+            || detailTarget.advisorName === currentUser.name
+          ));
         return (
           <div className="fixed inset-0 z-[55] flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.45)' }} role="dialog" aria-modal="true" aria-label="预约详情">
             <div className="w-[560px] max-w-[calc(100vw-32px)] rounded-xl shadow-custom overflow-hidden" style={{ background: 'var(--card)' }}>
@@ -2482,9 +2552,9 @@ export default function AppointmentsCalendarPage() {
                     同步订单次数
                   </button>
                 )}
-                {canManageProgress && detailTarget.status === '已完成' && (
+                {canManageProgress && canReverse && detailTarget.status === '已完成' && (
                   <button type="button" disabled={progressActionSaving} className="px-4 py-2 rounded-lg text-sm hover:opacity-90 disabled:opacity-50" style={{ color: '#DC2626', border: '1px solid #FCA5A5', background: '#FEF2F2' }} onClick={() => handleReverseCompletion(detailTarget)}>
-                    冲销错误完成
+                    冲销错误
                   </button>
                 )}
                 <button type="button" className="px-4 py-2 rounded-lg text-sm text-white hover:opacity-90" style={{ background: 'var(--brand)' }} onClick={() => setDetailTarget(null)}>

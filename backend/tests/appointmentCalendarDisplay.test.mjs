@@ -182,6 +182,15 @@ test('calendar can baseline package progress and browse therapists by collapsibl
   assert.match(calendarSource, /overflowY: 'auto'/);
 });
 
+test('reversal actions are labeled clearly and expose scoped history', () => {
+  assert.match(calendarSource, />\s*冲销错误\s*</);
+  assert.match(calendarSource, /历史冲销记录/);
+  assert.match(calendarSource, /canReverse/);
+  assert.match(appointmentRouteSource, /reversal-history/);
+  assert.match(appointmentServiceSource, /客服顾问只能冲销自己客户的服务/);
+  assert.match(appointmentServiceSource, /listAppointmentReversalHistory/);
+});
+
 test('mobile calendar uses compact adaptive rows, readable clipped card fields and pinch zoom', () => {
   assert.match(calendarSource, /data-calendar-table/);
   assert.match(calendarSource, /data-calendar-card/);

@@ -498,3 +498,23 @@ test('reverseCompletedAppointment preserves evidence and rolls back order progre
   assert.equal(pool.calls.includes('commit'), true);
   assert.equal(pool.calls.includes('rollback'), false);
 });
+
+test('service advisors can only reverse appointments belonging to themselves', async () => {
+  const pool = fakePool([[
+    {
+      id: 'appointment-2', customer_id: 'customer-2', therapist_id: 'therapist-2',
+      status: '已完成', progress_applied_at: '2026-08-18 10:00:00', service_record_id: 'record-2',
+      advisor_name: '客服乙',
+    },
+  ]]);
+  await assert.rejects(
+    reverseCompletedAppointment(
+      'appointment-2', '误点完成',
+      { id: 'user-1', name: '客服甲', role: 'service' },
+      pool,
+    ),
+    error => error.statusCode === 403 && /自己客户/.test(error.message),
+  );
+  assert.equal(pool.calls.includes('commit'), false);
+  assert.equal(pool.calls.includes('rollback'), true);
+});

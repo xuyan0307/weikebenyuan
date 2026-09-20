@@ -126,6 +126,14 @@ export function useOrderMutations() {
 export function useAppointments(params: QueryParams) {
   return useQuery({ queryKey: qk.appointments(params), queryFn: () => appointmentsApi.list(params) });
 }
+export function useAppointmentReversalHistory(enabled = true) {
+  return useQuery({
+    queryKey: ['appointments', 'reversal-history'],
+    queryFn: () => appointmentsApi.reversalHistory(),
+    enabled,
+    staleTime: 15_000,
+  });
+}
 export function useAppointmentMutations() {
   const qc = useQueryClient();
   const invalidate = () => { qc.invalidateQueries({ queryKey: ['appointments'] }); qc.invalidateQueries({ queryKey: ['orders'] }); qc.invalidateQueries({ queryKey: ['dashboard'] }); qc.invalidateQueries({ queryKey: ['service-records'] }); qc.invalidateQueries({ queryKey: ['salary'] }); };
