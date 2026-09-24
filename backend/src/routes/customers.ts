@@ -100,10 +100,15 @@ router.get('/filter-options', authenticateToken, async (_req, res, next) => {
 router.get(
   '/export',
   authenticateToken,
-  authorizeRoles('superadmin', 'admin'),
+  authorizeRoles('superadmin', 'admin', 'service'),
   async (req, res, next) => {
     try {
-      const data = await exportCustomers(getDb(), customerFiltersFromQuery(req.query));
+      const data = await exportCustomers(getDb(), {
+        ...customerFiltersFromQuery(req.query),
+        advisorId: req.userRole === 'superadmin' || req.userRole === 'admin'
+          ? undefined
+          : req.userId,
+      });
       res.json({ data });
     } catch (err) { next(err); }
   }

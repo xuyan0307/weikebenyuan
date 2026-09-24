@@ -853,6 +853,7 @@ export default function CustomersListPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const canEdit = currentUser.role !== 'finance' && currentUser.role !== 'therapist';
+  const canExport = currentUser.role === 'superadmin' || currentUser.role === 'admin' || currentUser.role === 'service';
   const canManageBulk = currentUser.role === 'superadmin' || currentUser.role === 'admin';
   useEffect(() => {
     if (showAdd) return;
@@ -1428,7 +1429,7 @@ export default function CustomersListPage() {
             <ChevronDownIcon size={12}
               style={{ transform: showLegend ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }} />
           </button>
-          {canManageBulk && (
+          {canExport && (
             <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all hover:opacity-90"
               style={{ background: 'var(--muted)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
               onClick={() => { void handleCustomerExport(); }}>

@@ -20,6 +20,7 @@ const customersSource = readFileSync(new URL('../../src/components/CustomersList
 const ordersSource = readFileSync(new URL('../../src/components/OrdersListPage.tsx', import.meta.url), 'utf8');
 const reportSource = readFileSync(new URL('../../src/components/ContractListPage.tsx', import.meta.url), 'utf8');
 const compactAreaSource = readFileSync(new URL('../../src/utils/compactArea.ts', import.meta.url), 'utf8');
+const customerRoutesSource = readFileSync(new URL('../src/routes/customers.ts', import.meta.url), 'utf8');
 
 function assertSharedFreezeContract(source, timeLabel) {
   assert.match(source, /const COL_W = \[82, 110\]/, 'left freeze pane must contain exactly two columns');
@@ -206,4 +207,19 @@ test('customer areas show two characters while retaining the full hover value', 
   assert.match(compactAreaSource, /characters\.slice\(0, visibleCharacters\)/);
   assert.match(customersSource, /title=\{c\.area && c\.area !== '—' \? c\.area : undefined\}[\s\S]*?compactAreaLabel\(c\.area\)/);
   assert.match(ordersSource, /title=\{o\.area\}[\s\S]*?compactAreaLabel\(o\.area\)/);
+});
+
+test('customer advisors can export their scoped customer list without bulk-management authority', () => {
+  assert.match(customersSource, /const canExport =[^;]*currentUser\.role === 'service'/);
+  assert.match(customersSource, /\{canExport && \([\s\S]*?<DownloadIcon size=\{13\} \/>批量导出/);
+  assert.match(customersSource, /\{canManageBulk && <button[\s\S]*?<UploadIcon size=\{13\} \/>批量导入/);
+  assert.match(customersSource, /onDelete=\{canManageBulk \? handleDeleteCustomer : undefined\}/);
+  assert.match(customerRoutesSource, /'\/export'[\s\S]*?authorizeRoles\('superadmin', 'admin', 'service'\)/);
+  assert.match(customerRoutesSource, /exportCustomers\(getDb\(\), \{[\s\S]*?advisorId:[\s\S]*?: req\.userId/);
+});
+
+test('customer advisors can export their scoped order list without bulk-import authority', () => {
+  assert.match(ordersSource, /const canExport =[^;]*currentUser\.role === 'service'/);
+  assert.match(ordersSource, /\{canExport && \([\s\S]*?<DownloadIcon size=\{14\} \/>客户信息导出/);
+  assert.match(ordersSource, /\{canManageBulk && \([\s\S]*?<UploadIcon size=\{14\} \/>批量导入/);
 });

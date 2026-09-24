@@ -40,6 +40,12 @@ test('customer query can explicitly include ordered customers', () => {
   assert.deepEqual(result.params, []);
 });
 
+test('customer export scope can be restricted to the signed-in advisor', () => {
+  const result = buildCustomerWhere({ includeOrdered: true, advisorId: 'service-user-1' });
+  assert.equal(result.whereSql, 'WHERE c.advisor_id = ?');
+  assert.deepEqual(result.params, ['service-user-1']);
+});
+
 test('customer query partitions follow time around today', () => {
   const today = buildCustomerWhere({ followTimes: ['today'] });
   assert.match(today.whereSql, /DATE\(c\.follow_date\) = CURDATE\(\)/);

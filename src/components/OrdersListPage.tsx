@@ -3593,6 +3593,7 @@ export default function OrdersListPage() {
   const [fServiceStatus, setFServiceStatus] = useState<string[]>([]);
 
   const isReadOnly = currentUser.role === 'finance';
+  const canExport = currentUser.role === 'superadmin' || currentUser.role === 'admin' || currentUser.role === 'service';
   const canManageBulk = currentUser.role === 'superadmin' || currentUser.role === 'admin';
 
   // Build option lists from data
@@ -3966,11 +3967,13 @@ export default function OrdersListPage() {
             </div>
             {/* Count + new button */}
             <span className="text-sm flex-shrink-0 ml-1" style={{ color: 'var(--muted-foreground)', whiteSpace: 'nowrap' }}>共 {filtered.length} 条</span>
+            {canExport && (
+              <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium flex-shrink-0" style={{ background: 'var(--muted)', border: '1px solid var(--border)' }} onClick={handleOrderCustomerExport}>
+                <DownloadIcon size={14} />客户信息导出
+              </button>
+            )}
             {canManageBulk && (
               <>
-                <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium flex-shrink-0" style={{ background: 'var(--muted)', border: '1px solid var(--border)' }} onClick={handleOrderCustomerExport}>
-                  <DownloadIcon size={14} />客户信息导出
-                </button>
                 <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium flex-shrink-0" style={{ background: 'var(--muted)', border: '1px solid var(--border)' }} onClick={() => { setImportFile(null); setImportMsg(''); setShowImport(true); }}>
                   <UploadIcon size={14} />批量导入
                 </button>
